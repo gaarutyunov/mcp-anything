@@ -1,4 +1,4 @@
-module github.com/your-org/mcp-anything
+module github.com/gaarutyunov/mcp-anything
 
 go 1.23
 

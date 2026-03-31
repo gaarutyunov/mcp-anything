@@ -11,7 +11,7 @@ import (
 
 // MustStartContainer starts a container and registers its cleanup with t.Cleanup.
 // It calls t.Fatal if the container fails to start.
-func MustStartContainer(t *testing.T, ctx context.Context, req testcontainers.ContainerRequest) testcontainers.Container {
+func MustStartContainer(ctx context.Context, t *testing.T, req testcontainers.ContainerRequest) testcontainers.Container {
 	t.Helper()
 	c, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: req,

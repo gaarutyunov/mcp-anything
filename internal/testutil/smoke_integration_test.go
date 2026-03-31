@@ -10,6 +10,8 @@ import (
 
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
+
+	"github.com/gaarutyunov/mcp-anything/internal/testutil"
 )
 
 // TestSmokeTestcontainersWorks verifies that Testcontainers can start a container
@@ -23,14 +25,7 @@ func TestSmokeTestcontainersWorks(t *testing.T) {
 		ExposedPorts: []string{"80/tcp"},
 		WaitingFor:   wait.ForHTTP("/").WithStartupTimeout(30 * time.Second),
 	}
-	c, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
-		ContainerRequest: req,
-		Started:          true,
-	})
-	if err != nil {
-		t.Fatalf("start nginx container: %v", err)
-	}
-	t.Cleanup(func() { _ = c.Terminate(context.Background()) })
+	c := testutil.MustStartContainer(ctx, t, req)
 
 	host, err := c.Host(ctx)
 	if err != nil {
@@ -42,7 +37,15 @@ func TestSmokeTestcontainersWorks(t *testing.T) {
 	}
 
 	url := "http://" + host + ":" + port.Port() + "/"
-	resp, err := http.Get(url) //nolint:noctx
+
+	httpCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	httpReq, err := http.NewRequestWithContext(httpCtx, http.MethodGet, url, nil)
+	if err != nil {
+		t.Fatalf("build request %s: %v", url, err)
+	}
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(httpReq)
 	if err != nil {
 		t.Fatalf("GET %s: %v", url, err)
 	}

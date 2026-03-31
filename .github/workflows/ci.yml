@@ -58,8 +58,6 @@ jobs:
         uses: atomicjar/testcontainers-cloud-setup-action@v1
         with:
           token: ${{ secrets.TC_CLOUD_TOKEN }}
-          env:
-            TC_CLOUD_CONCURRENCY: 2
 
       - name: Integration tests
         run: go test -race -tags integration -count=1 -timeout 300s ./...

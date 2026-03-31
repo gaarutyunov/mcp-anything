@@ -5,6 +5,7 @@ package testutil
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/testcontainers/testcontainers-go"
 )
@@ -21,7 +22,9 @@ func MustStartContainer(ctx context.Context, t *testing.T, req testcontainers.Co
 		t.Fatalf("start container %q: %v", req.Image, err)
 	}
 	t.Cleanup(func() {
-		if err := c.Terminate(context.Background()); err != nil {
+		termCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := c.Terminate(termCtx); err != nil {
 			t.Logf("terminate container %q: %v", req.Image, err)
 		}
 	})

@@ -1,0 +1,29 @@
+version: "2"
+linters:
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gofmt
+    - goimports
+    - misspell
+    - revive
+    - exhaustive
+    - noctx
+    - bodyclose
+    - contextcheck
+linters-settings:
+  goimports:
+    local-prefixes: github.com/your-org/mcp-anything
+  revive:
+    rules:
+      - name: exported
+      - name: error-return
+      - name: error-strings
+issues:
+  exclude-use-default: false
+  max-issues-per-linter: 0
+  max-same-issues: 0

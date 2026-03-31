@@ -1,0 +1,131 @@
+server:
+  port: 8080
+  read_timeout: 30s
+  write_timeout: 60s
+  shutdown_timeout: 10s
+  max_request_body: 1MB
+  startup_validation_timeout: 30s   # per-upstream timeout for jq dry-run at startup
+                                    # on hot-reload: exceeded → abandon reload, keep old config
+  transport:                        # list of enabled transports
+    - streamable-http               # primary: POST+GET on group endpoint paths
+    - sse                           # legacy: GET on {endpoint}/sse paths
+
+telemetry:
+  otlp_endpoint: "otel-collector:4317"
+  service_name: "mcp-anything"
+  service_version: "v0.1.0"
+  insecure: false
+
+# Default inbound auth — applies to all operations unless x-mcp-auth-required: false
+inbound_auth:
+  strategy: jwt   # jwt | introspection | apikey | lua | none
+  jwt:
+    issuer: "https://idp.example.com"
+    audience: "https://mcp.example.com"
+    jwks_url: ""                    # optional; if empty, uses issuer discovery
+  introspection:
+    issuer: "https://idp.example.com"
+    client_id: "${INTROSPECTION_CLIENT_ID}"
+    client_secret: "${INTROSPECTION_CLIENT_SECRET}"
+    audience: "https://mcp.example.com"
+  apikey:
+    header: "X-API-Key"
+    keys_env: "MCP_API_KEYS"        # comma-separated list in env var
+  lua:
+    script_path: "/etc/mcp-anything/auth.lua"
+    timeout: 500ms
+
+naming:
+  separator: "__"
+  max_length: 128
+  conflict_resolution: error        # error | first_wins | skip
+  description_max_length: 1024     # 0 = no truncation
+  description_truncation_suffix: "..."
+  default_slug_rules:
+    replace_slashes: true
+    replace_braces: true
+    lowercase: true
+    collapse_separators: true
+
+upstreams:
+  - name: petstore
+    enabled: true
+    tool_prefix: pets
+    base_url: "https://api.petstore.io/v2"
+    max_response_body: 10MB
+    timeout: 10s
+    tls_skip_verify: false
+    headers:
+      X-Proxy-Source: "mcp-anything"
+
+    openapi:
+      source: "/etc/mcp-anything/specs/petstore.yaml"  # file path or https:// URL
+      auth_header: ""               # "Bearer ${TOKEN}" for private docs
+      refresh_interval: 0           # 0 = no refresh; >0 = background URL refresh
+      max_refresh_failures: 5
+      allow_external_refs: false
+      version: "3.0"
+
+    # Overlay is always applied after spec load and re-applied on every refresh.
+    # source may be a file path or https:// URL.
+    # auth_header and refresh_interval are independent of the spec's values.
+    overlay:
+      source: "/etc/mcp-anything/overlays/petstore-overlay.yaml"
+      auth_header: ""
+      refresh_interval: 0           # 0 = refresh together with openapi.refresh_interval
+
+    outbound_auth:
+      strategy: oauth2_client_credentials
+      oauth2_client_credentials:
+        token_url: "https://idp.example.com/oauth/token"
+        client_id: "${PETSTORE_CLIENT_ID}"
+        client_secret: "${PETSTORE_CLIENT_SECRET}"
+        scopes: ["read:pets", "write:pets"]
+      bearer:
+        token_env: "UPSTREAM_TOKEN"
+      api_key:
+        header: "X-API-Key"
+        value_env: "UPSTREAM_API_KEY"
+        prefix: ""                  # prepended to env value, e.g. "ApiKey "
+      lua:
+        script_path: "/etc/mcp-anything/upstream-auth.lua"
+        timeout: 500ms
+
+    validation:
+      validate_request: true
+      validate_response: true
+      response_validation_failure: warn   # warn | fail
+      success_status: [200, 201, 202, 204]
+      error_status: [400, 401, 403, 404, 422, 429, 500, 502, 503]
+
+  - name: github
+    enabled: true
+    tool_prefix: gh
+    base_url: "https://api.github.com"
+    openapi:
+      source: "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.yaml"
+      refresh_interval: 1h
+    overlay:
+      source: "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/mcp-overlay.yaml"
+      refresh_interval: 1h
+    outbound_auth:
+      strategy: bearer
+      bearer:
+        token_env: "GITHUB_TOKEN"
+
+groups:
+  - name: all
+    endpoint: /mcp
+    upstreams: [petstore, github]
+    # no filter = all tools from all listed upstreams
+
+  - name: readonly
+    endpoint: /mcp/readonly
+    upstreams: [petstore]
+    # RFC 9535 JSONPath filter evaluated against each operation node
+    filter: "$.paths.*.get[?(@['x-mcp-safe'] == true)]"
+
+  - name: premium
+    endpoint: /mcp/premium
+    upstreams: [petstore, github]
+    filter: "$.paths.*.*[?(@['x-mcp-tier'] == 'premium')]"

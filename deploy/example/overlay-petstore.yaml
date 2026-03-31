@@ -1,0 +1,32 @@
+overlay: 1.0.0
+info:
+  title: Pet Store MCP Overlay
+  version: 1.0.0
+x-speakeasy-jsonpath: rfc9535
+
+actions:
+  # Remove internal endpoints entirely
+  - target: $.paths['/internal/metrics']
+    remove: true
+
+  # Disable destructive operation — stays in spec but excluded from tools
+  - target: $.paths['/pets/{petId}'].delete
+    update:
+      x-mcp-enabled: false
+
+  # Public health endpoint — no auth required
+  - target: $.paths['/health'].get
+    update:
+      x-mcp-auth-required: false
+
+  # Override tool names and descriptions
+  - target: $.paths['/pets'].get
+    update:
+      x-mcp-tool-name: list_pets
+      description: "List all available pets with optional status filter."
+      x-mcp-safe: true
+
+  # Mark premium operations
+  - target: $.paths['/pets'].post
+    update:
+      x-mcp-tier: premium

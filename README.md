@@ -1,2 +1,20 @@
 # mcp-anything
-A configurable gateway that transforms any API into MCP server
+
+A stateless Kubernetes-native proxy that converts any HTTP REST API into an MCP (Model Context Protocol) server. Define your upstream API via an OpenAPI 3.0 spec, optionally apply an OpenAPI Overlay to filter and rename operations, and the proxy automatically generates MCP tools — no code required.
+
+## Status
+Active development. No stability guarantees.
+
+## Design
+See [SPEC.md](SPEC.md) for the full architecture and design decisions.
+
+## Quick start
+(To be filled in when the MVP proxy is working — see TASK-03)
+
+## Development
+Requirements: Go 1.23+, Docker (for integration tests)
+
+    make check        # lint + vet + unit tests + build
+    make integration  # integration tests (requires Docker)
+
+Set `TC_CLOUD_TOKEN` to run integration tests via Testcontainers Cloud.

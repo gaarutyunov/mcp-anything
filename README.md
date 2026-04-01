@@ -12,9 +12,9 @@ See [SPEC.md](SPEC.md) for the full architecture and design decisions.
 (To be filled in when the MVP proxy is working — see TASK-03)
 
 ## Development
-Requirements: Go 1.23+, Docker (for integration tests)
+Requirements: Go 1.25+, Docker (for integration tests)
 
     make check        # lint + vet + unit tests + build
-    make integration  # integration tests (requires Docker)
+    make integration  # integration tests (builds from Dockerfile, or set PROXY_IMAGE)
 
-Set `TC_CLOUD_TOKEN` to run integration tests via Testcontainers Cloud.
+Set `TC_CLOUD_TOKEN` to run containers via Testcontainers Cloud.

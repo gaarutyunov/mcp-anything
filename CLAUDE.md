@@ -5,7 +5,7 @@ mcp-anything is a stateless Go proxy that converts HTTP REST APIs into MCP (Mode
 Full design: SPEC.md
 
 ## Module
-github.com/your-org/mcp-anything
+github.com/gaarutyunov/mcp-anything
 
 ## Commands
 
@@ -21,14 +21,24 @@ make vet          # go vet ./...
 ### Unit tests (must pass before every commit)
 make test         # go test -race -count=1 ./...
 
-### Integration tests (require Docker + TC_CLOUD_TOKEN env var)
-make integration  # go test -tags integration -race -count=1 -timeout 300s ./...
+### Integration tests (require Docker)
+make integration  # go test -tags integration ... ./tests/integration/...
+
+Without `PROXY_IMAGE`, tests build the proxy from source using the Dockerfile. Set `PROXY_IMAGE` to test against a pre-built image (used in CI).
 
 ### All checks (run before every commit)
 make check        # runs lint + vet + test + build in sequence
 
 ## Pre-commit checklist
-Run `make check` and fix all failures before committing. Never commit with failing lint, vet, or unit tests. Integration tests are run in CI but should also pass locally if Docker is available.
+1. Run `make check` and fix all failures before committing.
+2. Run `make integration` and fix all failures before committing.
+
+Never commit with failing lint, vet, unit tests, or integration tests.
+
+## Integration tests
+Integration tests live in `tests/integration/` with build tag `//go:build integration`. They run the proxy as a Docker container alongside test fixtures (WireMock, etc.) using Testcontainers. They do NOT import internal packages — they test the built image end-to-end via HTTP and MCP protocol.
+
+**You MUST run `make integration` after implementing any feature or fix and ensure all integration tests pass.** If an integration test fails, diagnose and fix the issue before committing. Do not skip or ignore integration test failures.
 
 ## Code conventions
 - All errors must be wrapped with context: `fmt.Errorf("loading spec: %w", err)`
@@ -38,7 +48,6 @@ Run `make check` and fix all failures before committing. Never commit with faili
 - Interfaces are defined in the package that uses them, not the package that implements them
 - Use `context.Context` as the first argument in all functions that do I/O or call other services
 - All config fields that reference secrets use `${ENV_VAR}` syntax; never log expanded values
-- Integration tests live in files named `*_integration_test.go` with build tag `//go:build integration`
 - Unit tests live in files named `*_test.go` with no build tag
 
 ## Testcontainers

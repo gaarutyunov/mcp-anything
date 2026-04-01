@@ -40,10 +40,23 @@ type UpstreamConfig struct {
 	Timeout    time.Duration       `koanf:"timeout"`
 	Headers    map[string]string   `koanf:"headers"`
 	OpenAPI    OpenAPISourceConfig `koanf:"openapi"`
+	Overlay    *OverlayConfig      `koanf:"overlay"`
 }
 
-// OpenAPISourceConfig points to an OpenAPI spec file.
+// OpenAPISourceConfig points to an OpenAPI spec file or URL.
 type OpenAPISourceConfig struct {
-	Source  string `koanf:"source"`
-	Version string `koanf:"version"`
+	Source             string        `koanf:"source"`
+	AuthHeader         string        `koanf:"auth_header"`
+	RefreshInterval    time.Duration `koanf:"refresh_interval"`
+	MaxRefreshFailures int           `koanf:"max_refresh_failures"`
+	AllowExternalRefs  bool          `koanf:"allow_external_refs"`
+	Version            string        `koanf:"version"`
+}
+
+// OverlayConfig points to an OpenAPI Overlay document.
+type OverlayConfig struct {
+	Source          string        `koanf:"source"`
+	AuthHeader      string        `koanf:"auth_header"`
+	RefreshInterval time.Duration `koanf:"refresh_interval"`
+	Inline          string        `koanf:"inline"`
 }

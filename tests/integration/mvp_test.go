@@ -21,13 +21,18 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
-const defaultProxyImage = "ghcr.io/gaarutyunov/mcp-anything:dev"
-
-func proxyImage() string {
-	if v := os.Getenv("PROXY_IMAGE"); v != "" {
-		return v
+// proxyContainerRequest returns a ContainerRequest for the proxy.
+// If PROXY_IMAGE is set, it pulls that image. Otherwise, it builds from source using the Dockerfile.
+func proxyContainerRequest() testcontainers.ContainerRequest {
+	if img := os.Getenv("PROXY_IMAGE"); img != "" {
+		return testcontainers.ContainerRequest{Image: img}
 	}
-	return defaultProxyImage
+	return testcontainers.ContainerRequest{
+		FromDockerfile: testcontainers.FromDockerfile{
+			Context:    "../..",
+			Dockerfile: "Dockerfile",
+		},
+	}
 }
 
 const testOpenAPISpec = `openapi: "3.0.0"
@@ -146,20 +151,19 @@ upstreams:
 		t.Fatalf("write config file: %v", err)
 	}
 
-	// 4. Start the proxy container from the pre-built image.
-	proxy := startContainer(ctx, t, testcontainers.ContainerRequest{
-		Image:        proxyImage(),
-		ExposedPorts: []string{"8080/tcp"},
-		Networks:     []string{net.Name},
-		Env: map[string]string{
-			"CONFIG_PATH": "/etc/mcp-anything/config.yaml",
-		},
-		Files: []testcontainers.ContainerFile{
-			{HostFilePath: cfgPath, ContainerFilePath: "/etc/mcp-anything/config.yaml", FileMode: 0o644},
-			{HostFilePath: specPath, ContainerFilePath: "/etc/mcp-anything/spec.yaml", FileMode: 0o644},
-		},
-		WaitingFor: wait.ForHTTP("/healthz").WithPort("8080").WithStartupTimeout(60 * time.Second),
-	})
+	// 4. Start the proxy container (pre-built image via PROXY_IMAGE, or build from Dockerfile).
+	proxyReq := proxyContainerRequest()
+	proxyReq.ExposedPorts = []string{"8080/tcp"}
+	proxyReq.Networks = []string{net.Name}
+	proxyReq.Env = map[string]string{
+		"CONFIG_PATH": "/etc/mcp-anything/config.yaml",
+	}
+	proxyReq.Files = []testcontainers.ContainerFile{
+		{HostFilePath: cfgPath, ContainerFilePath: "/etc/mcp-anything/config.yaml", FileMode: 0o644},
+		{HostFilePath: specPath, ContainerFilePath: "/etc/mcp-anything/spec.yaml", FileMode: 0o644},
+	}
+	proxyReq.WaitingFor = wait.ForHTTP("/healthz").WithPort("8080").WithStartupTimeout(120 * time.Second)
+	proxy := startContainer(ctx, t, proxyReq)
 
 	proxyHost, err := proxy.Host(ctx)
 	if err != nil {
@@ -267,7 +271,10 @@ func startContainer(ctx context.Context, t *testing.T, req testcontainers.Contai
 }
 
 func containerName(req testcontainers.ContainerRequest) string {
-	return req.Image
+	if req.Image != "" {
+		return req.Image
+	}
+	return "Dockerfile"
 }
 
 func registerStub(t *testing.T, base, body string) {

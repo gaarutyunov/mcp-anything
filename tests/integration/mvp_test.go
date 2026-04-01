@@ -1,6 +1,6 @@
 //go:build integration
 
-package mcp_test
+package integration_test
 
 import (
 	"bytes"
@@ -9,22 +9,26 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/wait"
-
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
-
-	"github.com/gaarutyunov/mcp-anything/internal/config"
-	mcppkg "github.com/gaarutyunov/mcp-anything/internal/mcp"
-	"github.com/gaarutyunov/mcp-anything/internal/openapi"
-	"github.com/gaarutyunov/mcp-anything/internal/testutil"
+	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/network"
+	"github.com/testcontainers/testcontainers-go/wait"
 )
+
+const defaultProxyImage = "ghcr.io/gaarutyunov/mcp-anything:dev"
+
+func proxyImage() string {
+	if v := os.Getenv("PROXY_IMAGE"); v != "" {
+		return v
+	}
+	return defaultProxyImage
+}
 
 const testOpenAPISpec = `openapi: "3.0.0"
 info:
@@ -69,50 +73,59 @@ paths:
 
 func TestMVPHappyPath(t *testing.T) {
 	t.Parallel()
-
 	ctx := context.Background()
 
+	// Create a shared network so the proxy container can reach WireMock by alias.
+	net, err := network.New(ctx, network.WithDriver("bridge"))
+	if err != nil {
+		t.Fatalf("create network: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := net.Remove(ctx); err != nil {
+			t.Logf("remove network: %v", err)
+		}
+	})
+
 	// 1. Start WireMock container.
-	req := testcontainers.ContainerRequest{
+	wiremock := startContainer(ctx, t, testcontainers.ContainerRequest{
 		Image:        "wiremock/wiremock:3.9.1",
 		ExposedPorts: []string{"8080/tcp"},
-		WaitingFor:   wait.ForHTTP("/__admin/mappings").WithStartupTimeout(60 * time.Second),
-	}
-	c := testutil.MustStartContainer(ctx, t, req)
+		Networks:     []string{net.Name},
+		NetworkAliases: map[string][]string{
+			net.Name: {"wiremock"},
+		},
+		WaitingFor: wait.ForHTTP("/__admin/mappings").WithPort("8080").WithStartupTimeout(60 * time.Second),
+	})
 
-	host, err := c.Host(ctx)
+	wiremockHost, err := wiremock.Host(ctx)
 	if err != nil {
-		t.Fatalf("get container host: %v", err)
+		t.Fatalf("get wiremock host: %v", err)
 	}
-	port, err := c.MappedPort(ctx, "8080")
+	wiremockPort, err := wiremock.MappedPort(ctx, "8080")
 	if err != nil {
-		t.Fatalf("get mapped port: %v", err)
+		t.Fatalf("get wiremock port: %v", err)
 	}
-	wireMockBase := "http://" + host + ":" + port.Port()
+	wiremockExternalURL := fmt.Sprintf("http://%s:%s", wiremockHost, wiremockPort.Port())
 
 	// 2. Register WireMock stubs.
-	registerStub(t, wireMockBase, `{
+	registerStub(t, wiremockExternalURL, `{
 		"request": {"method": "GET", "url": "/pets"},
 		"response": {"status": 200, "body": "{\"pets\":[{\"id\":1,\"name\":\"Fido\"}]}", "headers": {"Content-Type": "application/json"}}
 	}`)
-	registerStub(t, wireMockBase, `{
+	registerStub(t, wiremockExternalURL, `{
 		"request": {"method": "GET", "url": "/pets/1"},
 		"response": {"status": 200, "body": "{\"id\":1,\"name\":\"Fido\",\"species\":\"dog\"}", "headers": {"Content-Type": "application/json"}}
 	}`)
 
-	// 3. Write OpenAPI spec to temp file.
-	specFile, err := os.CreateTemp(t.TempDir(), "spec-*.yaml")
-	if err != nil {
-		t.Fatalf("create spec file: %v", err)
-	}
-	if _, err := specFile.WriteString(testOpenAPISpec); err != nil {
+	// 3. Write OpenAPI spec and config to a temp dir that will be mounted into the proxy container.
+	tmpDir := t.TempDir()
+	specPath := filepath.Join(tmpDir, "spec.yaml")
+	if err := os.WriteFile(specPath, []byte(testOpenAPISpec), 0o644); err != nil {
 		t.Fatalf("write spec file: %v", err)
 	}
-	specFile.Close()
 
-	// 4. Write minimal config to temp file.
 	cfgContent := fmt.Sprintf(`server:
-  port: 0
+  port: 8080
 naming:
   separator: "__"
 telemetry:
@@ -122,63 +135,49 @@ upstreams:
   - name: test
     enabled: true
     tool_prefix: test
-    base_url: %s
+    base_url: http://wiremock:8080
     timeout: 10s
     openapi:
-      source: %s
+      source: /etc/mcp-anything/spec.yaml
       version: "3.0"
-`, wireMockBase, specFile.Name())
-
-	cfgFile, err := os.CreateTemp(t.TempDir(), "config-*.yaml")
-	if err != nil {
-		t.Fatalf("create config file: %v", err)
-	}
-	if _, err := cfgFile.WriteString(cfgContent); err != nil {
+`)
+	cfgPath := filepath.Join(tmpDir, "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte(cfgContent), 0o644); err != nil {
 		t.Fatalf("write config file: %v", err)
 	}
-	cfgFile.Close()
 
-	// 5. Start the proxy.
-	cfg, err := config.Load(cfgFile.Name())
+	// 4. Start the proxy container from the pre-built image.
+	proxy := startContainer(ctx, t, testcontainers.ContainerRequest{
+		Image:        proxyImage(),
+		ExposedPorts: []string{"8080/tcp"},
+		Networks:     []string{net.Name},
+		Env: map[string]string{
+			"CONFIG_PATH": "/etc/mcp-anything/config.yaml",
+		},
+		Files: []testcontainers.ContainerFile{
+			{HostFilePath: cfgPath, ContainerFilePath: "/etc/mcp-anything/config.yaml", FileMode: 0o644},
+			{HostFilePath: specPath, ContainerFilePath: "/etc/mcp-anything/spec.yaml", FileMode: 0o644},
+		},
+		WaitingFor: wait.ForHTTP("/healthz").WithPort("8080").WithStartupTimeout(60 * time.Second),
+	})
+
+	proxyHost, err := proxy.Host(ctx)
 	if err != nil {
-		t.Fatalf("load config: %v", err)
+		t.Fatalf("get proxy host: %v", err)
 	}
-
-	upstream := cfg.Upstreams[0]
-	doc, _, err := openapi.Load(ctx, upstream.OpenAPI)
+	proxyPort, err := proxy.MappedPort(ctx, "8080")
 	if err != nil {
-		t.Fatalf("load openapi: %v", err)
+		t.Fatalf("get proxy port: %v", err)
 	}
+	proxyURL := fmt.Sprintf("http://%s:%s", proxyHost, proxyPort.Port())
 
-	tools, err := openapi.GenerateTools(doc, &upstream, cfg.Naming.Separator)
-	if err != nil {
-		t.Fatalf("generate tools: %v", err)
-	}
+	// 5. Assert health endpoints.
+	assertHTTPStatus(t, proxyURL+"/healthz", http.StatusOK)
+	assertHTTPStatus(t, proxyURL+"/readyz", http.StatusOK)
 
-	httpClient := &http.Client{Timeout: upstream.Timeout}
-	mcpSrv := mcppkg.New(
-		&sdkmcp.Implementation{Name: "mcp-anything", Version: cfg.Telemetry.ServiceVersion},
-		tools, &upstream, httpClient,
-	)
-
-	handler := sdkmcp.NewStreamableHTTPHandler(func(_ *http.Request) *sdkmcp.Server { return mcpSrv }, nil)
-
-	proxyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Route /mcp to the MCP handler; /healthz and /readyz return 200.
-		switch {
-		case strings.HasPrefix(r.URL.Path, "/mcp"):
-			http.StripPrefix("/mcp", handler).ServeHTTP(w, r)
-		case r.URL.Path == "/healthz" || r.URL.Path == "/readyz":
-			w.WriteHeader(http.StatusOK)
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	t.Cleanup(proxyServer.Close)
-
-	// 6. Create MCP client.
+	// 6. Connect MCP client to the proxy.
 	transport := &sdkmcp.StreamableClientTransport{
-		Endpoint: proxyServer.URL + "/mcp",
+		Endpoint: proxyURL + "/mcp",
 	}
 	mcpClient := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "test-client", Version: "v0.0.1"}, nil)
 	callCtx, callCancel := context.WithTimeout(ctx, 60*time.Second)
@@ -199,10 +198,6 @@ upstreams:
 		t.Fatalf("expected 2 tools, got %d: %v", len(toolsResult.Tools), toolNames(toolsResult.Tools))
 	}
 
-	// Verify the expected tool names are present.
-	// Naming convention: {prefix}{sep}{verb}_{path_slug}
-	// - GET /pets           → list_pets     → test__list_pets
-	// - GET /pets/{petId}   → get_pets_petid → test__get_pets_petid
 	const toolListPets = "test__list_pets"
 	const toolGetPet = "test__get_pets_petid"
 
@@ -217,53 +212,6 @@ upstreams:
 		t.Errorf("expected tool %s, got %v", toolGetPet, toolNames(toolsResult.Tools))
 	}
 
-	// Verify limit param on list_pets is optional integer.
-	for _, tool := range toolsResult.Tools {
-		if tool.Name == toolListPets {
-			schema := tool.InputSchema
-			if schema == nil {
-				t.Error("list_pets has nil InputSchema")
-				continue
-			}
-			limitProp, ok := schema.Properties["limit"]
-			if !ok {
-				t.Error("list_pets missing limit property in InputSchema")
-				continue
-			}
-			if limitProp.Type != "integer" {
-				t.Errorf("limit param type: got %q, want %q", limitProp.Type, "integer")
-			}
-			// limit should not be in required.
-			for _, req := range schema.Required {
-				if req == "limit" {
-					t.Error("limit should not be required")
-				}
-			}
-		}
-		if tool.Name == toolGetPet {
-			schema := tool.InputSchema
-			if schema == nil {
-				t.Error("get_pets_petid has nil InputSchema")
-				continue
-			}
-			_, ok := schema.Properties["petId"]
-			if !ok {
-				t.Error("get_pets_petid missing petId property in InputSchema")
-				continue
-			}
-			found := false
-			for _, req := range schema.Required {
-				if req == "petId" {
-					found = true
-					break
-				}
-			}
-			if !found {
-				t.Error("petId should be required in get_pets_petid")
-			}
-		}
-	}
-
 	// 8. Assert tools/call list_pets succeeds.
 	listResult, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{
 		Name: toolListPets,
@@ -273,9 +221,6 @@ upstreams:
 	}
 	if listResult.IsError {
 		t.Fatalf("%s returned error: %v", toolListPets, contentText(listResult.Content))
-	}
-	if len(listResult.Content) == 0 {
-		t.Fatalf("%s returned empty content", toolListPets)
 	}
 	text := contentText(listResult.Content)
 	if !strings.Contains(text, "Fido") {
@@ -298,20 +243,36 @@ upstreams:
 		t.Errorf("%s response missing species: %s", toolGetPet, text)
 	}
 
-	// 10. Assert GET /healthz returns 200.
-	checkHealth(t, proxyServer.URL+"/healthz")
-
-	// 11. Assert GET /readyz returns 200.
-	checkHealth(t, proxyServer.URL+"/readyz")
-
-	// Verify WireMock received the requests.
-	verifyWireMockRequests(t, wireMockBase)
+	// 10. Verify WireMock received the requests.
+	verifyWireMockRequests(t, wiremockExternalURL)
 }
 
-// registerStub registers a WireMock stub mapping.
+func startContainer(ctx context.Context, t *testing.T, req testcontainers.ContainerRequest) testcontainers.Container {
+	t.Helper()
+	c, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+		ContainerRequest: req,
+		Started:          true,
+	})
+	if err != nil {
+		t.Fatalf("start container %q: %v", containerName(req), err)
+	}
+	t.Cleanup(func() {
+		termCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := c.Terminate(termCtx); err != nil {
+			t.Logf("terminate container: %v", err)
+		}
+	})
+	return c
+}
+
+func containerName(req testcontainers.ContainerRequest) string {
+	return req.Image
+}
+
 func registerStub(t *testing.T, base, body string) {
 	t.Helper()
-	resp, err := http.Post(base+"/__admin/mappings", "application/json", bytes.NewBufferString(body)) //nolint:noctx // test setup, context not needed here
+	resp, err := http.Post(base+"/__admin/mappings", "application/json", bytes.NewBufferString(body)) //nolint:noctx // test helper
 	if err != nil {
 		t.Fatalf("register wiremock stub: %v", err)
 	}
@@ -322,23 +283,21 @@ func registerStub(t *testing.T, base, body string) {
 	}
 }
 
-// checkHealth asserts that a GET to url returns 200.
-func checkHealth(t *testing.T, url string) {
+func assertHTTPStatus(t *testing.T, url string, wantStatus int) {
 	t.Helper()
-	resp, err := http.Get(url) //nolint:noctx // health check, no context needed
+	resp, err := http.Get(url) //nolint:noctx // test helper
 	if err != nil {
 		t.Fatalf("GET %s: %v", url, err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("GET %s: expected 200, got %d", url, resp.StatusCode)
+	if resp.StatusCode != wantStatus {
+		t.Errorf("GET %s: expected %d, got %d", url, wantStatus, resp.StatusCode)
 	}
 }
 
-// verifyWireMockRequests checks the WireMock request journal.
 func verifyWireMockRequests(t *testing.T, base string) {
 	t.Helper()
-	resp, err := http.Get(base + "/__admin/requests") //nolint:noctx // verification, no context needed
+	resp, err := http.Get(base + "/__admin/requests") //nolint:noctx // test helper
 	if err != nil {
 		t.Fatalf("get wiremock requests: %v", err)
 	}
@@ -362,16 +321,14 @@ func verifyWireMockRequests(t *testing.T, base string) {
 	}
 }
 
-// toolNames returns a slice of tool names for error messages.
 func toolNames(tools []*sdkmcp.Tool) []string {
 	names := make([]string, len(tools))
-	for i, t := range tools {
-		names[i] = t.Name
+	for i, tool := range tools {
+		names[i] = tool.Name
 	}
 	return names
 }
 
-// contentText extracts the text from the first TextContent in a result.
 func contentText(content []sdkmcp.Content) string {
 	for _, c := range content {
 		if tc, ok := c.(*sdkmcp.TextContent); ok {

@@ -1,0 +1,22 @@
+name: Cleanup GHCR images
+
+on:
+  schedule:
+    - cron: "0 3 * * 0" # weekly, Sunday 03:00 UTC
+  workflow_dispatch:
+
+jobs:
+  cleanup:
+    name: Delete old test images
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+      - name: Delete old image versions
+        uses: actions/delete-package-versions@v5
+        with:
+          package-name: mcp-anything
+          package-type: container
+          min-versions-to-keep: 5
+          delete-only-untagged-versions: false
+          ignore-versions: "^(latest|v\\d+\\.\\d+\\.\\d+)$"

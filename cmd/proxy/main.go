@@ -1,3 +1,4 @@
+// Package main is the entry point for the mcp-anything proxy.
 package main
 
 import (

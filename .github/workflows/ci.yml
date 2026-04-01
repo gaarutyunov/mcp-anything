@@ -26,13 +26,10 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Install golangci-lint
+      - name: golangci-lint
         uses: golangci/golangci-lint-action@v7
         with:
-          install-only: true
-
-      - name: golangci-lint
-        run: golangci-lint run ./...
+          version: v2.7.2
 
       - name: go vet
         run: go vet ./...

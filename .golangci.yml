@@ -2,19 +2,20 @@ version: "2"
 linters:
   enable:
     - errcheck
-    - gosimple
     - govet
     - ineffassign
     - staticcheck
     - unused
-    - gofmt
-    - goimports
     - misspell
     - revive
     - exhaustive
     - noctx
     - bodyclose
     - contextcheck
+formatters:
+  enable:
+    - gofmt
+    - goimports
 linters-settings:
   goimports:
     local-prefixes: github.com/gaarutyunov/mcp-anything

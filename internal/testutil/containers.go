@@ -21,7 +21,7 @@ func MustStartContainer(ctx context.Context, t *testing.T, req testcontainers.Co
 	if err != nil {
 		t.Fatalf("start container %q: %v", req.Image, err)
 	}
-	t.Cleanup(func() {
+	t.Cleanup(func() { //nolint:contextcheck // cleanup uses a fresh context because the test context may be cancelled
 		termCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		if err := c.Terminate(termCtx); err != nil {

@@ -26,9 +26,22 @@ type TelemetryConfig struct {
 	ServiceVersion string `koanf:"service_version"`
 }
 
+// SlugRulesConfig controls which slug transformations are applied.
+type SlugRulesConfig struct {
+	ReplaceSlashes     bool `koanf:"replace_slashes"`
+	ReplaceBraces      bool `koanf:"replace_braces"`
+	Lowercase          bool `koanf:"lowercase"`
+	CollapseSeparators bool `koanf:"collapse_separators"`
+}
+
 // NamingConfig controls how tool names are generated.
 type NamingConfig struct {
-	Separator string `koanf:"separator"`
+	Separator                   string          `koanf:"separator"`
+	MaxLength                   int             `koanf:"max_length"`
+	ConflictResolution          string          `koanf:"conflict_resolution"`
+	DescriptionMaxLength        int             `koanf:"description_max_length"`
+	DescriptionTruncationSuffix string          `koanf:"description_truncation_suffix"`
+	DefaultSlugRules            SlugRulesConfig `koanf:"default_slug_rules"`
 }
 
 // UpstreamConfig describes a single upstream HTTP API.

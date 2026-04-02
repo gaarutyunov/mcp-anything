@@ -2,17 +2,14 @@ package openapi
 
 import (
 	"fmt"
-	"net/http"
-	"strings"
 
 	"github.com/getkin/kin-openapi/openapi3"
-	"github.com/google/jsonschema-go/jsonschema"
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/gaarutyunov/mcp-anything/internal/config"
 )
 
-// ParamInfo holds metadata about a single OpenAPI parameter.
+// ParamInfo holds metadata about a single OpenAPI parameter used for HTTP routing.
 type ParamInfo struct {
 	Name     string
 	Required bool
@@ -31,10 +28,11 @@ type GeneratedTool struct {
 	QueryParams  []ParamInfo
 }
 
-// GenerateTools walks all operations in the OpenAPI document and returns
-// a list of MCP tools. Each tool is associated with the routing information
-// needed to construct and execute the upstream HTTP request.
-func GenerateTools(doc *openapi3.T, upstream *config.UpstreamConfig, sep string) ([]*GeneratedTool, error) {
+// GenerateTools walks all operations in the OpenAPI document and returns a list of MCP
+// tools with routing metadata. It applies the full naming pipeline (ToolBaseName →
+// PrefixedName → TruncateDescription) and runs conflict detection before returning.
+func GenerateTools(doc *openapi3.T, upstream *config.UpstreamConfig, naming *config.NamingConfig) ([]*GeneratedTool, error) {
+	var prefixedList []PrefixedTool
 	var tools []*GeneratedTool
 
 	for path, pathItem := range doc.Paths.Map() {
@@ -52,31 +50,27 @@ func GenerateTools(doc *openapi3.T, upstream *config.UpstreamConfig, sep string)
 
 			// Collect parameters from path item and operation (operation overrides path-level).
 			allParams := mergeParams(pathItem.Parameters, op.Parameters)
-
 			pathParams, queryParams := classifyParams(allParams)
+			hasPathParams := len(pathParams) > 0
 
-			// Build slug from path + method verb.
-			slug := buildSlug(method, path, pathParams)
+			// Derive the base name using naming rules.
+			baseName := ToolBaseName(op, method, path, hasPathParams, naming.DefaultSlugRules)
 
-			// Allow x-mcp-tool-name to override the generated slug.
-			if val, ok := op.Extensions["x-mcp-tool-name"]; ok {
-				if name, ok := val.(string); ok && name != "" {
-					slug = name
-				}
-			}
-
-			prefixedName := upstream.ToolPrefix + sep + slug
+			// Build the fully-prefixed tool name.
+			prefixedName := PrefixedName(baseName, upstream.ToolPrefix, naming.Separator, naming.MaxLength)
 
 			// Build the MCP input schema.
-			inputSchema, err := buildInputSchema(allParams)
+			inputSchema, err := DeriveInputSchema(op)
 			if err != nil {
 				return nil, fmt.Errorf("building input schema for %s %s: %w", method, path, err)
 			}
 
+			// Pick description (summary preferred) and truncate.
 			description := op.Summary
 			if description == "" {
 				description = op.Description
 			}
+			description = TruncateDescription(description, naming.DescriptionMaxLength, naming.DescriptionTruncationSuffix)
 
 			tool := &mcp.Tool{
 				Name:        prefixedName,
@@ -87,7 +81,7 @@ func GenerateTools(doc *openapi3.T, upstream *config.UpstreamConfig, sep string)
 			gt := &GeneratedTool{
 				MCPTool:      tool,
 				PrefixedName: prefixedName,
-				OriginalName: slug,
+				OriginalName: baseName,
 				Method:       method,
 				PathTemplate: path,
 				PathParams:   pathParams,
@@ -95,7 +89,33 @@ func GenerateTools(doc *openapi3.T, upstream *config.UpstreamConfig, sep string)
 			}
 
 			tools = append(tools, gt)
+			prefixedList = append(prefixedList, PrefixedTool{
+				PrefixedName:   prefixedName,
+				OriginalPath:   path,
+				OriginalMethod: method,
+			})
 		}
+	}
+
+	// Run conflict detection and filter tools to only the surviving set.
+	surviving, err := DetectConflicts(prefixedList, naming.ConflictResolution)
+	if err != nil {
+		return nil, fmt.Errorf("conflict detection: %w", err)
+	}
+
+	if len(surviving) != len(prefixedList) {
+		type toolKey struct{ name, path, method string }
+		survivingSet := make(map[toolKey]bool, len(surviving))
+		for _, t := range surviving {
+			survivingSet[toolKey{t.PrefixedName, t.OriginalPath, t.OriginalMethod}] = true
+		}
+		filtered := make([]*GeneratedTool, 0, len(surviving))
+		for _, gt := range tools {
+			if survivingSet[toolKey{gt.PrefixedName, gt.PathTemplate, gt.Method}] {
+				filtered = append(filtered, gt)
+			}
+		}
+		tools = filtered
 	}
 
 	return tools, nil
@@ -149,89 +169,4 @@ func classifyParams(params openapi3.Parameters) ([]string, []ParamInfo) {
 		}
 	}
 	return pathParams, queryParams
-}
-
-// buildSlug creates a tool name slug from the HTTP method and path.
-func buildSlug(method, path string, pathParams []string) string {
-	// Strip leading slash.
-	slug := strings.TrimPrefix(path, "/")
-	// Replace path separators.
-	slug = strings.ReplaceAll(slug, "/", "_")
-	// Remove braces.
-	slug = strings.ReplaceAll(slug, "{", "")
-	slug = strings.ReplaceAll(slug, "}", "")
-	// Lowercase.
-	slug = strings.ToLower(slug)
-
-	// Add method verb prefix.
-	verb := methodVerb(method, pathParams)
-
-	return verb + "_" + slug
-}
-
-// methodVerb returns the verb prefix for a given HTTP method.
-func methodVerb(method string, pathParams []string) string {
-	switch strings.ToUpper(method) {
-	case http.MethodGet:
-		if len(pathParams) == 0 {
-			return "list"
-		}
-		return "get"
-	case http.MethodPost:
-		return "create"
-	case http.MethodPut:
-		return "update"
-	case http.MethodDelete:
-		return "delete"
-	case http.MethodPatch:
-		return "patch"
-	default:
-		return strings.ToLower(method)
-	}
-}
-
-// buildInputSchema constructs a JSON Schema object for the tool input.
-func buildInputSchema(params openapi3.Parameters) (*jsonschema.Schema, error) {
-	schema := &jsonschema.Schema{
-		Type:       "object",
-		Properties: make(map[string]*jsonschema.Schema),
-	}
-
-	for _, ref := range params {
-		if ref == nil || ref.Value == nil {
-			continue
-		}
-		p := ref.Value
-		// Only include path and query params.
-		if p.In != "path" && p.In != "query" {
-			continue
-		}
-
-		propSchema := paramSchema(p)
-		schema.Properties[p.Name] = propSchema
-
-		if p.Required {
-			schema.Required = append(schema.Required, p.Name)
-		}
-	}
-
-	return schema, nil
-}
-
-// paramSchema converts an OpenAPI parameter schema to a jsonschema.Schema.
-func paramSchema(p *openapi3.Parameter) *jsonschema.Schema {
-	s := &jsonschema.Schema{}
-	if p.Schema != nil && p.Schema.Value != nil {
-		v := p.Schema.Value
-		if v.Type != nil && len(v.Type.Slice()) > 0 {
-			s.Type = v.Type.Slice()[0]
-		}
-		if v.Description != "" {
-			s.Description = v.Description
-		}
-	}
-	if s.Type == "" {
-		s.Type = "string"
-	}
-	return s
 }

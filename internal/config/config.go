@@ -45,6 +45,15 @@ type NamingConfig struct {
 	DefaultSlugRules            SlugRulesConfig `koanf:"default_slug_rules"`
 }
 
+// ValidationConfig controls runtime request and response validation against the OpenAPI schema.
+type ValidationConfig struct {
+	ValidateRequest           bool   `koanf:"validate_request"`
+	ValidateResponse          bool   `koanf:"validate_response"`
+	ResponseValidationFailure string `koanf:"response_validation_failure"` // "warn" | "fail"
+	SuccessStatus             []int  `koanf:"success_status"`
+	ErrorStatus               []int  `koanf:"error_status"`
+}
+
 // UpstreamConfig describes a single upstream HTTP API.
 type UpstreamConfig struct {
 	Name                     string              `koanf:"name"`
@@ -56,6 +65,7 @@ type UpstreamConfig struct {
 	OpenAPI                  OpenAPISourceConfig `koanf:"openapi"`
 	Overlay                  *OverlayConfig      `koanf:"overlay"`
 	StartupValidationTimeout time.Duration       `koanf:"startup_validation_timeout"`
+	Validation               ValidationConfig    `koanf:"validation"`
 }
 
 // OpenAPISourceConfig points to an OpenAPI spec file or URL.

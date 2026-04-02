@@ -27,7 +27,7 @@ func LoadPipeline(ctx context.Context, specCfg config.OpenAPISourceConfig, overl
 	if err != nil {
 		return nil, nil, fmt.Errorf("loading spec bytes: %w", err)
 	}
-	_ = etag
+	_ = etag // TODO: use for conditional refresh (If-None-Match) in a future task
 
 	modifiedBytes, warnings, err := ApplyOverlay(ctx, specBytes, overlayCfg)
 	if err != nil {
@@ -71,7 +71,7 @@ func LoadPipeline(ctx context.Context, specCfg config.OpenAPISourceConfig, overl
 var httpClient = &http.Client{Timeout: 30 * time.Second}
 
 // loadSpecBytes loads the raw spec bytes and returns the ETag (empty for file-based).
-// For HTTP URLs, it retries up to 3 times on transient connection errors.
+// For HTTP URLs, it retries up to 5 times on transient connection errors and 5xx responses.
 func loadSpecBytes(ctx context.Context, cfg config.OpenAPISourceConfig) ([]byte, string, error) {
 	if !strings.HasPrefix(cfg.Source, "http") {
 		data, err := os.ReadFile(cfg.Source)
@@ -83,7 +83,7 @@ func loadSpecBytes(ctx context.Context, cfg config.OpenAPISourceConfig) ([]byte,
 
 	authHeader := os.ExpandEnv(cfg.AuthHeader)
 
-	const maxAttempts = 3
+	const maxAttempts = 5
 	var lastErr error
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if attempt > 0 {
@@ -110,13 +110,22 @@ func loadSpecBytes(ctx context.Context, cfg config.OpenAPISourceConfig) ([]byte,
 			slog.Warn("spec fetch failed, will retry", "url", cfg.Source, "error", err)
 			continue
 		}
-		defer func() { _ = resp.Body.Close() }()
+
+		if resp.StatusCode >= 500 {
+			// Server-side error — may be transient; retry.
+			_ = resp.Body.Close()
+			lastErr = fmt.Errorf("fetching spec from %q: unexpected status %d", cfg.Source, resp.StatusCode)
+			slog.Warn("spec fetch got server error, will retry", "url", cfg.Source, "status", resp.StatusCode)
+			continue
+		}
 
 		if resp.StatusCode != http.StatusOK {
+			_ = resp.Body.Close()
 			return nil, "", fmt.Errorf("fetching spec from %q: unexpected status %d", cfg.Source, resp.StatusCode)
 		}
 
 		data, err := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
 		if err != nil {
 			return nil, "", fmt.Errorf("reading spec response from %q: %w", cfg.Source, err)
 		}
@@ -142,7 +151,7 @@ func buildAuthHTTPReader(ctx context.Context, authHeader string) openapi3.ReadFr
 		}
 		resp, err := httpClient.Do(req)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("fetching %q: %w", location.String(), err)
 		}
 		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusOK {
@@ -166,5 +175,9 @@ func specBaseURI(source string) (*url.URL, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolving absolute path for %q: %w", source, err)
 	}
-	return url.Parse("file://" + filepath.ToSlash(abs))
+	u, err := url.Parse("file://" + filepath.ToSlash(abs))
+	if err != nil {
+		return nil, fmt.Errorf("parsing file URI for %q: %w", source, err)
+	}
+	return u, nil
 }

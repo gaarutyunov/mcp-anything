@@ -3,7 +3,6 @@
 package integration_test
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -261,6 +260,25 @@ func TestURLSpecLoadingWithAuthHeader(t *testing.T) {
 		"response": {"status": 200, "body": "[]", "headers": {"Content-Type": "application/json"}}
 	}`)
 
+	// Verify that WireMock serves the spec with the correct auth header before starting the proxy.
+	// This catches stub configuration issues early with a clear error message.
+	{
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, wiremockURL+"/openapi.yaml", nil)
+		if err != nil {
+			t.Fatalf("create pre-check request: %v", err)
+		}
+		req.Header.Set("Authorization", "Bearer test-token")
+		resp, err := http.DefaultClient.Do(req) //nolint:noctx // test helper
+		if err != nil {
+			t.Fatalf("pre-check spec endpoint: %v", err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("pre-check spec endpoint: expected 200, got %d (stub not matching?)", resp.StatusCode)
+		}
+		t.Logf("pre-check: WireMock serves spec at /openapi.yaml with auth header (status %d)", resp.StatusCode)
+	}
+
 	tmpDir := t.TempDir()
 	cfgContent := `server:
   port: 8080
@@ -285,6 +303,7 @@ upstreams:
 		t.Fatalf("write config: %v", err)
 	}
 
+	t.Logf("starting proxy container with spec URL: http://wiremock:8080/openapi.yaml")
 	proxyReq := proxyContainerRequest()
 	proxyReq.ExposedPorts = []string{"8080/tcp"}
 	proxyReq.Networks = []string{net.Name}
@@ -325,29 +344,11 @@ upstreams:
 	}
 
 	// Verify the auth header was sent to WireMock.
-	resp, err := http.Get(wiremockURL + "/__admin/requests") //nolint:noctx // test helper
-	if err != nil {
-		t.Fatalf("get wiremock requests: %v", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("read requests: %v", err)
-	}
-	var result struct {
-		Requests []struct {
-			Request struct {
-				Headers map[string]string `json:"headers"`
-			} `json:"request"`
-		} `json:"requests"`
-	}
-	if err := json.Unmarshal(body, &result); err != nil {
-		t.Fatalf("parse requests: %v", err)
-	}
-
+	headers := wiremockRequestHeaders(t, wiremockURL)
+	t.Logf("auth headers seen by WireMock: %v", headers)
 	authSent := false
-	for _, r := range result.Requests {
-		if r.Request.Headers["Authorization"] == "Bearer test-token" {
+	for _, h := range headers {
+		if h == "Bearer test-token" {
 			authSent = true
 			break
 		}
@@ -689,19 +690,3 @@ func wiremockRequestHeaders(t *testing.T, base string) []string {
 	return headers
 }
 
-// registerWireMockStubJSON is an alias for clarity in this test file.
-func registerWireMockStubJSON(t *testing.T, base, body string) {
-	t.Helper()
-	resp, err := http.Post(base+"/__admin/mappings", "application/json", bytes.NewBufferString(body)) //nolint:noctx // test helper
-	if err != nil {
-		t.Fatalf("register wiremock stub: %v", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusCreated {
-		b, _ := io.ReadAll(resp.Body)
-		t.Fatalf("register wiremock stub: got %d: %s", resp.StatusCode, b)
-	}
-}
-
-var _ = wiremockRequestHeaders
-var _ = registerWireMockStubJSON

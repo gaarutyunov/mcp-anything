@@ -258,6 +258,9 @@ func startContainer(ctx context.Context, t *testing.T, req testcontainers.Contai
 		Started:          true,
 	})
 	if err != nil {
+		if c != nil {
+			logContainerOutput(ctx, t, c)
+		}
 		t.Fatalf("start container %q: %v", containerName(req), err)
 	}
 	t.Cleanup(func() {
@@ -268,6 +271,24 @@ func startContainer(ctx context.Context, t *testing.T, req testcontainers.Contai
 		}
 	})
 	return c
+}
+
+// logContainerOutput dumps the container's stdout+stderr logs to the test log.
+// Useful for diagnosing startup failures when the container exits with a non-zero code.
+func logContainerOutput(ctx context.Context, t *testing.T, c testcontainers.Container) {
+	t.Helper()
+	logs, err := c.Logs(ctx)
+	if err != nil {
+		t.Logf("failed to retrieve container logs: %v", err)
+		return
+	}
+	defer func() { _ = logs.Close() }()
+	b, err := io.ReadAll(logs)
+	if err != nil {
+		t.Logf("failed to read container logs: %v", err)
+		return
+	}
+	t.Logf("=== container logs ===\n%s\n=== end container logs ===", string(b))
 }
 
 func containerName(req testcontainers.ContainerRequest) string {

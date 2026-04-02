@@ -35,7 +35,7 @@ func main() {
 
 	// For this task: single upstream only.
 	upstream := cfg.Upstreams[0]
-	doc, router, err := openapi.Load(ctx, upstream.OpenAPI)
+	doc, router, err := openapi.LoadPipeline(ctx, upstream.OpenAPI, upstream.Overlay)
 	if err != nil {
 		slog.Error("load openapi spec", "upstream", upstream.Name, "error", err)
 		os.Exit(1)

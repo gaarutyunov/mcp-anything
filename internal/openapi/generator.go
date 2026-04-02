@@ -57,6 +57,14 @@ func GenerateTools(doc *openapi3.T, upstream *config.UpstreamConfig, sep string)
 
 			// Build slug from path + method verb.
 			slug := buildSlug(method, path, pathParams)
+
+			// Allow x-mcp-tool-name to override the generated slug.
+			if val, ok := op.Extensions["x-mcp-tool-name"]; ok {
+				if name, ok := val.(string); ok && name != "" {
+					slug = name
+				}
+			}
+
 			prefixedName := upstream.ToolPrefix + sep + slug
 
 			// Build the MCP input schema.

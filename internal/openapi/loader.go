@@ -3,6 +3,14 @@ package openapi
 import (
 	"context"
 	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/routers"
@@ -11,13 +19,39 @@ import (
 	"github.com/gaarutyunov/mcp-anything/internal/config"
 )
 
-// Load loads and validates an OpenAPI 3.0 spec from a local file path.
-// Returns the parsed document and a gorillamux router for request matching.
-func Load(ctx context.Context, cfg config.OpenAPISourceConfig) (*openapi3.T, routers.Router, error) {
-	loader := openapi3.NewLoader()
-	doc, err := loader.LoadFromFile(cfg.Source)
+// LoadPipeline executes the full OpenAPI loading pipeline for a single upstream:
+// load spec bytes → apply overlay → parse with kin-openapi → validate → build router.
+// It is safe to call from multiple goroutines if cfg is read-only.
+func LoadPipeline(ctx context.Context, specCfg config.OpenAPISourceConfig, overlayCfg *config.OverlayConfig) (*openapi3.T, routers.Router, error) {
+	specBytes, etag, err := loadSpecBytes(ctx, specCfg)
 	if err != nil {
-		return nil, nil, fmt.Errorf("loading OpenAPI spec from %q: %w", cfg.Source, err)
+		return nil, nil, fmt.Errorf("loading spec bytes: %w", err)
+	}
+	_ = etag // TODO: use for conditional refresh (If-None-Match) in a future task
+
+	modifiedBytes, warnings, err := ApplyOverlay(ctx, specBytes, overlayCfg)
+	if err != nil {
+		return nil, nil, fmt.Errorf("applying overlay: %w", err)
+	}
+	for _, w := range warnings {
+		slog.Warn("overlay unmatched target", "warning", w)
+	}
+
+	loader := openapi3.NewLoader()
+	loader.IsExternalRefsAllowed = specCfg.AllowExternalRefs
+	loader.ReadFromURIFunc = openapi3.URIMapCache(openapi3.ReadFromURIs(
+		buildAuthHTTPReader(ctx, os.ExpandEnv(specCfg.AuthHeader)),
+		openapi3.ReadFromFile,
+	))
+
+	parsedBaseURI, err := specBaseURI(specCfg.Source)
+	if err != nil {
+		return nil, nil, fmt.Errorf("resolving spec base URI: %w", err)
+	}
+
+	doc, err := loader.LoadFromDataWithPath(modifiedBytes, parsedBaseURI)
+	if err != nil {
+		return nil, nil, fmt.Errorf("parsing OpenAPI spec: %w", err)
 	}
 
 	if err := doc.Validate(ctx); err != nil {
@@ -30,4 +64,124 @@ func Load(ctx context.Context, cfg config.OpenAPISourceConfig) (*openapi3.T, rou
 	}
 
 	return doc, router, nil
+}
+
+// httpClient is used for fetching specs and overlays from remote URLs.
+// The 30-second timeout prevents indefinite hangs if the server is unresponsive.
+var httpClient = &http.Client{Timeout: 30 * time.Second}
+
+// loadSpecBytes loads the raw spec bytes and returns the ETag (empty for file-based).
+// For HTTP URLs, it retries up to 5 times on transient connection errors and 5xx responses.
+func loadSpecBytes(ctx context.Context, cfg config.OpenAPISourceConfig) ([]byte, string, error) {
+	if !strings.HasPrefix(cfg.Source, "http") {
+		data, err := os.ReadFile(cfg.Source)
+		if err != nil {
+			return nil, "", fmt.Errorf("reading spec file %q: %w", cfg.Source, err)
+		}
+		return data, "", nil
+	}
+
+	authHeader := os.ExpandEnv(cfg.AuthHeader)
+
+	const maxAttempts = 5
+	var lastErr error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if attempt > 0 {
+			slog.Warn("retrying spec fetch", "url", cfg.Source, "attempt", attempt+1)
+			select {
+			case <-ctx.Done():
+				return nil, "", fmt.Errorf("processing spec %s: %w", cfg.Source, ctx.Err())
+			case <-time.After(2 * time.Second):
+			}
+		}
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, cfg.Source, nil)
+		if err != nil {
+			return nil, "", fmt.Errorf("creating request for %q: %w", cfg.Source, err)
+		}
+		if authHeader != "" {
+			req.Header.Set("Authorization", authHeader)
+		}
+
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			// Connection error — may be transient (e.g. DNS not yet ready); retry.
+			lastErr = fmt.Errorf("fetching spec from %q: %w", cfg.Source, err)
+			slog.Warn("spec fetch failed, will retry", "url", cfg.Source, "error", err)
+			continue
+		}
+
+		if resp.StatusCode >= 500 {
+			// Server-side error — may be transient; retry.
+			_ = resp.Body.Close()
+			lastErr = fmt.Errorf("fetching spec from %q: unexpected status %d", cfg.Source, resp.StatusCode)
+			slog.Warn("spec fetch got server error, will retry", "url", cfg.Source, "status", resp.StatusCode)
+			continue
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			_ = resp.Body.Close()
+			return nil, "", fmt.Errorf("fetching spec from %q: unexpected status %d", cfg.Source, resp.StatusCode)
+		}
+
+		data, err := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if err != nil {
+			return nil, "", fmt.Errorf("reading spec response from %q: %w", cfg.Source, err)
+		}
+
+		return data, resp.Header.Get("ETag"), nil
+	}
+	return nil, "", lastErr
+}
+
+// buildAuthHTTPReader returns a ReadFromURIFunc that adds an Authorization header on all HTTP requests.
+// ctx is captured from the loader startup call and used for all $ref fetches.
+func buildAuthHTTPReader(ctx context.Context, authHeader string) openapi3.ReadFromURIFunc {
+	return func(_ *openapi3.Loader, location *url.URL) ([]byte, error) {
+		if location.Scheme != "http" && location.Scheme != "https" {
+			return nil, openapi3.ErrURINotSupported
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, location.String(), nil)
+		if err != nil {
+			return nil, fmt.Errorf("processing spec %s: %w", location.String(), err)
+		}
+		if authHeader != "" {
+			req.Header.Set("Authorization", authHeader)
+		}
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("processing spec %s: %w", location.String(), err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("error loading %q: request returned status code %d", location.String(), resp.StatusCode)
+		}
+		data, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("processing spec %s: %w", location.String(), err)
+		}
+		return data, nil
+	}
+}
+
+// specBaseURI builds the base URI for $ref resolution.
+func specBaseURI(source string) (*url.URL, error) {
+	if strings.HasPrefix(source, "http") {
+		u, err := url.Parse(source)
+		if err != nil {
+			return nil, fmt.Errorf("parsing spec URL %q: %w", source, err)
+		}
+		return u, nil
+	}
+
+	abs, err := filepath.Abs(source)
+	if err != nil {
+		return nil, fmt.Errorf("resolving absolute path for %q: %w", source, err)
+	}
+	u, err := url.Parse("file://" + filepath.ToSlash(abs))
+	if err != nil {
+		return nil, fmt.Errorf("parsing file URI for %q: %w", source, err)
+	}
+	return u, nil
 }

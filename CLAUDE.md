@@ -50,6 +50,9 @@ Integration tests live in `tests/integration/` with build tag `//go:build integr
 - All config fields that reference secrets use `${ENV_VAR}` syntax; never log expanded values
 - Unit tests live in files named `*_test.go` with no build tag
 
+## Additional rules
+See `.claude/rules/` for scoped rules on integration tests, OpenAPI package patterns, and common review issues.
+
 ## Testcontainers
 Set `TC_CLOUD_TOKEN` environment variable to use Testcontainers Cloud. Without it, tests use the local Docker daemon. The library auto-detects.
 
@@ -58,3 +61,4 @@ This project has no public users. There is no backward compatibility requirement
 
 ## No stubs
 Implementation tasks must produce complete, working code. Do not write placeholder functions that return `nil, nil` or `errors.New("not implemented")`. If a feature is not yet needed, do not create the function at all.
+

@@ -19,24 +19,23 @@ import (
 // Validator holds a pre-built kin-openapi router for a single upstream spec.
 type Validator struct {
 	router routers.Router
-	doc    *openapi3.T
 }
 
 // NewValidator creates a Validator from a parsed OpenAPI document and its pre-built router.
-func NewValidator(doc *openapi3.T, router routers.Router) *Validator {
-	return &Validator{router: router, doc: doc}
+func NewValidator(_ *openapi3.T, router routers.Router) *Validator {
+	return &Validator{router: router}
 }
 
-// ValidateRequest validates an outbound HTTP request against the OpenAPI spec.
-// It uses NoopAuthenticationFunc so upstream auth schemes are not re-validated.
-// Returns the RequestValidationInput for use in a subsequent ValidateResponse call.
-func (v *Validator) ValidateRequest(ctx context.Context, r *http.Request) (*openapi3filter.RequestValidationInput, error) {
+// BuildRequestInput resolves the route for r and returns a RequestValidationInput
+// without performing request schema validation. This is used when only response
+// validation is needed (ValidateRequest=false, ValidateResponse=true) to supply
+// the route metadata required by ValidateResponse.
+func (v *Validator) BuildRequestInput(r *http.Request) (*openapi3filter.RequestValidationInput, error) {
 	route, pathParams, err := v.router.FindRoute(r)
 	if err != nil {
 		return nil, fmt.Errorf("route not found: %w", err)
 	}
-
-	input := &openapi3filter.RequestValidationInput{
+	return &openapi3filter.RequestValidationInput{
 		Request:    r,
 		PathParams: pathParams,
 		Route:      route,
@@ -44,6 +43,16 @@ func (v *Validator) ValidateRequest(ctx context.Context, r *http.Request) (*open
 			AuthenticationFunc: openapi3filter.NoopAuthenticationFunc,
 			MultiError:         true,
 		},
+	}, nil
+}
+
+// ValidateRequest validates an outbound HTTP request against the OpenAPI spec.
+// It uses NoopAuthenticationFunc so upstream auth schemes are not re-validated.
+// Returns the RequestValidationInput for use in a subsequent ValidateResponse call.
+func (v *Validator) ValidateRequest(ctx context.Context, r *http.Request) (*openapi3filter.RequestValidationInput, error) {
+	input, err := v.BuildRequestInput(r)
+	if err != nil {
+		return nil, err
 	}
 	return input, openapi3filter.ValidateRequest(ctx, input)
 }

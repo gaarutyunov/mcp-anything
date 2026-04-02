@@ -82,18 +82,30 @@ func registerTool(srv *sdkmcp.Server, vt *openapi.ValidatedTool, upstream *confi
 		}
 
 		// Validate the outbound request against the OpenAPI spec before calling upstream.
+		// When only response validation is enabled, we still need to resolve route metadata
+		// (BuildRequestInput) so that ValidateResponse has the required context.
 		var reqInput *openapi3filter.RequestValidationInput
-		if upstream.Validation.ValidateRequest && tool.Validator != nil {
-			ri, valErr := tool.Validator.ValidateRequest(ctx, httpReq)
-			if valErr != nil {
-				return &sdkmcp.CallToolResult{
-					IsError: true,
-					Content: []sdkmcp.Content{
-						&sdkmcp.TextContent{Text: fmt.Sprintf("request validation failed: %v", valErr)},
-					},
-				}, nil
+		if tool.Validator != nil {
+			if upstream.Validation.ValidateRequest {
+				ri, valErr := tool.Validator.ValidateRequest(ctx, httpReq)
+				if valErr != nil {
+					return &sdkmcp.CallToolResult{
+						IsError: true,
+						Content: []sdkmcp.Content{
+							&sdkmcp.TextContent{Text: fmt.Sprintf("request validation failed: %v", valErr)},
+						},
+					}, nil
+				}
+				reqInput = ri
+			} else if upstream.Validation.ValidateResponse {
+				// Build route metadata for response validation without validating the request.
+				ri, routeErr := tool.Validator.BuildRequestInput(httpReq)
+				if routeErr != nil {
+					slog.Warn("could not resolve route for response validation", "tool", tool.PrefixedName, "error", routeErr)
+				} else {
+					reqInput = ri
+				}
 			}
-			reqInput = ri
 		}
 
 		resp, err := client.Do(httpReq)

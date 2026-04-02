@@ -352,6 +352,108 @@ func TestResponseValidationFailMode(t *testing.T) {
 	}
 }
 
+// TestResponseValidationOnlyWarnMode verifies that response validation works independently
+// of request validation. With ValidateRequest=false and ValidateResponse=true in warn mode,
+// a schema-violating response should still return success (warning is logged only).
+func TestResponseValidationOnlyWarnMode(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	net, err := network.New(ctx, network.WithDriver("bridge"))
+	if err != nil {
+		t.Fatalf("create network: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := net.Remove(ctx); err != nil {
+			t.Logf("remove network: %v", err)
+		}
+	})
+
+	_, wiremockURL := startWireMock(ctx, t, net.Name)
+
+	// Return id as string — violates schema (id should be integer).
+	registerStub(t, wiremockURL, `{
+		"request": {"method": "GET", "url": "/pets"},
+		"response": {"status": 200, "body": "{\"pets\":[{\"id\":\"not-an-integer\",\"name\":\"Fido\"}]}", "headers": {"Content-Type": "application/json"}}
+	}`)
+
+	// Request validation disabled, response validation enabled in warn mode.
+	cfg := buildValidationConfig(false, true, "warn")
+	proxyURL := startValidationProxy(ctx, t, net.Name, validationListPetsSpec, cfg)
+
+	session, cancel := connectValidationMCPClient(t, proxyURL)
+	defer cancel()
+
+	callCtx, callCancel := context.WithTimeout(ctx, 60*time.Second)
+	defer callCancel()
+
+	result, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{
+		Name: "test__listpets",
+	})
+	if err != nil {
+		t.Fatalf("CallTool returned error: %v", err)
+	}
+	// In warn mode, schema violation must not cause IsError even when request validation is off.
+	if result.IsError {
+		t.Errorf("expected successful result in response-only warn mode, got IsError=true: %s", contentText(result.Content))
+	}
+	text := contentText(result.Content)
+	if !strings.Contains(text, "Fido") {
+		t.Errorf("expected response to contain 'Fido', got: %s", text)
+	}
+}
+
+// TestResponseValidationOnlyFailMode verifies that response validation works independently
+// of request validation. With ValidateRequest=false and ValidateResponse=true in fail mode,
+// a schema-violating response must return IsError: true.
+func TestResponseValidationOnlyFailMode(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	net, err := network.New(ctx, network.WithDriver("bridge"))
+	if err != nil {
+		t.Fatalf("create network: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := net.Remove(ctx); err != nil {
+			t.Logf("remove network: %v", err)
+		}
+	})
+
+	_, wiremockURL := startWireMock(ctx, t, net.Name)
+
+	// Return id as string — violates schema (id should be integer).
+	registerStub(t, wiremockURL, `{
+		"request": {"method": "GET", "url": "/pets"},
+		"response": {"status": 200, "body": "{\"pets\":[{\"id\":\"not-an-integer\",\"name\":\"Fido\"}]}", "headers": {"Content-Type": "application/json"}}
+	}`)
+
+	// Request validation disabled, response validation enabled in fail mode.
+	cfg := buildValidationConfig(false, true, "fail")
+	proxyURL := startValidationProxy(ctx, t, net.Name, validationListPetsSpec, cfg)
+
+	session, cancel := connectValidationMCPClient(t, proxyURL)
+	defer cancel()
+
+	callCtx, callCancel := context.WithTimeout(ctx, 60*time.Second)
+	defer callCancel()
+
+	result, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{
+		Name: "test__listpets",
+	})
+	if err != nil {
+		t.Fatalf("CallTool returned error: %v", err)
+	}
+	// In fail mode, schema violation must cause IsError even when request validation is off.
+	if !result.IsError {
+		t.Errorf("expected IsError=true in response-only fail mode, got success: %s", contentText(result.Content))
+	}
+	text := contentText(result.Content)
+	if !strings.Contains(strings.ToLower(text), "validation") && !strings.Contains(strings.ToLower(text), "invalid") {
+		t.Errorf("expected error message to mention validation failure, got: %s", text)
+	}
+}
+
 // TestUnexpectedStatusReturnsError verifies that an HTTP status not in success_status
 // or error_status returns IsError: true.
 func TestUnexpectedStatusReturnsError(t *testing.T) {

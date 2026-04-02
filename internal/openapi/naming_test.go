@@ -56,6 +56,8 @@ func TestTruncateDescription(t *testing.T) {
 		{"hi", 2, "...", "hi"},
 		{"abc", 3, "...", "abc"},
 		{"abcd", 3, "...", "..."},
+		// suffix longer than maxLength — clip to maxLength.
+		{"hello", 2, "...", ".."},
 	}
 
 	for _, tt := range tests {
@@ -84,6 +86,8 @@ func TestPrefixedName(t *testing.T) {
 		// maxLength=14 truncates the base name by 1.
 		{"list_pets", "shop", "__", 14, "shop__list_pet"},
 		{"list_pets", "shop", "__", 0, "shop__list_pets"},
+		// prefix+sep ("shop__") is 6 runes, maxLength=4 — truncate prefix+sep to maxLength.
+		{"list_pets", "shop", "__", 4, "shop"},
 	}
 
 	for _, tt := range tests {

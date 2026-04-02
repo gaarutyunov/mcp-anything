@@ -149,15 +149,18 @@ func extractExtensionString(val any) string {
 }
 
 // PrefixedName returns "{prefix}{separator}{baseName}", truncating baseName so
-// the total length does not exceed maxLength. The prefix and separator are never truncated.
+// the total length does not exceed maxLength. If prefix+separator alone meets or
+// exceeds maxLength, the result is truncated to maxLength runes (no baseName appended).
 // If maxLength is 0, no truncation is applied.
 func PrefixedName(baseName, prefix, separator string, maxLength int) string {
 	if maxLength > 0 {
 		prefixPart := prefix + separator
-		allowedBase := maxLength - len([]rune(prefixPart))
-		if allowedBase < 0 {
-			allowedBase = 0
+		prefixRunes := []rune(prefixPart)
+		if len(prefixRunes) >= maxLength {
+			// prefix+separator alone meets or exceeds the limit — truncate to maxLength.
+			return string(prefixRunes[:maxLength])
 		}
+		allowedBase := maxLength - len(prefixRunes)
 		runes := []rune(baseName)
 		if len(runes) > allowedBase {
 			baseName = string(runes[:allowedBase])
@@ -166,17 +169,20 @@ func PrefixedName(baseName, prefix, separator string, maxLength int) string {
 	return prefix + separator + baseName
 }
 
-// TruncateDescription truncates desc to at most maxLength characters, appending
-// suffix when truncation occurs. If maxLength is 0, desc is returned unchanged.
+// TruncateDescription truncates desc to at most maxLength runes, appending
+// suffix when truncation occurs. If suffix alone is longer than maxLength, the
+// suffix is itself clipped to maxLength. If maxLength is 0 or negative, desc is
+// returned unchanged.
 func TruncateDescription(desc string, maxLength int, suffix string) string {
 	descRunes := []rune(desc)
-	if maxLength == 0 || len(descRunes) <= maxLength {
+	if maxLength <= 0 || len(descRunes) <= maxLength {
 		return desc
 	}
-	cutAt := maxLength - len([]rune(suffix))
-	if cutAt < 0 {
-		cutAt = 0
+	suffixRunes := []rune(suffix)
+	if len(suffixRunes) >= maxLength {
+		return string(suffixRunes[:maxLength])
 	}
+	cutAt := maxLength - len(suffixRunes)
 	return string(descRunes[:cutAt]) + suffix
 }
 

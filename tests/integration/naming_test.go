@@ -86,16 +86,7 @@ actions:
 func TestToolNamingEndToEnd(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-
-	net, err := network.New(ctx, network.WithDriver("bridge"))
-	if err != nil {
-		t.Fatalf("create network: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := net.Remove(ctx); err != nil {
-			t.Logf("remove network: %v", err)
-		}
-	})
+	net := mustCreateNetwork(ctx, t)
 
 	// Start WireMock.
 	wiremock := startContainer(ctx, t, testcontainers.ContainerRequest{
@@ -219,16 +210,7 @@ upstreams:
 func TestConflictDetectionFails(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-
-	net, err := network.New(ctx, network.WithDriver("bridge"))
-	if err != nil {
-		t.Fatalf("create network: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := net.Remove(ctx); err != nil {
-			t.Logf("remove network: %v", err)
-		}
-	})
+	net := mustCreateNetwork(ctx, t)
 
 	// A minimal spec used by both (conflicting) upstreams.
 	minimalSpec := `openapi: "3.0.0"
@@ -349,16 +331,7 @@ paths:
 func TestInputSchemaPreservesConstraints(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-
-	net, err := network.New(ctx, network.WithDriver("bridge"))
-	if err != nil {
-		t.Fatalf("create network: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := net.Remove(ctx); err != nil {
-			t.Logf("remove network: %v", err)
-		}
-	})
+	net := mustCreateNetwork(ctx, t)
 
 	wiremock := startContainer(ctx, t, testcontainers.ContainerRequest{
 		Image:        "wiremock/wiremock:3.9.1",
@@ -507,11 +480,7 @@ func collisionProxySetup(t *testing.T, specYAML string) (*sdkmcp.ClientSession, 
 	t.Helper()
 	ctx := context.Background()
 
-	net, err := network.New(ctx, network.WithDriver("bridge"))
-	if err != nil {
-		t.Fatalf("create network: %v", err)
-	}
-	t.Cleanup(func() { _ = net.Remove(ctx) })
+	net := mustCreateNetwork(ctx, t)
 
 	wiremock := startContainer(ctx, t, testcontainers.ContainerRequest{
 		Image:        "wiremock/wiremock:3.9.1",
@@ -597,9 +566,8 @@ upstreams:
 	return session, cancel
 }
 
-// schemaProperties lists a tool and returns its InputSchema properties as a
-// map[name]type-string for easy assertion.
-func toolInputSchema(t *testing.T, session *sdkmcp.ClientSession, callCtx context.Context) map[string]any {
+// toolRawSchema fetches the single tool's InputSchema as a raw map for inspection.
+func toolRawSchema(t *testing.T, session *sdkmcp.ClientSession, callCtx context.Context) map[string]any {
 	t.Helper()
 	toolsResult, err := session.ListTools(callCtx, nil)
 	if err != nil {
@@ -616,11 +584,32 @@ func toolInputSchema(t *testing.T, session *sdkmcp.ClientSession, callCtx contex
 	if err := json.Unmarshal(schemaBytes, &schema); err != nil {
 		t.Fatalf("unmarshal input schema: %v", err)
 	}
+	return schema
+}
+
+// toolInputSchema returns the InputSchema "properties" map of the single tool.
+func toolInputSchema(t *testing.T, session *sdkmcp.ClientSession, callCtx context.Context) map[string]any {
+	t.Helper()
+	schema := toolRawSchema(t, session, callCtx)
 	props, ok := schema["properties"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected 'properties' in schema, got: %v", schema)
 	}
 	return props
+}
+
+// toolRequiredFields returns the "required" fields of the single tool's InputSchema as a set.
+func toolRequiredFields(t *testing.T, session *sdkmcp.ClientSession, callCtx context.Context) map[string]bool {
+	t.Helper()
+	schema := toolRawSchema(t, session, callCtx)
+	rawReq, _ := schema["required"].([]any)
+	required := make(map[string]bool, len(rawReq))
+	for _, r := range rawReq {
+		if s, ok := r.(string); ok {
+			required[s] = true
+		}
+	}
+	return required
 }
 
 // TestInputSchemaCollisionPathAndBody checks that when a path parameter and a
@@ -685,6 +674,15 @@ paths:
 		if idBody["type"] != "integer" {
 			t.Errorf("id_body: expected type 'integer', got %v", idBody["type"])
 		}
+	}
+
+	// Both id_path (path param) and id_body (required in body) must appear in required.
+	required := toolRequiredFields(t, session, context.Background())
+	if !required["id_path"] {
+		t.Errorf("expected 'id_path' to be required (path param), got required: %v", required)
+	}
+	if !required["id_body"] {
+		t.Errorf("expected 'id_body' to be required (body field marked required), got required: %v", required)
 	}
 }
 
@@ -904,6 +902,30 @@ paths:
 			t.Errorf("tag_body: want type 'boolean', got %v", p["type"])
 		}
 	}
+
+	// name_path (path param) and name_body (required in body) must appear in required.
+	required := toolRequiredFields(t, session, context.Background())
+	if !required["name_path"] {
+		t.Errorf("expected 'name_path' to be required (path param), got required: %v", required)
+	}
+	if !required["name_body"] {
+		t.Errorf("expected 'name_body' to be required (body field marked required), got required: %v", required)
+	}
+}
+
+// mustCreateNetwork creates a Docker bridge network and registers cleanup with t.
+func mustCreateNetwork(ctx context.Context, t *testing.T) *testcontainers.DockerNetwork {
+	t.Helper()
+	net, err := network.New(ctx, network.WithDriver("bridge"))
+	if err != nil {
+		t.Fatalf("create network: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := net.Remove(ctx); err != nil {
+			t.Logf("remove network: %v", err)
+		}
+	})
+	return net
 }
 
 // mapKeys returns the keys of a map as a slice for readable error messages.

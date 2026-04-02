@@ -42,6 +42,7 @@ jobs:
         uses: atomicjar/testcontainers-cloud-setup-action@v1
         with:
           token: ${{ secrets.TC_CLOUD_TOKEN }}
+          wait: 'true'
 
       - name: Run Claude Code
         id: claude

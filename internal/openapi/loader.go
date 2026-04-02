@@ -90,7 +90,7 @@ func loadSpecBytes(ctx context.Context, cfg config.OpenAPISourceConfig) ([]byte,
 			slog.Warn("retrying spec fetch", "url", cfg.Source, "attempt", attempt+1)
 			select {
 			case <-ctx.Done():
-				return nil, "", ctx.Err()
+				return nil, "", fmt.Errorf("processing spec %s: %w", cfg.Source, ctx.Err())
 			case <-time.After(2 * time.Second):
 			}
 		}
@@ -139,25 +139,29 @@ func loadSpecBytes(ctx context.Context, cfg config.OpenAPISourceConfig) ([]byte,
 // ctx is captured from the loader startup call and used for all $ref fetches.
 func buildAuthHTTPReader(ctx context.Context, authHeader string) openapi3.ReadFromURIFunc {
 	return func(_ *openapi3.Loader, location *url.URL) ([]byte, error) {
-		if location.Scheme == "" || location.Host == "" {
+		if location.Scheme != "http" && location.Scheme != "https" {
 			return nil, openapi3.ErrURINotSupported
 		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, location.String(), nil)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("processing spec %s: %w", location.String(), err)
 		}
 		if authHeader != "" {
 			req.Header.Set("Authorization", authHeader)
 		}
 		resp, err := httpClient.Do(req)
 		if err != nil {
-			return nil, fmt.Errorf("fetching %q: %w", location.String(), err)
+			return nil, fmt.Errorf("processing spec %s: %w", location.String(), err)
 		}
 		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusOK {
 			return nil, fmt.Errorf("error loading %q: request returned status code %d", location.String(), resp.StatusCode)
 		}
-		return io.ReadAll(resp.Body)
+		data, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("processing spec %s: %w", location.String(), err)
+		}
+		return data, nil
 	}
 }
 

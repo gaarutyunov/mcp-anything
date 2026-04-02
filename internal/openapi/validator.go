@@ -1,20 +1,80 @@
 package openapi
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
 
 	"github.com/getkin/kin-openapi/openapi3"
+	"github.com/getkin/kin-openapi/openapi3filter"
+	"github.com/getkin/kin-openapi/routers"
 
 	"github.com/gaarutyunov/mcp-anything/internal/config"
 	"github.com/gaarutyunov/mcp-anything/internal/transform"
 )
 
-// ValidatedTool is a GeneratedTool with its compiled jq transforms.
+// Validator holds a pre-built kin-openapi router for a single upstream spec.
+type Validator struct {
+	router routers.Router
+}
+
+// NewValidator creates a Validator from a parsed OpenAPI document and its pre-built router.
+func NewValidator(_ *openapi3.T, router routers.Router) *Validator {
+	return &Validator{router: router}
+}
+
+// BuildRequestInput resolves the route for r and returns a RequestValidationInput
+// without performing request schema validation. This is used when only response
+// validation is needed (ValidateRequest=false, ValidateResponse=true) to supply
+// the route metadata required by ValidateResponse.
+func (v *Validator) BuildRequestInput(r *http.Request) (*openapi3filter.RequestValidationInput, error) {
+	route, pathParams, err := v.router.FindRoute(r)
+	if err != nil {
+		return nil, fmt.Errorf("route not found: %w", err)
+	}
+	return &openapi3filter.RequestValidationInput{
+		Request:    r,
+		PathParams: pathParams,
+		Route:      route,
+		Options: &openapi3filter.Options{
+			AuthenticationFunc: openapi3filter.NoopAuthenticationFunc,
+			MultiError:         true,
+		},
+	}, nil
+}
+
+// ValidateRequest validates an outbound HTTP request against the OpenAPI spec.
+// It uses NoopAuthenticationFunc so upstream auth schemes are not re-validated.
+// Returns the RequestValidationInput for use in a subsequent ValidateResponse call.
+func (v *Validator) ValidateRequest(ctx context.Context, r *http.Request) (*openapi3filter.RequestValidationInput, error) {
+	input, err := v.BuildRequestInput(r)
+	if err != nil {
+		return nil, err
+	}
+	return input, openapi3filter.ValidateRequest(ctx, input)
+}
+
+// ValidateResponse validates an upstream HTTP response against the OpenAPI spec.
+// The reqInput must be the RequestValidationInput from a prior ValidateRequest call.
+func (v *Validator) ValidateResponse(ctx context.Context, reqInput *openapi3filter.RequestValidationInput, resp *http.Response, body []byte) error {
+	input := &openapi3filter.ResponseValidationInput{
+		RequestValidationInput: reqInput,
+		Status:                 resp.StatusCode,
+		Header:                 resp.Header,
+		Body:                   io.NopCloser(bytes.NewReader(body)),
+		Options:                &openapi3filter.Options{MultiError: true},
+	}
+	return openapi3filter.ValidateResponse(ctx, input)
+}
+
+// ValidatedTool is a GeneratedTool with its compiled jq transforms and runtime validator.
 type ValidatedTool struct {
 	GeneratedTool
 	Transforms *transform.CompiledTransforms
+	Validator  *Validator
 }
 
 // ValidateUpstream runs full config-time validation for a single upstream.
@@ -22,10 +82,12 @@ type ValidatedTool struct {
 // and dry-runs all three transforms against synthetic data.
 // Respects the provided context (for startup_validation_timeout).
 func ValidateUpstream(ctx context.Context, upstreamCfg *config.UpstreamConfig, namingCfg *config.NamingConfig) ([]*ValidatedTool, error) {
-	doc, _, err := LoadPipeline(ctx, upstreamCfg.OpenAPI, upstreamCfg.Overlay)
+	doc, router, err := LoadPipeline(ctx, upstreamCfg.OpenAPI, upstreamCfg.Overlay)
 	if err != nil {
 		return nil, fmt.Errorf("loading spec for upstream %q: %w", upstreamCfg.Name, err)
 	}
+
+	validator := NewValidator(doc, router)
 
 	tools, err := GenerateTools(doc, upstreamCfg, namingCfg)
 	if err != nil {
@@ -38,6 +100,7 @@ func ValidateUpstream(ctx context.Context, upstreamCfg *config.UpstreamConfig, n
 		if err != nil {
 			return nil, fmt.Errorf("validating tool %q: %w", gt.PrefixedName, err)
 		}
+		vt.Validator = validator
 		validated = append(validated, vt)
 	}
 

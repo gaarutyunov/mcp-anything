@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/getkin/kin-openapi/openapi3filter"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/gaarutyunov/mcp-anything/internal/config"
@@ -80,6 +81,33 @@ func registerTool(srv *sdkmcp.Server, vt *openapi.ValidatedTool, upstream *confi
 			httpReq.Header.Set("Content-Type", "application/json")
 		}
 
+		// Validate the outbound request against the OpenAPI spec before calling upstream.
+		// When only response validation is enabled, we still need to resolve route metadata
+		// (BuildRequestInput) so that ValidateResponse has the required context.
+		var reqInput *openapi3filter.RequestValidationInput
+		if tool.Validator != nil {
+			if upstream.Validation.ValidateRequest {
+				ri, valErr := tool.Validator.ValidateRequest(ctx, httpReq)
+				if valErr != nil {
+					return &sdkmcp.CallToolResult{
+						IsError: true,
+						Content: []sdkmcp.Content{
+							&sdkmcp.TextContent{Text: fmt.Sprintf("request validation failed: %v", valErr)},
+						},
+					}, nil
+				}
+				reqInput = ri
+			} else if upstream.Validation.ValidateResponse {
+				// Build route metadata for response validation without validating the request.
+				ri, routeErr := tool.Validator.BuildRequestInput(httpReq)
+				if routeErr != nil {
+					slog.Warn("could not resolve route for response validation", "tool", tool.PrefixedName, "error", routeErr)
+				} else {
+					reqInput = ri
+				}
+			}
+		}
+
 		resp, err := client.Do(httpReq)
 		if err != nil {
 			return nil, fmt.Errorf("executing HTTP request: %w", err)
@@ -95,8 +123,35 @@ func registerTool(srv *sdkmcp.Server, vt *openapi.ValidatedTool, upstream *confi
 			return nil, fmt.Errorf("reading response body: %w", err)
 		}
 
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		inSuccess := containsStatus(upstream.Validation.SuccessStatus, resp.StatusCode)
+		inError := containsStatus(upstream.Validation.ErrorStatus, resp.StatusCode)
+
+		if !inSuccess && !inError {
+			return &sdkmcp.CallToolResult{
+				IsError: true,
+				Content: []sdkmcp.Content{
+					&sdkmcp.TextContent{Text: fmt.Sprintf("unexpected HTTP %d", resp.StatusCode)},
+				},
+			}, nil
+		}
+
+		if inError {
 			return errorResult(ctx, tool.Transforms, resp.StatusCode, body), nil
+		}
+
+		// Success path: validate response if configured and reqInput is available.
+		if upstream.Validation.ValidateResponse && reqInput != nil && tool.Validator != nil {
+			if valErr := tool.Validator.ValidateResponse(ctx, reqInput, resp, body); valErr != nil {
+				if upstream.Validation.ResponseValidationFailure == "fail" {
+					return &sdkmcp.CallToolResult{
+						IsError: true,
+						Content: []sdkmcp.Content{
+							&sdkmcp.TextContent{Text: fmt.Sprintf("response validation failed: %v", valErr)},
+						},
+					}, nil
+				}
+				slog.Warn("response validation failed", "tool", tool.PrefixedName, "error", valErr)
+			}
 		}
 
 		return successResult(ctx, tool.Transforms, body), nil
@@ -173,6 +228,16 @@ func marshalToString(v any) string {
 		return fmt.Sprintf("%v", v)
 	}
 	return string(data)
+}
+
+// containsStatus reports whether status is in the list.
+func containsStatus(list []int, status int) bool {
+	for _, s := range list {
+		if s == status {
+			return true
+		}
+	}
+	return false
 }
 
 // parseArguments unmarshals the tool call arguments into a string map.

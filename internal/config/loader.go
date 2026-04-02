@@ -40,9 +40,31 @@ func Load(path string) (*ProxyConfig, error) {
 		if up.StartupValidationTimeout == 0 {
 			up.StartupValidationTimeout = cfg.Server.StartupValidationTimeout
 		}
+		applyValidationDefaults(k, i, &up.Validation)
 	}
 
 	return &cfg, nil
+}
+
+// applyValidationDefaults sets defaults for a single upstream's ValidationConfig.
+// Bool fields require raw-key existence checks since koanf sets absent bools to false.
+func applyValidationDefaults(k *koanf.Koanf, i int, v *ValidationConfig) {
+	prefix := fmt.Sprintf("upstreams.%d.validation", i)
+	if !k.Exists(prefix + ".validate_request") {
+		v.ValidateRequest = true
+	}
+	if !k.Exists(prefix + ".validate_response") {
+		v.ValidateResponse = true
+	}
+	if v.ResponseValidationFailure == "" {
+		v.ResponseValidationFailure = "warn"
+	}
+	if len(v.SuccessStatus) == 0 {
+		v.SuccessStatus = []int{200, 201, 202, 204}
+	}
+	if len(v.ErrorStatus) == 0 {
+		v.ErrorStatus = []int{400, 401, 403, 404, 422, 429, 500, 502, 503}
+	}
 }
 
 // applyDefaults sets scalar defaults on the koanf instance before unmarshalling.

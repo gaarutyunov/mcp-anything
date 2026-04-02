@@ -62,7 +62,7 @@ func loadOverlayBytes(ctx context.Context, cfg *config.OverlayConfig) ([]byte, e
 	}
 
 	if strings.HasPrefix(cfg.Source, "http") {
-		authHeader := cfg.AuthHeader
+		authHeader := os.ExpandEnv(cfg.AuthHeader)
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, cfg.Source, nil)
 		if err != nil {
 			return nil, fmt.Errorf("creating overlay request for %q: %w", cfg.Source, err)
@@ -70,7 +70,7 @@ func loadOverlayBytes(ctx context.Context, cfg *config.OverlayConfig) ([]byte, e
 		if authHeader != "" {
 			req.Header.Set("Authorization", authHeader)
 		}
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := httpClient.Do(req)
 		if err != nil {
 			return nil, fmt.Errorf("fetching overlay from %q: %w", cfg.Source, err)
 		}

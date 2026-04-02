@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/routers"
@@ -65,7 +66,12 @@ func LoadPipeline(ctx context.Context, specCfg config.OpenAPISourceConfig, overl
 	return doc, router, nil
 }
 
+// httpClient is used for fetching specs and overlays from remote URLs.
+// The 30-second timeout prevents indefinite hangs if the server is unresponsive.
+var httpClient = &http.Client{Timeout: 30 * time.Second}
+
 // loadSpecBytes loads the raw spec bytes and returns the ETag (empty for file-based).
+// For HTTP URLs, it retries up to 3 times on transient connection errors.
 func loadSpecBytes(ctx context.Context, cfg config.OpenAPISourceConfig) ([]byte, string, error) {
 	if !strings.HasPrefix(cfg.Source, "http") {
 		data, err := os.ReadFile(cfg.Source)
@@ -76,30 +82,48 @@ func loadSpecBytes(ctx context.Context, cfg config.OpenAPISourceConfig) ([]byte,
 	}
 
 	authHeader := os.ExpandEnv(cfg.AuthHeader)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, cfg.Source, nil)
-	if err != nil {
-		return nil, "", fmt.Errorf("creating request for %q: %w", cfg.Source, err)
-	}
-	if authHeader != "" {
-		req.Header.Set("Authorization", authHeader)
-	}
 
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, "", fmt.Errorf("fetching spec from %q: %w", cfg.Source, err)
-	}
-	defer func() { _ = resp.Body.Close() }()
+	const maxAttempts = 3
+	var lastErr error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if attempt > 0 {
+			slog.Warn("retrying spec fetch", "url", cfg.Source, "attempt", attempt+1)
+			select {
+			case <-ctx.Done():
+				return nil, "", ctx.Err()
+			case <-time.After(2 * time.Second):
+			}
+		}
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, "", fmt.Errorf("fetching spec from %q: unexpected status %d", cfg.Source, resp.StatusCode)
-	}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, cfg.Source, nil)
+		if err != nil {
+			return nil, "", fmt.Errorf("creating request for %q: %w", cfg.Source, err)
+		}
+		if authHeader != "" {
+			req.Header.Set("Authorization", authHeader)
+		}
 
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, "", fmt.Errorf("reading spec response from %q: %w", cfg.Source, err)
-	}
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			// Connection error — may be transient (e.g. DNS not yet ready); retry.
+			lastErr = fmt.Errorf("fetching spec from %q: %w", cfg.Source, err)
+			slog.Warn("spec fetch failed, will retry", "url", cfg.Source, "error", err)
+			continue
+		}
+		defer func() { _ = resp.Body.Close() }()
 
-	return data, resp.Header.Get("ETag"), nil
+		if resp.StatusCode != http.StatusOK {
+			return nil, "", fmt.Errorf("fetching spec from %q: unexpected status %d", cfg.Source, resp.StatusCode)
+		}
+
+		data, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, "", fmt.Errorf("reading spec response from %q: %w", cfg.Source, err)
+		}
+
+		return data, resp.Header.Get("ETag"), nil
+	}
+	return nil, "", lastErr
 }
 
 // buildAuthHTTPReader returns a ReadFromURIFunc that adds an Authorization header on all HTTP requests.
@@ -116,7 +140,7 @@ func buildAuthHTTPReader(ctx context.Context, authHeader string) openapi3.ReadFr
 		if authHeader != "" {
 			req.Header.Set("Authorization", authHeader)
 		}
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := httpClient.Do(req)
 		if err != nil {
 			return nil, err
 		}

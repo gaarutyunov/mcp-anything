@@ -550,6 +550,7 @@ upstreams:
 	}
 
 	proxyReq := proxyContainerRequest()
+	proxyReq.ExposedPorts = []string{"8080/tcp"}
 	proxyReq.Networks = []string{net.Name}
 	proxyReq.Env = map[string]string{"CONFIG_PATH": "/etc/mcp-anything/config.yaml"}
 	proxyReq.Files = []testcontainers.ContainerFile{
@@ -557,8 +558,8 @@ upstreams:
 		{HostFilePath: specPath, ContainerFilePath: "/etc/mcp-anything/spec.yaml", FileMode: 0o644},
 		{HostFilePath: overlayPath, ContainerFilePath: "/etc/mcp-anything/overlay.yaml", FileMode: 0o644},
 	}
-	// Use a short startup timeout: the container should fail, not start successfully.
-	proxyReq.WaitingFor = wait.ForExit().WithExitTimeout(30 * time.Second)
+	// ForHTTP returns "container exited with code N" when the proxy exits before the endpoint is ready.
+	proxyReq.WaitingFor = wait.ForHTTP("/healthz").WithPort("8080").WithStartupTimeout(30 * time.Second)
 
 	_, err = testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: proxyReq,
@@ -630,13 +631,15 @@ upstreams:
 	}
 
 	proxyReq := proxyContainerRequest()
+	proxyReq.ExposedPorts = []string{"8080/tcp"}
 	proxyReq.Networks = []string{net.Name}
 	proxyReq.Env = map[string]string{"CONFIG_PATH": "/etc/mcp-anything/config.yaml"}
 	proxyReq.Files = []testcontainers.ContainerFile{
 		{HostFilePath: cfgPath, ContainerFilePath: "/etc/mcp-anything/config.yaml", FileMode: 0o644},
 		{HostFilePath: specPath, ContainerFilePath: "/etc/mcp-anything/spec.yaml", FileMode: 0o644},
 	}
-	proxyReq.WaitingFor = wait.ForExit().WithExitTimeout(30 * time.Second)
+	// ForHTTP returns "container exited with code N" when the proxy exits before the endpoint is ready.
+	proxyReq.WaitingFor = wait.ForHTTP("/healthz").WithPort("8080").WithStartupTimeout(30 * time.Second)
 
 	_, err = testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: proxyReq,

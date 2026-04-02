@@ -1,6 +1,8 @@
 package openapi
 
 import (
+	"fmt"
+
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/google/jsonschema-go/jsonschema"
 )
@@ -40,6 +42,9 @@ func DeriveInputSchema(op *openapi3.Operation) (*jsonschema.Schema, error) {
 			for propName, propRef := range bodySchema.Properties {
 				if propRef == nil || propRef.Value == nil {
 					continue
+				}
+				if _, exists := schema.Properties[propName]; exists {
+					return nil, fmt.Errorf("input schema collision: request body property %q conflicts with a path/query/header parameter of the same name", propName)
 				}
 				schema.Properties[propName] = openAPISchemaToJSONSchema(propRef.Value)
 			}

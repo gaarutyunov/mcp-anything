@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/getkin/kin-openapi/openapi3"
@@ -137,10 +138,10 @@ func extractExtensionString(val any) string {
 	case string:
 		return v
 	case []byte:
-		// JSON raw message — strip surrounding quotes if present.
+		// JSON raw message — unquote properly to handle escape sequences.
 		s := strings.TrimSpace(string(v))
-		if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
-			return s[1 : len(s)-1]
+		if unquoted, err := strconv.Unquote(s); err == nil {
+			return unquoted
 		}
 		return s
 	}
@@ -153,12 +154,13 @@ func extractExtensionString(val any) string {
 func PrefixedName(baseName, prefix, separator string, maxLength int) string {
 	if maxLength > 0 {
 		prefixPart := prefix + separator
-		allowedBase := maxLength - len(prefixPart)
+		allowedBase := maxLength - len([]rune(prefixPart))
 		if allowedBase < 0 {
 			allowedBase = 0
 		}
-		if len(baseName) > allowedBase {
-			baseName = baseName[:allowedBase]
+		runes := []rune(baseName)
+		if len(runes) > allowedBase {
+			baseName = string(runes[:allowedBase])
 		}
 	}
 	return prefix + separator + baseName
@@ -167,14 +169,15 @@ func PrefixedName(baseName, prefix, separator string, maxLength int) string {
 // TruncateDescription truncates desc to at most maxLength characters, appending
 // suffix when truncation occurs. If maxLength is 0, desc is returned unchanged.
 func TruncateDescription(desc string, maxLength int, suffix string) string {
-	if maxLength == 0 || len(desc) <= maxLength {
+	descRunes := []rune(desc)
+	if maxLength == 0 || len(descRunes) <= maxLength {
 		return desc
 	}
-	cutAt := maxLength - len(suffix)
+	cutAt := maxLength - len([]rune(suffix))
 	if cutAt < 0 {
 		cutAt = 0
 	}
-	return desc[:cutAt] + suffix
+	return string(descRunes[:cutAt]) + suffix
 }
 
 // DetectConflicts checks for duplicate PrefixedName values in tools and applies

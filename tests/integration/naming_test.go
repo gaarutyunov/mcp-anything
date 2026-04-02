@@ -6,8 +6,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -289,12 +291,26 @@ upstreams:
 	}
 	proxyReq.WaitingFor = wait.ForHTTP("/healthz").WithPort("8080").WithStartupTimeout(30 * time.Second)
 
-	_, err = testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+	ctr, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: proxyReq,
 		Started:          true,
 	})
 	if err == nil {
-		t.Error("expected proxy to fail to start due to duplicate tool_prefix, but it started successfully")
+		_ = ctr.Terminate(ctx)
+		t.Fatal("expected proxy to fail to start due to duplicate tool_prefix, but it started successfully")
+	}
+	// Verify the failure is specifically due to duplicate tool_prefix validation by
+	// inspecting the container logs, since err is a testcontainers wait error that
+	// does not include the proxy's log output.
+	if ctr != nil {
+		logs, logErr := ctr.Logs(ctx)
+		if logErr == nil {
+			defer logs.Close()
+			logBytes, _ := io.ReadAll(logs)
+			if !strings.Contains(string(logBytes), "tool_prefix") {
+				t.Errorf("expected startup failure to mention 'tool_prefix' in logs, got: %s", string(logBytes))
+			}
+		}
 	}
 }
 

@@ -79,7 +79,6 @@ jobs:
         uses: atomicjar/testcontainers-cloud-setup-action@v1
         with:
           token: ${{ secrets.TC_CLOUD_TOKEN }}
-          wait: 'true'
 
       - name: Integration tests
         uses: nick-fields/retry@v3

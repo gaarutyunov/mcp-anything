@@ -484,3 +484,417 @@ upstreams:
 		t.Errorf("expected limit maximum 100, got: %v", limitProp["maximum"])
 	}
 }
+
+// collisionProxySetup spins up a proxy with the given spec YAML and returns the
+// MCP session and a cancel func. It registers a catch-all WireMock stub.
+func collisionProxySetup(t *testing.T, specYAML string) (*sdkmcp.ClientSession, context.CancelFunc) {
+	t.Helper()
+	ctx := context.Background()
+
+	net, err := network.New(ctx, network.WithDriver("bridge"))
+	if err != nil {
+		t.Fatalf("create network: %v", err)
+	}
+	t.Cleanup(func() { _ = net.Remove(ctx) })
+
+	wiremock := startContainer(ctx, t, testcontainers.ContainerRequest{
+		Image:        "wiremock/wiremock:3.9.1",
+		ExposedPorts: []string{"8080/tcp"},
+		Networks:     []string{net.Name},
+		NetworkAliases: map[string][]string{
+			net.Name: {"wiremock"},
+		},
+		WaitingFor: wait.ForHTTP("/__admin/mappings").WithPort("8080").WithStartupTimeout(60 * time.Second),
+	})
+	wiremockHost, err := wiremock.Host(ctx)
+	if err != nil {
+		t.Fatalf("get wiremock host: %v", err)
+	}
+	wiremockPort, err := wiremock.MappedPort(ctx, "8080")
+	if err != nil {
+		t.Fatalf("get wiremock port: %v", err)
+	}
+	wiremockURL := fmt.Sprintf("http://%s:%s", wiremockHost, wiremockPort.Port())
+	// Catch-all stub for any HTTP method / URL.
+	registerStub(t, wiremockURL, `{"request":{"method":"ANY","urlPattern":".*"},"response":{"status":200,"body":"{}","headers":{"Content-Type":"application/json"}}}`)
+
+	tmpDir := t.TempDir()
+	specPath := filepath.Join(tmpDir, "spec.yaml")
+	if err := os.WriteFile(specPath, []byte(specYAML), 0o644); err != nil {
+		t.Fatalf("write spec: %v", err)
+	}
+
+	cfgContent := `server:
+  port: 8080
+naming:
+  separator: "__"
+telemetry:
+  service_name: mcp-anything
+  service_version: v0.0.0-test
+upstreams:
+  - name: collision
+    enabled: true
+    tool_prefix: col
+    base_url: http://wiremock:8080
+    timeout: 10s
+    openapi:
+      source: /etc/mcp-anything/spec.yaml
+      version: "3.0"
+`
+	cfgPath := filepath.Join(tmpDir, "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte(cfgContent), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	proxyReq := proxyContainerRequest()
+	proxyReq.ExposedPorts = []string{"8080/tcp"}
+	proxyReq.Networks = []string{net.Name}
+	proxyReq.Env = map[string]string{"CONFIG_PATH": "/etc/mcp-anything/config.yaml"}
+	proxyReq.Files = []testcontainers.ContainerFile{
+		{HostFilePath: cfgPath, ContainerFilePath: "/etc/mcp-anything/config.yaml", FileMode: 0o644},
+		{HostFilePath: specPath, ContainerFilePath: "/etc/mcp-anything/spec.yaml", FileMode: 0o644},
+	}
+	proxyReq.WaitingFor = wait.ForHTTP("/healthz").WithPort("8080").WithStartupTimeout(120 * time.Second)
+	proxy := startContainer(ctx, t, proxyReq)
+
+	proxyHost, err := proxy.Host(ctx)
+	if err != nil {
+		t.Fatalf("get proxy host: %v", err)
+	}
+	proxyPort, err := proxy.MappedPort(ctx, "8080")
+	if err != nil {
+		t.Fatalf("get proxy port: %v", err)
+	}
+	proxyURL := fmt.Sprintf("http://%s:%s", proxyHost, proxyPort.Port())
+
+	transport := &sdkmcp.StreamableClientTransport{Endpoint: proxyURL + "/mcp"}
+	mcpClient := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "test-client", Version: "v0.0.1"}, nil)
+	callCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+
+	session, err := mcpClient.Connect(callCtx, transport, nil)
+	if err != nil {
+		cancel()
+		t.Fatalf("connect MCP client: %v", err)
+	}
+	t.Cleanup(func() { session.Close() })
+
+	return session, cancel
+}
+
+// schemaProperties lists a tool and returns its InputSchema properties as a
+// map[name]type-string for easy assertion.
+func toolInputSchema(t *testing.T, session *sdkmcp.ClientSession, callCtx context.Context) map[string]any {
+	t.Helper()
+	toolsResult, err := session.ListTools(callCtx, nil)
+	if err != nil {
+		t.Fatalf("list tools: %v", err)
+	}
+	if len(toolsResult.Tools) != 1 {
+		t.Fatalf("expected 1 tool, got %d: %v", len(toolsResult.Tools), toolNames(toolsResult.Tools))
+	}
+	schemaBytes, err := json.Marshal(toolsResult.Tools[0].InputSchema)
+	if err != nil {
+		t.Fatalf("marshal input schema: %v", err)
+	}
+	var schema map[string]any
+	if err := json.Unmarshal(schemaBytes, &schema); err != nil {
+		t.Fatalf("unmarshal input schema: %v", err)
+	}
+	props, ok := schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected 'properties' in schema, got: %v", schema)
+	}
+	return props
+}
+
+// TestInputSchemaCollisionPathAndBody checks that when a path parameter and a
+// request body property share the same name, the schema renames them to
+// {name}_path and {name}_body respectively.
+func TestInputSchemaCollisionPathAndBody(t *testing.T) {
+	t.Parallel()
+
+	spec := `openapi: "3.0.0"
+info:
+  title: Collision API
+  version: "1.0"
+paths:
+  /items/{id}:
+    post:
+      summary: Create item
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            description: path ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id]
+              properties:
+                id:
+                  type: integer
+                  description: body ID
+      responses:
+        "200":
+          description: OK
+`
+
+	session, cancel := collisionProxySetup(t, spec)
+	defer cancel()
+
+	props := toolInputSchema(t, session, context.Background())
+
+	if _, ok := props["id"]; ok {
+		t.Errorf("expected 'id' to be renamed on collision, but found plain 'id' key")
+	}
+	if _, ok := props["id_path"]; !ok {
+		t.Errorf("expected 'id_path' key from path param collision, got keys: %v", mapKeys(props))
+	}
+	if _, ok := props["id_body"]; !ok {
+		t.Errorf("expected 'id_body' key from body property collision, got keys: %v", mapKeys(props))
+	}
+
+	// Path param must be string, body property must be integer.
+	if idPath, ok := props["id_path"].(map[string]any); ok {
+		if idPath["type"] != "string" {
+			t.Errorf("id_path: expected type 'string', got %v", idPath["type"])
+		}
+	}
+	if idBody, ok := props["id_body"].(map[string]any); ok {
+		if idBody["type"] != "integer" {
+			t.Errorf("id_body: expected type 'integer', got %v", idBody["type"])
+		}
+	}
+}
+
+// TestInputSchemaCollisionQueryAndBody checks that when a query parameter and a
+// request body property share the same name, the schema renames them to
+// {name}_query and {name}_body.
+func TestInputSchemaCollisionQueryAndBody(t *testing.T) {
+	t.Parallel()
+
+	spec := `openapi: "3.0.0"
+info:
+  title: Collision API
+  version: "1.0"
+paths:
+  /search:
+    post:
+      summary: Search
+      parameters:
+        - name: filter
+          in: query
+          schema:
+            type: string
+            description: query filter
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                filter:
+                  type: integer
+                  description: body filter
+      responses:
+        "200":
+          description: OK
+`
+
+	session, cancel := collisionProxySetup(t, spec)
+	defer cancel()
+
+	props := toolInputSchema(t, session, context.Background())
+
+	if _, ok := props["filter"]; ok {
+		t.Errorf("expected 'filter' to be renamed on collision, but found plain 'filter' key")
+	}
+	if _, ok := props["filter_query"]; !ok {
+		t.Errorf("expected 'filter_query' key, got keys: %v", mapKeys(props))
+	}
+	if _, ok := props["filter_body"]; !ok {
+		t.Errorf("expected 'filter_body' key, got keys: %v", mapKeys(props))
+	}
+
+	if fq, ok := props["filter_query"].(map[string]any); ok {
+		if fq["type"] != "string" {
+			t.Errorf("filter_query: expected type 'string', got %v", fq["type"])
+		}
+	}
+	if fb, ok := props["filter_body"].(map[string]any); ok {
+		if fb["type"] != "integer" {
+			t.Errorf("filter_body: expected type 'integer', got %v", fb["type"])
+		}
+	}
+}
+
+// TestInputSchemaCollisionHeaderAndBody checks that when a header parameter and
+// a request body property share the same name, the schema renames them to
+// {name}_header and {name}_body.
+func TestInputSchemaCollisionHeaderAndBody(t *testing.T) {
+	t.Parallel()
+
+	spec := `openapi: "3.0.0"
+info:
+  title: Collision API
+  version: "1.0"
+paths:
+  /upload:
+    post:
+      summary: Upload
+      parameters:
+        - name: X-Checksum
+          in: header
+          schema:
+            type: string
+            description: header checksum
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                X-Checksum:
+                  type: integer
+                  description: body checksum
+      responses:
+        "200":
+          description: OK
+`
+
+	session, cancel := collisionProxySetup(t, spec)
+	defer cancel()
+
+	props := toolInputSchema(t, session, context.Background())
+
+	if _, ok := props["X-Checksum"]; ok {
+		t.Errorf("expected 'X-Checksum' to be renamed on collision, but found plain key")
+	}
+	if _, ok := props["X-Checksum_header"]; !ok {
+		t.Errorf("expected 'X-Checksum_header' key, got keys: %v", mapKeys(props))
+	}
+	if _, ok := props["X-Checksum_body"]; !ok {
+		t.Errorf("expected 'X-Checksum_body' key, got keys: %v", mapKeys(props))
+	}
+
+	if hdr, ok := props["X-Checksum_header"].(map[string]any); ok {
+		if hdr["type"] != "string" {
+			t.Errorf("X-Checksum_header: expected type 'string', got %v", hdr["type"])
+		}
+	}
+	if body, ok := props["X-Checksum_body"].(map[string]any); ok {
+		if body["type"] != "integer" {
+			t.Errorf("X-Checksum_body: expected type 'integer', got %v", body["type"])
+		}
+	}
+}
+
+// TestInputSchemaMultipleCollisions checks that multiple simultaneous collisions
+// (path+body for "name", query+body for "tag") are all resolved with suffixes,
+// while non-colliding params keep their original names.
+func TestInputSchemaMultipleCollisions(t *testing.T) {
+	t.Parallel()
+
+	spec := `openapi: "3.0.0"
+info:
+  title: Collision API
+  version: "1.0"
+paths:
+  /items/{name}:
+    post:
+      summary: Create item
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: tag
+          in: query
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: integer
+                tag:
+                  type: boolean
+                description:
+                  type: string
+      responses:
+        "200":
+          description: OK
+`
+
+	session, cancel := collisionProxySetup(t, spec)
+	defer cancel()
+
+	props := toolInputSchema(t, session, context.Background())
+
+	// Colliding params must be renamed.
+	for _, plain := range []string{"name", "tag"} {
+		if _, ok := props[plain]; ok {
+			t.Errorf("expected %q to be renamed on collision, but found plain key", plain)
+		}
+	}
+
+	// Renamed keys must exist.
+	expected := []string{"name_path", "name_body", "tag_query", "tag_body"}
+	for _, key := range expected {
+		if _, ok := props[key]; !ok {
+			t.Errorf("expected renamed key %q, got keys: %v", key, mapKeys(props))
+		}
+	}
+
+	// Non-colliding params must keep original names.
+	for _, plain := range []string{"page", "description"} {
+		if _, ok := props[plain]; !ok {
+			t.Errorf("expected non-colliding param %q to keep original name, got keys: %v", plain, mapKeys(props))
+		}
+	}
+
+	// Type assertions.
+	if p, ok := props["name_path"].(map[string]any); ok {
+		if p["type"] != "string" {
+			t.Errorf("name_path: want type 'string', got %v", p["type"])
+		}
+	}
+	if p, ok := props["name_body"].(map[string]any); ok {
+		if p["type"] != "integer" {
+			t.Errorf("name_body: want type 'integer', got %v", p["type"])
+		}
+	}
+	if p, ok := props["tag_query"].(map[string]any); ok {
+		if p["type"] != "string" {
+			t.Errorf("tag_query: want type 'string', got %v", p["type"])
+		}
+	}
+	if p, ok := props["tag_body"].(map[string]any); ok {
+		if p["type"] != "boolean" {
+			t.Errorf("tag_body: want type 'boolean', got %v", p["type"])
+		}
+	}
+}
+
+// mapKeys returns the keys of a map as a slice for readable error messages.
+func mapKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}

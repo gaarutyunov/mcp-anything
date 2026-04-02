@@ -1,54 +1,89 @@
 package openapi
 
 import (
-	"fmt"
-
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/google/jsonschema-go/jsonschema"
 )
 
 // DeriveInputSchema builds the MCP tool InputSchema from an OpenAPI operation.
-// It includes path params (required), query params (required if marked), header params
-// (optional), and request body properties (application/json, merged at top level).
-// Constraints preserved: type, format, minimum, maximum, minLength, maxLength, enum,
-// pattern, description.
+// It includes path params (always required), query params (required if marked),
+// header params (optional), and request body properties (application/json, merged
+// at top level). Constraints preserved: type, format, minimum, maximum,
+// minLength, maxLength, enum, pattern, description.
+//
+// Name collisions between parameters from different locations (path, query,
+// header, body) are resolved by appending "_{source}" to all conflicting keys
+// (e.g. "id" in both path and body becomes "id_path" and "id_body"). Names that
+// do not collide are kept as-is.
 func DeriveInputSchema(op *openapi3.Operation) (*jsonschema.Schema, error) {
-	schema := &jsonschema.Schema{
-		Type:       "object",
-		Properties: make(map[string]*jsonschema.Schema),
+	type entry struct {
+		source     string // "path", "query", "header", or "body"
+		propSchema *jsonschema.Schema
+		required   bool
 	}
+
+	// Collect all parameters keyed by name. Multiple entries for the same name
+	// indicate a collision that will be resolved with _{source} suffixes.
+	collected := make(map[string][]entry)
 
 	for _, ref := range op.Parameters {
 		if ref == nil || ref.Value == nil {
 			continue
 		}
 		p := ref.Value
-
 		switch p.In {
 		case "path", "query", "header":
-			propSchema := paramSchemaFull(p)
-			schema.Properties[p.Name] = propSchema
-			if p.Required {
-				schema.Required = append(schema.Required, p.Name)
-			}
+			collected[p.Name] = append(collected[p.Name], entry{
+				source:     p.In,
+				propSchema: paramSchemaFull(p),
+				required:   p.Required || p.In == "path",
+			})
 		}
 	}
 
-	// Merge request body (application/json) properties at the top level.
+	// Merge request body (application/json) properties.
 	if op.RequestBody != nil && op.RequestBody.Value != nil {
 		if ct, ok := op.RequestBody.Value.Content["application/json"]; ok &&
 			ct != nil && ct.Schema != nil && ct.Schema.Value != nil {
 			bodySchema := ct.Schema.Value
+			bodyRequired := make(map[string]bool, len(bodySchema.Required))
+			for _, r := range bodySchema.Required {
+				bodyRequired[r] = true
+			}
 			for propName, propRef := range bodySchema.Properties {
 				if propRef == nil || propRef.Value == nil {
 					continue
 				}
-				if _, exists := schema.Properties[propName]; exists {
-					return nil, fmt.Errorf("input schema collision: request body property %q conflicts with a path/query/header parameter of the same name", propName)
-				}
-				schema.Properties[propName] = openAPISchemaToJSONSchema(propRef.Value)
+				collected[propName] = append(collected[propName], entry{
+					source:     "body",
+					propSchema: openAPISchemaToJSONSchema(propRef.Value),
+					required:   bodyRequired[propName],
+				})
 			}
-			schema.Required = append(schema.Required, bodySchema.Required...)
+		}
+	}
+
+	schema := &jsonschema.Schema{
+		Type:       "object",
+		Properties: make(map[string]*jsonschema.Schema),
+	}
+
+	for name, entries := range collected {
+		if len(entries) == 1 {
+			// No collision — use the original name.
+			schema.Properties[name] = entries[0].propSchema
+			if entries[0].required {
+				schema.Required = append(schema.Required, name)
+			}
+		} else {
+			// Collision — rename every conflicting entry with "_{source}" suffix.
+			for _, e := range entries {
+				key := name + "_" + e.source
+				schema.Properties[key] = e.propSchema
+				if e.required {
+					schema.Required = append(schema.Required, key)
+				}
+			}
 		}
 	}
 

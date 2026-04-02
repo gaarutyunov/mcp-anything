@@ -102,7 +102,10 @@ func validateTool(ctx context.Context, gt *GeneratedTool, doc *openapi3.T) (*Val
 func dryRunRequest(ctx context.Context, toolName string, compiled *transform.CompiledTransforms, instances []any) error {
 	var failures []error
 	for _, inst := range instances {
-		args, _ := toStringAnyMap(inst)
+		if ctx.Err() != nil {
+			return fmt.Errorf("request transform dry-run cancelled: %w", ctx.Err())
+		}
+		args := toStringAnyMap(inst)
 		if _, err := compiled.RunRequest(ctx, args); err != nil {
 			failures = append(failures, err)
 		}
@@ -241,13 +244,13 @@ func extractErrorSchema(op *openapi3.Operation) *openapi3.Schema {
 	return nil
 }
 
-// toStringAnyMap converts any value to map[string]any, returning empty map if not possible.
-func toStringAnyMap(v any) (map[string]any, bool) {
+// toStringAnyMap converts any value to map[string]any, returning an empty map if not possible.
+func toStringAnyMap(v any) map[string]any {
 	if v == nil {
-		return map[string]any{}, true
+		return map[string]any{}
 	}
 	if m, ok := v.(map[string]any); ok {
-		return m, true
+		return m
 	}
-	return map[string]any{}, false
+	return map[string]any{}
 }

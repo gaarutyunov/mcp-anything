@@ -109,8 +109,13 @@ func errorResult(ctx context.Context, transforms *transform.CompiledTransforms, 
 	if err := json.Unmarshal(body, &parsed); err != nil {
 		// If body is not JSON, wrap it.
 		parsed = map[string]any{"status": statusCode, "body": string(body)}
-	} else if m, ok := parsed.(map[string]any); ok && m["status"] == nil {
-		m["status"] = statusCode
+	} else if m, ok := parsed.(map[string]any); ok {
+		if m["status"] == nil {
+			m["status"] = statusCode
+		}
+	} else {
+		// Non-object JSON (array, string, number, etc.) — wrap it so the transform always receives an object with status.
+		parsed = map[string]any{"status": statusCode, "body": parsed}
 	}
 
 	transformed, err := transforms.RunError(ctx, parsed)

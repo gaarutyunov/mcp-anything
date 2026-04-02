@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"unicode"
 
 	"github.com/getkin/kin-openapi/openapi3"
 )
@@ -151,17 +150,20 @@ func jqAccess(name string) string {
 	return fmt.Sprintf(`.["%s"]`, name)
 }
 
-// isJqIdentifier reports whether s is a valid jq identifier
-// (letters, digits, underscores; must not start with a digit).
+// isJqIdentifier reports whether s is a valid jq identifier.
+// jq restricts identifiers to ASCII letters (a-z, A-Z), digits (0-9), and
+// underscore; the first character must not be a digit.
 func isJqIdentifier(s string) bool {
 	if s == "" {
 		return false
 	}
 	for i, r := range s {
-		if i == 0 && unicode.IsDigit(r) {
+		isLetter := (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || r == '_'
+		isDigit := r >= '0' && r <= '9'
+		if i == 0 && !isLetter {
 			return false
 		}
-		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '_' {
+		if i > 0 && !isLetter && !isDigit {
 			return false
 		}
 	}

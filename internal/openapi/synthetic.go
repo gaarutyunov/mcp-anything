@@ -138,11 +138,7 @@ func generateString(schema *openapi3.Schema) any {
 
 func generateInteger(schema *openapi3.Schema) any {
 	if schema.Min != nil {
-		v := int(*schema.Min) + 1
-		if v < 1 {
-			v = 1
-		}
-		return v
+		return int(*schema.Min) + 1
 	}
 	return 1
 }
@@ -186,14 +182,11 @@ func generateArray(schema *openapi3.Schema, visited map[string]bool) any {
 		minItems = 1
 	}
 
-	var elem any
-	if schema.Items != nil && schema.Items.Value != nil {
-		elem = Generate(schema.Items.Value, visited)
-	}
-
 	result := make([]any, minItems)
 	for i := range result {
-		result[i] = elem
+		if schema.Items != nil && schema.Items.Value != nil {
+			result[i] = Generate(schema.Items.Value, visited)
+		}
 	}
 	return result
 }

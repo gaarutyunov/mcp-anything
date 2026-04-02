@@ -81,6 +81,12 @@ func GenerateTools(doc *openapi3.T, upstream *config.UpstreamConfig, naming *con
 				InputSchema: inputSchema,
 			}
 
+			// Copy the operation and replace Parameters with the merged list so
+			// downstream helpers (GenerateRequestJq, DeriveArgMapping) always see
+			// path-item parameters alongside operation-level parameters.
+			mergedOp := *op
+			mergedOp.Parameters = allParams
+
 			gt := &GeneratedTool{
 				MCPTool:      tool,
 				PrefixedName: prefixedName,
@@ -90,7 +96,7 @@ func GenerateTools(doc *openapi3.T, upstream *config.UpstreamConfig, naming *con
 				PathParams:   pathParamNames,
 				QueryParams:  queryParams,
 				HeaderParams: headerParams,
-				Operation:    op,
+				Operation:    &mergedOp,
 			}
 
 			tools = append(tools, gt)

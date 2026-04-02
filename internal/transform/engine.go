@@ -136,15 +136,28 @@ func (c *CompiledTransforms) RunError(ctx context.Context, body any) (any, error
 	return v, nil
 }
 
-// runOnce runs a compiled jq expression once and returns the first value.
+// runOnce runs a compiled jq expression and returns the first output value.
+// The iterator is fully drained to catch runtime errors that occur after the first value.
 func runOnce(ctx context.Context, code *gojq.Code, input any) (any, error) {
 	iter := code.RunWithContext(ctx, input)
-	v, ok := iter.Next()
-	if !ok {
-		return nil, fmt.Errorf("jq expression produced no output")
+	var (
+		first any
+		have  bool
+	)
+	for {
+		v, ok := iter.Next()
+		if !ok {
+			if !have {
+				return nil, fmt.Errorf("jq expression produced no output")
+			}
+			return first, nil
+		}
+		if err, isErr := v.(error); isErr {
+			return nil, fmt.Errorf("jq runtime error: %w", err)
+		}
+		if !have {
+			first = v
+			have = true
+		}
 	}
-	if err, isErr := v.(error); isErr {
-		return nil, fmt.Errorf("jq runtime error: %w", err)
-	}
-	return v, nil
 }

@@ -237,6 +237,12 @@ func TestURLSpecLoadingWithAuthHeader(t *testing.T) {
 	wiremockURL := fmt.Sprintf("http://%s:%s", wiremockHost, wiremockPort.Port())
 
 	// Stub: /openapi.yaml with auth → spec; without auth → 401.
+	// Register the generic 401 stub first so the more specific auth stub (registered last) takes priority.
+	// WireMock matches the most recently registered stub when multiple stubs match.
+	registerStub(t, wiremockURL, `{
+		"request": {"method": "GET", "url": "/openapi.yaml"},
+		"response": {"status": 401, "body": "Unauthorized"}
+	}`)
 	registerStub(t, wiremockURL, `{
 		"request": {
 			"method": "GET",
@@ -248,10 +254,6 @@ func TestURLSpecLoadingWithAuthHeader(t *testing.T) {
 			"body": `+jsonEscape(testOpenAPISpec)+`,
 			"headers": {"Content-Type": "application/yaml"}
 		}
-	}`)
-	registerStub(t, wiremockURL, `{
-		"request": {"method": "GET", "url": "/openapi.yaml"},
-		"response": {"status": 401, "body": "Unauthorized"}
 	}`)
 
 	// Stubs for the API itself.

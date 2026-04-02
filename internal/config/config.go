@@ -13,11 +13,12 @@ type ProxyConfig struct {
 
 // ServerConfig holds HTTP server settings.
 type ServerConfig struct {
-	Port            int           `koanf:"port"`
-	ReadTimeout     time.Duration `koanf:"read_timeout"`
-	WriteTimeout    time.Duration `koanf:"write_timeout"`
-	ShutdownTimeout time.Duration `koanf:"shutdown_timeout"`
-	MaxRequestBody  string        `koanf:"max_request_body"`
+	Port                     int           `koanf:"port"`
+	ReadTimeout              time.Duration `koanf:"read_timeout"`
+	WriteTimeout             time.Duration `koanf:"write_timeout"`
+	ShutdownTimeout          time.Duration `koanf:"shutdown_timeout"`
+	MaxRequestBody           string        `koanf:"max_request_body"`
+	StartupValidationTimeout time.Duration `koanf:"startup_validation_timeout"`
 }
 
 // TelemetryConfig holds observability settings.
@@ -46,14 +47,15 @@ type NamingConfig struct {
 
 // UpstreamConfig describes a single upstream HTTP API.
 type UpstreamConfig struct {
-	Name       string              `koanf:"name"`
-	Enabled    bool                `koanf:"enabled"`
-	ToolPrefix string              `koanf:"tool_prefix"`
-	BaseURL    string              `koanf:"base_url"`
-	Timeout    time.Duration       `koanf:"timeout"`
-	Headers    map[string]string   `koanf:"headers"`
-	OpenAPI    OpenAPISourceConfig `koanf:"openapi"`
-	Overlay    *OverlayConfig      `koanf:"overlay"`
+	Name                     string              `koanf:"name"`
+	Enabled                  bool                `koanf:"enabled"`
+	ToolPrefix               string              `koanf:"tool_prefix"`
+	BaseURL                  string              `koanf:"base_url"`
+	Timeout                  time.Duration       `koanf:"timeout"`
+	Headers                  map[string]string   `koanf:"headers"`
+	OpenAPI                  OpenAPISourceConfig `koanf:"openapi"`
+	Overlay                  *OverlayConfig      `koanf:"overlay"`
+	StartupValidationTimeout time.Duration       `koanf:"startup_validation_timeout"`
 }
 
 // OpenAPISourceConfig points to an OpenAPI spec file or URL.

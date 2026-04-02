@@ -11,9 +11,10 @@ import (
 
 // ParamInfo holds metadata about a single OpenAPI parameter used for HTTP routing.
 type ParamInfo struct {
-	Name     string
-	Required bool
-	In       string // "query", "path", "header"
+	Name       string
+	Required   bool
+	In         string // "query", "path", "header"
+	SchemaType string // "string", "integer", "number", etc.
 }
 
 // GeneratedTool associates an MCP tool definition with routing information
@@ -26,6 +27,8 @@ type GeneratedTool struct {
 	PathTemplate string   // e.g. /pets/{petId}
 	PathParams   []string // ordered list of path param names
 	QueryParams  []ParamInfo
+	HeaderParams []ParamInfo
+	Operation    *openapi3.Operation // original operation for jq generation and response schema extraction
 }
 
 // GenerateTools walks all operations in the OpenAPI document and returns a list of MCP
@@ -50,8 +53,8 @@ func GenerateTools(doc *openapi3.T, upstream *config.UpstreamConfig, naming *con
 
 			// Collect parameters from path item and operation (operation overrides path-level).
 			allParams := mergeParams(pathItem.Parameters, op.Parameters)
-			pathParams, queryParams := classifyParams(allParams)
-			hasPathParams := len(pathParams) > 0
+			pathParamNames, queryParams, headerParams := classifyParams(allParams)
+			hasPathParams := len(pathParamNames) > 0
 
 			// Derive the base name using naming rules.
 			baseName := ToolBaseName(op, method, path, hasPathParams, naming.DefaultSlugRules)
@@ -84,8 +87,10 @@ func GenerateTools(doc *openapi3.T, upstream *config.UpstreamConfig, naming *con
 				OriginalName: baseName,
 				Method:       method,
 				PathTemplate: path,
-				PathParams:   pathParams,
+				PathParams:   pathParamNames,
 				QueryParams:  queryParams,
+				HeaderParams: headerParams,
+				Operation:    op,
 			}
 
 			tools = append(tools, gt)
@@ -147,26 +152,42 @@ func mergeParams(pathParams, opParams openapi3.Parameters) openapi3.Parameters {
 	return merged
 }
 
-// classifyParams splits parameters into path param names and query ParamInfo.
-func classifyParams(params openapi3.Parameters) ([]string, []ParamInfo) {
+// classifyParams splits parameters into path param names, query ParamInfo, and header ParamInfo.
+func classifyParams(params openapi3.Parameters) ([]string, []ParamInfo, []ParamInfo) {
 	var pathParams []string
 	var queryParams []ParamInfo
+	var headerParams []ParamInfo
 
 	for _, ref := range params {
 		if ref == nil || ref.Value == nil {
 			continue
 		}
 		p := ref.Value
+		schemaType := ""
+		if p.Schema != nil && p.Schema.Value != nil && p.Schema.Value.Type != nil {
+			types := p.Schema.Value.Type.Slice()
+			if len(types) > 0 {
+				schemaType = types[0]
+			}
+		}
 		switch p.In {
 		case "path":
 			pathParams = append(pathParams, p.Name)
 		case "query":
 			queryParams = append(queryParams, ParamInfo{
-				Name:     p.Name,
-				Required: p.Required,
-				In:       p.In,
+				Name:       p.Name,
+				Required:   p.Required,
+				In:         p.In,
+				SchemaType: schemaType,
+			})
+		case "header":
+			headerParams = append(headerParams, ParamInfo{
+				Name:       p.Name,
+				Required:   p.Required,
+				In:         p.In,
+				SchemaType: schemaType,
 			})
 		}
 	}
-	return pathParams, queryParams
+	return pathParams, queryParams, headerParams
 }

@@ -5,6 +5,58 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 )
 
+// ArgMapping maps "location:originalName" to the actual MCP argument name,
+// applying the same collision renaming as DeriveInputSchema.
+// For example, if "id" appears in both path and body, the map contains
+// "path:id" -> "id_path" and "body:id" -> "id_body".
+type ArgMapping map[string]string
+
+// ArgName returns the MCP arg name for the parameter at the given location.
+func (m ArgMapping) ArgName(location, name string) string {
+	if n, ok := m[location+":"+name]; ok {
+		return n
+	}
+	return name
+}
+
+// DeriveArgMapping builds the mapping from (location, name) to MCP arg name,
+// applying the same collision renaming logic as DeriveInputSchema.
+func DeriveArgMapping(op *openapi3.Operation) ArgMapping {
+	type occurrence struct{ location, name string }
+	collected := make(map[string][]occurrence)
+
+	for _, ref := range op.Parameters {
+		if ref == nil || ref.Value == nil {
+			continue
+		}
+		p := ref.Value
+		if p.In == "path" || p.In == "query" || p.In == "header" {
+			collected[p.Name] = append(collected[p.Name], occurrence{p.In, p.Name})
+		}
+	}
+
+	if op.RequestBody != nil && op.RequestBody.Value != nil {
+		if ct, ok := op.RequestBody.Value.Content["application/json"]; ok &&
+			ct != nil && ct.Schema != nil && ct.Schema.Value != nil {
+			for propName := range ct.Schema.Value.Properties {
+				collected[propName] = append(collected[propName], occurrence{"body", propName})
+			}
+		}
+	}
+
+	result := make(ArgMapping)
+	for name, occurrences := range collected {
+		if len(occurrences) == 1 {
+			result[occurrences[0].location+":"+name] = name
+		} else {
+			for _, o := range occurrences {
+				result[o.location+":"+name] = name + "_" + o.location
+			}
+		}
+	}
+	return result
+}
+
 // DeriveInputSchema builds the MCP tool InputSchema from an OpenAPI operation.
 // It includes path params (always required), query params (required if marked),
 // header params (optional), and request body properties (application/json, merged

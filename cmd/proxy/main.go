@@ -42,19 +42,17 @@ func main() {
 
 	// For this task: single upstream only.
 	upstream := cfg.Upstreams[0]
-	doc, router, err := openapi.LoadPipeline(ctx, upstream.OpenAPI, upstream.Overlay)
-	if err != nil {
-		slog.Error("load openapi spec", "upstream", upstream.Name, "error", err)
-		os.Exit(1)
-	}
-	_ = router // used in later tasks for validation
 
-	tools, err := openapi.GenerateTools(doc, &upstream, &cfg.Naming)
+	// Apply startup validation timeout per upstream.
+	valCtx, valCancel := context.WithTimeout(ctx, upstream.StartupValidationTimeout)
+	defer valCancel()
+
+	tools, err := openapi.ValidateUpstream(valCtx, &upstream, &cfg.Naming)
 	if err != nil {
-		slog.Error("generate tools", "upstream", upstream.Name, "error", err)
+		slog.Error("validate upstream", "upstream", upstream.Name, "error", err)
 		os.Exit(1)
 	}
-	slog.Info("generated tools", "upstream", upstream.Name, "count", len(tools))
+	slog.Info("validated tools", "upstream", upstream.Name, "count", len(tools))
 
 	client := &http.Client{Timeout: upstream.Timeout}
 	mcpSrv := mcppkg.New(

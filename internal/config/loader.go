@@ -37,6 +37,9 @@ func Load(path string) (*ProxyConfig, error) {
 		if !k.Exists(key) {
 			up.Enabled = true
 		}
+		if up.StartupValidationTimeout == 0 {
+			up.StartupValidationTimeout = cfg.Server.StartupValidationTimeout
+		}
 	}
 
 	return &cfg, nil
@@ -73,5 +76,8 @@ func applyDefaults(k *koanf.Koanf) {
 	}
 	if !k.Exists("naming.default_slug_rules.collapse_separators") {
 		_ = k.Set("naming.default_slug_rules.collapse_separators", true)
+	}
+	if !k.Exists("server.startup_validation_timeout") {
+		_ = k.Set("server.startup_validation_timeout", 30*time.Second)
 	}
 }

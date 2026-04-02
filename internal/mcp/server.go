@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -14,22 +15,23 @@ import (
 
 	"github.com/gaarutyunov/mcp-anything/internal/config"
 	"github.com/gaarutyunov/mcp-anything/internal/openapi"
+	"github.com/gaarutyunov/mcp-anything/internal/transform"
 )
 
 // New creates an MCP server and registers all provided tools.
-func New(impl *sdkmcp.Implementation, tools []*openapi.GeneratedTool, upstream *config.UpstreamConfig, client *http.Client) *sdkmcp.Server {
+func New(impl *sdkmcp.Implementation, tools []*openapi.ValidatedTool, upstream *config.UpstreamConfig, client *http.Client) *sdkmcp.Server {
 	srv := sdkmcp.NewServer(impl, nil)
 
-	for _, gt := range tools {
-		registerTool(srv, gt, upstream, client)
+	for _, vt := range tools {
+		registerTool(srv, vt, upstream, client)
 	}
 
 	return srv
 }
 
-// registerTool registers a single generated tool with the MCP server.
-func registerTool(srv *sdkmcp.Server, gt *openapi.GeneratedTool, upstream *config.UpstreamConfig, client *http.Client) {
-	tool := gt // capture loop variable
+// registerTool registers a single validated tool with the MCP server.
+func registerTool(srv *sdkmcp.Server, vt *openapi.ValidatedTool, upstream *config.UpstreamConfig, client *http.Client) {
+	tool := vt // capture loop variable
 	srv.AddTool(tool.MCPTool, func(ctx context.Context, req *sdkmcp.CallToolRequest) (*sdkmcp.CallToolResult, error) {
 		// Parse arguments from the request.
 		args, err := parseArguments(req.Params.Arguments)
@@ -37,14 +39,30 @@ func registerTool(srv *sdkmcp.Server, gt *openapi.GeneratedTool, upstream *confi
 			return nil, fmt.Errorf("parsing tool arguments: %w", err)
 		}
 
-		// Build the upstream URL.
-		upstreamURL, err := buildURL(upstream.BaseURL, tool.PathTemplate, tool.PathParams, tool.QueryParams, args)
+		// Run the request transform jq to get the request envelope.
+		envelope, err := tool.Transforms.RunRequest(ctx, args)
+		if err != nil {
+			return nil, fmt.Errorf("request transform: %w", err)
+		}
+
+		// Build the upstream URL from the envelope.
+		upstreamURL, err := buildURL(upstream.BaseURL, tool.PathTemplate, envelope)
 		if err != nil {
 			return nil, fmt.Errorf("building upstream URL: %w", err)
 		}
 
+		// Build request body if present.
+		var bodyReader io.Reader
+		if envelope.Body != nil {
+			bodyBytes, marshalErr := json.Marshal(envelope.Body)
+			if marshalErr != nil {
+				return nil, fmt.Errorf("marshalling request body: %w", marshalErr)
+			}
+			bodyReader = bytes.NewReader(bodyBytes)
+		}
+
 		// Make the HTTP request.
-		httpReq, err := http.NewRequestWithContext(ctx, tool.Method, upstreamURL, nil)
+		httpReq, err := http.NewRequestWithContext(ctx, tool.Method, upstreamURL, bodyReader)
 		if err != nil {
 			return nil, fmt.Errorf("creating HTTP request: %w", err)
 		}
@@ -52,6 +70,14 @@ func registerTool(srv *sdkmcp.Server, gt *openapi.GeneratedTool, upstream *confi
 		// Add configured headers.
 		for k, v := range upstream.Headers {
 			httpReq.Header.Set(k, v)
+		}
+		// Add envelope headers (override configured headers).
+		for k, v := range envelope.Headers {
+			httpReq.Header.Set(k, v)
+		}
+
+		if bodyReader != nil {
+			httpReq.Header.Set("Content-Type", "application/json")
 		}
 
 		resp, err := client.Do(httpReq)
@@ -70,22 +96,78 @@ func registerTool(srv *sdkmcp.Server, gt *openapi.GeneratedTool, upstream *confi
 		}
 
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			return &sdkmcp.CallToolResult{
-				IsError: true,
-				Content: []sdkmcp.Content{
-					&sdkmcp.TextContent{
-						Text: fmt.Sprintf("upstream returned %d: %s", resp.StatusCode, string(body)),
-					},
-				},
-			}, nil
+			return errorResult(ctx, tool.Transforms, resp.StatusCode, body), nil
 		}
 
+		return successResult(ctx, tool.Transforms, body), nil
+	})
+}
+
+// errorResult transforms the error response body and returns an error CallToolResult.
+func errorResult(ctx context.Context, transforms *transform.CompiledTransforms, statusCode int, body []byte) *sdkmcp.CallToolResult {
+	var parsed any
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		// If body is not JSON, wrap it.
+		parsed = map[string]any{"status": statusCode, "body": string(body)}
+	} else if m, ok := parsed.(map[string]any); ok && m["status"] == nil {
+		m["status"] = statusCode
+	}
+
+	transformed, err := transforms.RunError(ctx, parsed)
+	if err != nil {
+		slog.Warn("error transform failed, using raw body", "error", err)
+		transformed = map[string]any{"error": fmt.Sprintf("upstream returned %d", statusCode), "body": string(body)}
+	}
+
+	text := marshalToString(transformed)
+	return &sdkmcp.CallToolResult{
+		IsError: true,
+		Content: []sdkmcp.Content{
+			&sdkmcp.TextContent{Text: text},
+		},
+	}
+}
+
+// successResult transforms the success response body and returns a CallToolResult.
+func successResult(ctx context.Context, transforms *transform.CompiledTransforms, body []byte) *sdkmcp.CallToolResult {
+	var parsed any
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		// If body is not JSON, return it as-is.
 		return &sdkmcp.CallToolResult{
 			Content: []sdkmcp.Content{
 				&sdkmcp.TextContent{Text: string(body)},
 			},
-		}, nil
-	})
+		}
+	}
+
+	transformed, err := transforms.RunResponse(ctx, parsed)
+	if err != nil {
+		slog.Warn("response transform failed, using raw body", "error", err)
+		return &sdkmcp.CallToolResult{
+			Content: []sdkmcp.Content{
+				&sdkmcp.TextContent{Text: string(body)},
+			},
+		}
+	}
+
+	text := marshalToString(transformed)
+	return &sdkmcp.CallToolResult{
+		Content: []sdkmcp.Content{
+			&sdkmcp.TextContent{Text: text},
+		},
+	}
+}
+
+// marshalToString marshals v to a JSON string, or returns a string representation on error.
+func marshalToString(v any) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	data, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Sprintf("%v", v)
+	}
+	return string(data)
 }
 
 // parseArguments unmarshals the tool call arguments into a string map.
@@ -116,17 +198,13 @@ func parseArguments(raw any) (map[string]any, error) {
 	return args, nil
 }
 
-// buildURL constructs the upstream URL by substituting path params and
-// appending query params.
-func buildURL(baseURL, pathTemplate string, pathParams []string, queryParams []openapi.ParamInfo, args map[string]any) (string, error) {
-	// Replace path parameters.
+// buildURL constructs the upstream URL using the request envelope.
+// Path parameters are substituted into the template; query parameters are appended.
+func buildURL(baseURL, pathTemplate string, envelope *transform.RequestEnvelope) (string, error) {
+	// Substitute path parameters.
 	path := pathTemplate
-	for _, name := range pathParams {
-		val, ok := args[name]
-		if !ok {
-			return "", fmt.Errorf("missing required path parameter %q", name)
-		}
-		path = strings.ReplaceAll(path, "{"+name+"}", fmt.Sprintf("%v", val))
+	for name, val := range envelope.Path {
+		path = strings.ReplaceAll(path, "{"+name+"}", val)
 	}
 
 	u, err := url.Parse(baseURL + path)
@@ -134,12 +212,12 @@ func buildURL(baseURL, pathTemplate string, pathParams []string, queryParams []o
 		return "", fmt.Errorf("parsing URL: %w", err)
 	}
 
-	// Append query parameters.
-	if len(queryParams) > 0 {
+	// Append non-empty query parameters.
+	if len(envelope.Query) > 0 {
 		q := u.Query()
-		for _, qp := range queryParams {
-			if val, ok := args[qp.Name]; ok {
-				q.Set(qp.Name, fmt.Sprintf("%v", val))
+		for k, v := range envelope.Query {
+			if v != "" {
+				q.Set(k, v)
 			}
 		}
 		u.RawQuery = q.Encode()

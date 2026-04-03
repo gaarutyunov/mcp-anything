@@ -14,6 +14,7 @@ import (
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/gaarutyunov/mcp-anything/internal/auth/inbound"
 	"github.com/gaarutyunov/mcp-anything/internal/config"
 	"github.com/gaarutyunov/mcp-anything/internal/openapi"
 	"github.com/gaarutyunov/mcp-anything/internal/server"
@@ -82,12 +83,49 @@ func main() {
 		})
 	}
 
-	handler := sdkmcp.NewStreamableHTTPHandler(func(_ *http.Request) *sdkmcp.Server { return mcpSrv }, nil)
-	srv := server.New(cfg, map[string]http.Handler{"/mcp": handler})
+	// Build inbound auth middleware if configured.
+	var authMiddleware func(http.Handler) http.Handler
+	if cfg.InboundAuth.Strategy != "" && cfg.InboundAuth.Strategy != "none" {
+		validator, apiKeyHeader, buildErr := buildInboundAuth(ctx, &cfg.InboundAuth)
+		if buildErr != nil {
+			slog.Error("build inbound auth validator", "error", buildErr)
+			os.Exit(1)
+		}
+		authMiddleware = inbound.Middleware(validator, registry, apiKeyHeader)
+		slog.Info("inbound auth enabled", "strategy", cfg.InboundAuth.Strategy)
+	}
+
+	var mcpHandler http.Handler = sdkmcp.NewStreamableHTTPHandler(func(_ *http.Request) *sdkmcp.Server { return mcpSrv }, nil)
+	if authMiddleware != nil {
+		mcpHandler = authMiddleware(mcpHandler)
+	}
+
+	wellKnown := inbound.WellKnownHandler(cfg)
+	srv := server.New(cfg, map[string]http.Handler{"/mcp": mcpHandler}, wellKnown)
 
 	if err := srv.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		slog.Error("server", "error", err)
 		os.Exit(1)
+	}
+}
+
+// buildInboundAuth constructs the token validator and returns the API key header (if applicable).
+func buildInboundAuth(ctx context.Context, cfg *config.InboundAuthConfig) (inbound.TokenValidator, string, error) {
+	switch cfg.Strategy {
+	case "jwt":
+		v, err := inbound.NewJWTValidator(ctx, cfg.JWT)
+		return v, "", err
+	case "introspection":
+		v, err := inbound.NewIntrospectionValidator(ctx, cfg.Introspection)
+		return v, "", err
+	case "apikey":
+		v, err := inbound.NewAPIKeyValidator(cfg.APIKey)
+		if err != nil {
+			return nil, "", err
+		}
+		return v, cfg.APIKey.Header, nil
+	default:
+		return nil, "", fmt.Errorf("unknown inbound auth strategy: %q", cfg.Strategy)
 	}
 }
 

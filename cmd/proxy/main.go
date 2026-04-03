@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -14,9 +15,9 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/gaarutyunov/mcp-anything/internal/config"
-	mcppkg "github.com/gaarutyunov/mcp-anything/internal/mcp"
 	"github.com/gaarutyunov/mcp-anything/internal/openapi"
 	"github.com/gaarutyunov/mcp-anything/internal/server"
+	upstreampkg "github.com/gaarutyunov/mcp-anything/internal/upstream"
 )
 
 func main() {
@@ -34,31 +35,52 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Validate that no two upstreams share the same tool_prefix (always fatal).
+	// Validate that no two enabled upstreams share the same tool_prefix (AC-07.5 — fast fail).
 	if err := validateUpstreamPrefixes(cfg.Upstreams); err != nil {
 		slog.Error("invalid upstream configuration", "error", err)
 		os.Exit(1)
 	}
 
-	// For this task: single upstream only.
-	upstream := cfg.Upstreams[0]
+	// Validate each enabled upstream and collect results.
+	var validatedUpstreams []*upstreampkg.ValidatedUpstream
+	for i := range cfg.Upstreams {
+		upCfg := &cfg.Upstreams[i]
+		if !upCfg.Enabled {
+			continue
+		}
 
-	// Apply startup validation timeout per upstream.
-	valCtx, valCancel := context.WithTimeout(ctx, upstream.StartupValidationTimeout)
-	defer valCancel()
+		valCtx, valCancel := context.WithTimeout(ctx, upCfg.StartupValidationTimeout)
+		tools, valErr := openapi.ValidateUpstream(valCtx, upCfg, &cfg.Naming)
+		valCancel()
+		if valErr != nil {
+			slog.Error("upstream validation failed", "upstream", upCfg.Name, "error", valErr)
+			os.Exit(1)
+		}
+		slog.Info("validated tools", "upstream", upCfg.Name, "count", len(tools))
 
-	tools, err := openapi.ValidateUpstream(valCtx, &upstream, &cfg.Naming)
+		validatedUpstreams = append(validatedUpstreams, &upstreampkg.ValidatedUpstream{
+			Config: upCfg,
+			Tools:  tools,
+		})
+	}
+
+	registry, err := upstreampkg.New(validatedUpstreams, &cfg.Naming)
 	if err != nil {
-		slog.Error("validate upstream", "upstream", upstream.Name, "error", err)
+		slog.Error("build tool registry", "error", err)
 		os.Exit(1)
 	}
-	slog.Info("validated tools", "upstream", upstream.Name, "count", len(tools))
 
-	client := &http.Client{Timeout: upstream.Timeout}
-	mcpSrv := mcppkg.New(
-		&sdkmcp.Implementation{Name: "mcp-anything", Version: cfg.Telemetry.ServiceVersion},
-		tools, &upstream, client,
-	)
+	mcpSrv := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "mcp-anything", Version: cfg.Telemetry.ServiceVersion}, nil)
+	for _, tool := range registry.Tools() {
+		t := tool // capture for closure
+		mcpSrv.AddTool(t, func(callCtx context.Context, req *sdkmcp.CallToolRequest) (*sdkmcp.CallToolResult, error) {
+			args, parseErr := parseArguments(req.Params.Arguments)
+			if parseErr != nil {
+				return nil, fmt.Errorf("parsing tool arguments: %w", parseErr)
+			}
+			return registry.Dispatch(callCtx, req.Params.Name, args)
+		})
+	}
 
 	handler := sdkmcp.NewStreamableHTTPHandler(func(_ *http.Request) *sdkmcp.Server { return mcpSrv }, nil)
 	srv := server.New(cfg, map[string]http.Handler{"/mcp": handler})
@@ -82,4 +104,30 @@ func validateUpstreamPrefixes(upstreams []config.UpstreamConfig) error {
 		seen[up.ToolPrefix] = up.Name
 	}
 	return nil
+}
+
+// parseArguments unmarshals the tool call arguments into a map.
+func parseArguments(raw any) (map[string]any, error) {
+	if raw == nil {
+		return make(map[string]any), nil
+	}
+
+	b, ok := raw.(json.RawMessage)
+	if !ok {
+		data, err := json.Marshal(raw)
+		if err != nil {
+			return nil, fmt.Errorf("re-marshalling arguments: %w", err)
+		}
+		b = data
+	}
+
+	if len(b) == 0 || string(b) == "null" {
+		return make(map[string]any), nil
+	}
+
+	var args map[string]any
+	if err := json.Unmarshal(b, &args); err != nil {
+		return nil, fmt.Errorf("unmarshalling arguments: %w", err)
+	}
+	return args, nil
 }

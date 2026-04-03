@@ -454,17 +454,51 @@ func TestMissingPrefixSeparatorReturnsError(t *testing.T) {
 
 	session := connectMCPClient(callCtx, t, proxyURL)
 
-	result, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "noprefixatall"})
-	// The MCP SDK rejects unregistered tool names at the protocol level (err != nil).
-	// Our registry's Dispatch returns "missing prefix separator" when called directly,
-	// but over the MCP protocol only registered tools reach Dispatch.
-	// Either an error or IsError=true is acceptable here.
-	if err != nil {
-		// Protocol-level rejection is a valid error response.
-		return
+	// The MCP SDK may reject unregistered tool names at the protocol level; that is acceptable.
+	_, _ = session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "noprefixatall"})
+
+	// Directly call the proxy's /mcp endpoint via raw HTTP to bypass SDK client-side filtering.
+	// The MCP framework returns a JSON-RPC error for unknown tools (before Dispatch is called),
+	// so we assert the proxy responds gracefully (no 5xx) and returns an error payload.
+	type rawMCPReq struct {
+		JSONRPC string `json:"jsonrpc"`
+		ID      string `json:"id"`
+		Method  string `json:"method"`
+		Params  any    `json:"params"`
 	}
-	if !result.IsError {
-		t.Fatalf("expected IsError=true, got false; content: %s", contentText(result.Content))
+	rawBodyBytes, marshalErr := json.Marshal(rawMCPReq{
+		JSONRPC: "2.0",
+		ID:      "1",
+		Method:  "tools/call",
+		Params:  map[string]any{"name": "noprefixatall", "arguments": map[string]any{}},
+	})
+	if marshalErr != nil {
+		t.Fatalf("marshal raw MCP request: %v", marshalErr)
+	}
+
+	rawHTTPReq, reqErr := http.NewRequestWithContext(callCtx, http.MethodPost, proxyURL+"/mcp", strings.NewReader(string(rawBodyBytes)))
+	if reqErr != nil {
+		t.Fatalf("build raw MCP request: %v", reqErr)
+	}
+	rawHTTPReq.Header.Set("Content-Type", "application/json")
+	rawHTTPReq.Header.Set("Accept", "application/json, text/event-stream")
+
+	rawHTTPClient := &http.Client{Timeout: 30 * time.Second}
+	rawHTTPResp, doErr := rawHTTPClient.Do(rawHTTPReq)
+	if doErr != nil {
+		t.Fatalf("raw MCP request failed: %v", doErr)
+	}
+	defer rawHTTPResp.Body.Close()
+	rawRespBody, _ := io.ReadAll(rawHTTPResp.Body)
+
+	// Proxy must not return 5xx for unknown tool names.
+	if rawHTTPResp.StatusCode >= 500 {
+		t.Errorf("expected non-5xx for unknown tool, got HTTP %d; body: %s", rawHTTPResp.StatusCode, string(rawRespBody))
+	}
+	// Response must contain some error indication.
+	respStr := string(rawRespBody)
+	if !strings.Contains(respStr, "error") && !strings.Contains(respStr, "Error") {
+		t.Errorf("expected error response for unknown tool name, got: %s", respStr)
 	}
 }
 

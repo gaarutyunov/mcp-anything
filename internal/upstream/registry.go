@@ -85,6 +85,10 @@ func New(upstreams []*ValidatedUpstream, naming *config.NamingConfig) (*Registry
 		r.byPrefix[vu.Config.ToolPrefix] = up
 
 		for _, vt := range vu.Tools {
+			if existing, ok := r.byPrefixedName[vt.PrefixedName]; ok {
+				return nil, fmt.Errorf("tool name conflict %q between upstreams %q and %q",
+					vt.PrefixedName, existing.Upstream.Name, vu.Config.Name)
+			}
 			entry := &RegistryEntry{
 				PrefixedName:   vt.PrefixedName,
 				OriginalName:   vt.OriginalName,
@@ -281,13 +285,10 @@ func buildErrorResult(ctx context.Context, transforms *transform.CompiledTransfo
 
 // buildSuccessResult transforms a success response body and returns a CallToolResult.
 func buildSuccessResult(ctx context.Context, transforms *transform.CompiledTransforms, body []byte) *sdkmcp.CallToolResult {
-	var parsed any
-	if err := json.Unmarshal(body, &parsed); err != nil {
-		return &sdkmcp.CallToolResult{
-			Content: []sdkmcp.Content{
-				&sdkmcp.TextContent{Text: string(body)},
-			},
-		}
+	var parsed any = string(body)
+	var jsonParsed any
+	if err := json.Unmarshal(body, &jsonParsed); err == nil {
+		parsed = jsonParsed
 	}
 
 	transformed, err := transforms.RunResponse(ctx, parsed)
@@ -311,7 +312,7 @@ func buildSuccessResult(ctx context.Context, transforms *transform.CompiledTrans
 func buildUpstreamURL(baseURL, pathTemplate string, envelope *transform.RequestEnvelope) (string, error) {
 	path := pathTemplate
 	for name, val := range envelope.Path {
-		path = strings.ReplaceAll(path, "{"+name+"}", val)
+		path = strings.ReplaceAll(path, "{"+name+"}", url.PathEscape(val))
 	}
 
 	u, err := url.Parse(baseURL + path)

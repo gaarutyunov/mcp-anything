@@ -16,7 +16,9 @@ type headerRoundTripper struct {
 func (h *headerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	r := req.Clone(req.Context())
 	for k, v := range h.headers {
-		r.Header.Set(k, v)
+		if r.Header.Get(k) == "" {
+			r.Header.Set(k, v)
+		}
 	}
 	return h.wrapped.RoundTrip(r)
 }

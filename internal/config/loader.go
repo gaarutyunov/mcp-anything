@@ -25,35 +25,49 @@ func Load(path string) (*ProxyConfig, error) {
 		return nil, fmt.Errorf("unmarshalling config: %w", err)
 	}
 
+	// rawUpstreams holds the parsed YAML array for per-key existence checks.
+	// koanf does not expand array-element keys (e.g. "upstreams.0.enabled" never exists),
+	// so we inspect the raw Go representation instead.
+	rawUpstreams, _ := k.Get("upstreams").([]interface{})
+
 	// Apply per-upstream defaults that mapstructure won't handle for slice elements.
 	for i := range cfg.Upstreams {
 		up := &cfg.Upstreams[i]
 		if up.Timeout == 0 {
 			up.Timeout = 10 * time.Second
 		}
-		// enabled defaults to true; koanf unmarshals false for missing bool keys.
-		// We check the raw key to decide whether to set the default.
-		key := fmt.Sprintf("upstreams.%d.enabled", i)
-		if !k.Exists(key) {
+
+		// Retrieve the raw map for this upstream entry (may be nil for out-of-range index).
+		var rawUp map[string]interface{}
+		if i < len(rawUpstreams) {
+			rawUp, _ = rawUpstreams[i].(map[string]interface{})
+		}
+
+		// enabled defaults to true when the key is absent from the YAML.
+		if _, exists := rawUp["enabled"]; !exists {
 			up.Enabled = true
 		}
 		if up.StartupValidationTimeout == 0 {
 			up.StartupValidationTimeout = cfg.Server.StartupValidationTimeout
 		}
-		applyValidationDefaults(k, i, &up.Validation)
+		applyValidationDefaults(rawUp, &up.Validation)
 	}
 
 	return &cfg, nil
 }
 
 // applyValidationDefaults sets defaults for a single upstream's ValidationConfig.
-// Bool fields require raw-key existence checks since koanf sets absent bools to false.
-func applyValidationDefaults(k *koanf.Koanf, i int, v *ValidationConfig) {
-	prefix := fmt.Sprintf("upstreams.%d.validation", i)
-	if !k.Exists(prefix + ".validate_request") {
+// rawUp is the raw map for the upstream entry (may be nil). Bool fields require
+// raw-key existence checks since absent YAML booleans unmarshal to false.
+func applyValidationDefaults(rawUp map[string]interface{}, v *ValidationConfig) {
+	var rawVal map[string]interface{}
+	if rawUp != nil {
+		rawVal, _ = rawUp["validation"].(map[string]interface{})
+	}
+	if _, exists := rawVal["validate_request"]; !exists {
 		v.ValidateRequest = true
 	}
-	if !k.Exists(prefix + ".validate_response") {
+	if _, exists := rawVal["validate_response"]; !exists {
 		v.ValidateResponse = true
 	}
 	if v.ResponseValidationFailure == "" {

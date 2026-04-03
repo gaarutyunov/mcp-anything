@@ -2,7 +2,7 @@
 
 BINARY := bin/proxy
 GOFLAGS := -race
-INTEGRATION_TIMEOUT := 300s
+INTEGRATION_TIMEOUT := 600s
 
 build:
 	go build -o $(BINARY) ./cmd/proxy

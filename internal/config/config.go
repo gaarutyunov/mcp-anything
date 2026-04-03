@@ -61,6 +61,7 @@ type UpstreamConfig struct {
 	ToolPrefix               string              `koanf:"tool_prefix"`
 	BaseURL                  string              `koanf:"base_url"`
 	Timeout                  time.Duration       `koanf:"timeout"`
+	TLSSkipVerify            bool                `koanf:"tls_skip_verify"`
 	Headers                  map[string]string   `koanf:"headers"`
 	OpenAPI                  OpenAPISourceConfig `koanf:"openapi"`
 	Overlay                  *OverlayConfig      `koanf:"overlay"`

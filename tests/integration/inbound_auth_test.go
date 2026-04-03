@@ -926,6 +926,8 @@ func TestWellKnownEndpoint(t *testing.T) {
 	wmPort, _ := wm.MappedPort(ctx, "8080")
 	wmURL := fmt.Sprintf("http://%s:%s", wmHost, wmPort.Port())
 	registerStub(t, wmURL, `{"request":{"method":"GET","url":"/pets"},"response":{"status":200,"body":"{}","headers":{"Content-Type":"application/json"}}}`)
+	// Serve a static JWKS so the proxy can start with jwt strategy without a real OIDC provider.
+	registerStub(t, wmURL, `{"request":{"method":"GET","url":"/.well-known/jwks.json"},"response":{"status":200,"body":"{\"keys\":[]}","headers":{"Content-Type":"application/json"}}}`)
 
 	tmpDir := t.TempDir()
 	cfg := `server:
@@ -936,10 +938,11 @@ telemetry:
   service_name: mcp-anything
   service_version: v0.0.0-test
 inbound_auth:
-  strategy: apikey
-  apikey:
-    header: X-API-Key
-    keys_env: WELL_KNOWN_KEYS
+  strategy: jwt
+  jwt:
+    issuer: http://wiremock:8080
+    jwks_url: http://wiremock:8080/.well-known/jwks.json
+    audience: mcp-anything
 upstreams:
   - name: test
     enabled: true
@@ -952,8 +955,7 @@ upstreams:
 `
 	files := authProxyFiles(t, tmpDir, cfg, false)
 	proxyURL := startAuthProxy(ctx, t, net.Name, files, map[string]string{
-		"CONFIG_PATH":    "/etc/mcp-anything/config.yaml",
-		"WELL_KNOWN_KEYS": "test-key",
+		"CONFIG_PATH": "/etc/mcp-anything/config.yaml",
 	})
 
 	// GET /.well-known/oauth-protected-resource — no auth header needed.

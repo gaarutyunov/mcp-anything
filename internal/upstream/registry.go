@@ -89,13 +89,17 @@ func New(upstreams []*ValidatedUpstream, naming *config.NamingConfig) (*Registry
 				return nil, fmt.Errorf("tool name conflict %q between upstreams %q and %q",
 					vt.PrefixedName, existing.Upstream.Name, vu.Config.Name)
 			}
+			authRequired := extractAuthRequired(vt.Operation)
+			if !authRequired {
+				slog.Info("public operation (auth not required)", "tool", vt.PrefixedName)
+			}
 			entry := &RegistryEntry{
 				PrefixedName:   vt.PrefixedName,
 				OriginalName:   vt.OriginalName,
 				Upstream:       up,
 				Transforms:     vt.Transforms,
 				ResponseFormat: extractResponseFormat(vt.Operation),
-				AuthRequired:   extractAuthRequired(vt.Operation),
+				AuthRequired:   authRequired,
 				Method:         vt.Method,
 				PathTemplate:   vt.PathTemplate,
 				Validator:      vt.Validator,
@@ -112,6 +116,25 @@ func New(upstreams []*ValidatedUpstream, naming *config.NamingConfig) (*Registry
 // Tools returns all tools for use in MCP tools/list.
 func (r *Registry) Tools() []*sdkmcp.Tool {
 	return r.toolList
+}
+
+// AuthRequired reports whether authentication is required for the named tool.
+// Returns true (conservative default) if the tool is not found in the registry.
+func (r *Registry) AuthRequired(toolName string) bool {
+	entry, ok := r.byPrefixedName[toolName]
+	if !ok {
+		return true
+	}
+	return entry.AuthRequired
+}
+
+// ToolUpstreamName returns the upstream name for the given tool, or an empty string if unknown.
+func (r *Registry) ToolUpstreamName(toolName string) string {
+	entry, ok := r.byPrefixedName[toolName]
+	if !ok {
+		return ""
+	}
+	return entry.Upstream.Name
 }
 
 // Dispatch routes a tool call to the correct upstream entry.

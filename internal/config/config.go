@@ -5,10 +5,40 @@ import "time"
 
 // ProxyConfig is the top-level configuration struct.
 type ProxyConfig struct {
-	Server    ServerConfig     `koanf:"server"`
-	Telemetry TelemetryConfig  `koanf:"telemetry"`
-	Naming    NamingConfig     `koanf:"naming"`
-	Upstreams []UpstreamConfig `koanf:"upstreams"`
+	Server      ServerConfig      `koanf:"server"`
+	Telemetry   TelemetryConfig   `koanf:"telemetry"`
+	Naming      NamingConfig      `koanf:"naming"`
+	Upstreams   []UpstreamConfig  `koanf:"upstreams"`
+	InboundAuth InboundAuthConfig `koanf:"inbound_auth"`
+}
+
+// InboundAuthConfig controls how inbound MCP clients are authenticated.
+type InboundAuthConfig struct {
+	Strategy      string              `koanf:"strategy"` // jwt|introspection|apikey|none
+	JWT           JWTAuthConfig       `koanf:"jwt"`
+	Introspection IntrospectionConfig `koanf:"introspection"`
+	APIKey        APIKeyAuthConfig    `koanf:"apikey"`
+}
+
+// JWTAuthConfig configures JWT Bearer token validation via OIDC/JWKS.
+type JWTAuthConfig struct {
+	Issuer   string `koanf:"issuer"`
+	Audience string `koanf:"audience"`
+	JWKSURL  string `koanf:"jwks_url"` // optional; uses OIDC discovery if empty
+}
+
+// IntrospectionConfig configures token introspection via an OIDC server.
+type IntrospectionConfig struct {
+	Issuer       string `koanf:"issuer"`
+	ClientID     string `koanf:"client_id"`
+	ClientSecret string `koanf:"client_secret"` // supports ${ENV_VAR} expansion
+	Audience     string `koanf:"audience"`
+}
+
+// APIKeyAuthConfig configures API key validation from a request header.
+type APIKeyAuthConfig struct {
+	Header  string `koanf:"header"`   // header name to read the key from
+	KeysEnv string `koanf:"keys_env"` // env var containing comma-separated valid keys
 }
 
 // ServerConfig holds HTTP server settings.
@@ -67,6 +97,7 @@ type UpstreamConfig struct {
 	Overlay                  *OverlayConfig      `koanf:"overlay"`
 	StartupValidationTimeout time.Duration       `koanf:"startup_validation_timeout"`
 	Validation               ValidationConfig    `koanf:"validation"`
+	InboundAuthOverride      *InboundAuthConfig  `koanf:"inbound_auth_override"`
 }
 
 // OpenAPISourceConfig points to an OpenAPI spec file or URL.

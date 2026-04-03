@@ -128,6 +128,15 @@ func (r *Registry) AuthRequired(toolName string) bool {
 	return entry.AuthRequired
 }
 
+// ToolUpstreamName returns the upstream name for the given tool, or an empty string if unknown.
+func (r *Registry) ToolUpstreamName(toolName string) string {
+	entry, ok := r.byPrefixedName[toolName]
+	if !ok {
+		return ""
+	}
+	return entry.Upstream.Name
+}
+
 // Dispatch routes a tool call to the correct upstream entry.
 // Returns an error result if the tool name is unknown or malformed.
 func (r *Registry) Dispatch(ctx context.Context, name string, args map[string]any) (*sdkmcp.CallToolResult, error) {

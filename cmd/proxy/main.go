@@ -86,13 +86,43 @@ func main() {
 	// Build inbound auth middleware if configured.
 	var authMiddleware func(http.Handler) http.Handler
 	if cfg.InboundAuth.Strategy != "" && cfg.InboundAuth.Strategy != "none" {
-		validator, apiKeyHeader, buildErr := buildInboundAuth(ctx, &cfg.InboundAuth)
+		globalValidator, globalHeader, buildErr := buildInboundAuth(ctx, &cfg.InboundAuth)
 		if buildErr != nil {
 			slog.Error("build inbound auth validator", "error", buildErr)
 			os.Exit(1)
 		}
-		authMiddleware = inbound.Middleware(validator, registry, apiKeyHeader)
 		slog.Info("inbound auth enabled", "strategy", cfg.InboundAuth.Strategy)
+
+		// Build per-upstream override validators keyed by upstream name.
+		type overrideEntry struct {
+			validator    inbound.TokenValidator
+			apiKeyHeader string
+		}
+		overrides := make(map[string]overrideEntry)
+		for i := range cfg.Upstreams {
+			up := &cfg.Upstreams[i]
+			if !up.Enabled || up.InboundAuthOverride == nil {
+				continue
+			}
+			ov, oh, ovErr := buildInboundAuth(ctx, up.InboundAuthOverride)
+			if ovErr != nil {
+				slog.Error("build inbound auth override", "upstream", up.Name, "error", ovErr)
+				os.Exit(1)
+			}
+			overrides[up.Name] = overrideEntry{ov, oh}
+			slog.Info("per-upstream auth override", "upstream", up.Name, "strategy", up.InboundAuthOverride.Strategy)
+		}
+
+		selectValidator := func(toolName string) (inbound.TokenValidator, string) {
+			if toolName != "" {
+				upstreamName := registry.ToolUpstreamName(toolName)
+				if entry, ok := overrides[upstreamName]; ok {
+					return entry.validator, entry.apiKeyHeader
+				}
+			}
+			return globalValidator, globalHeader
+		}
+		authMiddleware = inbound.MiddlewareWithSelector(selectValidator, registry)
 	}
 
 	var mcpHandler http.Handler = sdkmcp.NewStreamableHTTPHandler(func(_ *http.Request) *sdkmcp.Server { return mcpSrv }, nil)
@@ -100,7 +130,10 @@ func main() {
 		mcpHandler = authMiddleware(mcpHandler)
 	}
 
-	wellKnown := inbound.WellKnownHandler(cfg)
+	var wellKnown http.HandlerFunc
+	if cfg.InboundAuth.Strategy == "jwt" || cfg.InboundAuth.Strategy == "introspection" {
+		wellKnown = inbound.WellKnownHandler(cfg)
+	}
 	srv := server.New(cfg, map[string]http.Handler{"/mcp": mcpHandler}, wellKnown)
 
 	if err := srv.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {

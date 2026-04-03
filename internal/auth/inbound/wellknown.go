@@ -13,8 +13,11 @@ import (
 // endpoint defined in RFC 9728. It is always public (no auth middleware applied).
 func WellKnownHandler(cfg *config.ProxyConfig) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		issuer := cfg.InboundAuth.JWT.Issuer
-		if issuer == "" {
+		var issuer string
+		switch cfg.InboundAuth.Strategy {
+		case "jwt":
+			issuer = cfg.InboundAuth.JWT.Issuer
+		case "introspection":
 			issuer = cfg.InboundAuth.Introspection.Issuer
 		}
 

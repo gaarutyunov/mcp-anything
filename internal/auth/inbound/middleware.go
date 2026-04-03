@@ -44,11 +44,23 @@ func TokenInfoFromContext(ctx context.Context) *TokenInfo {
 	return v
 }
 
+// ValidatorSelector selects the appropriate validator and API key header for a given tool name.
+// toolName is empty when the request is not a tools/call (e.g. tools/list, initialize).
+type ValidatorSelector func(toolName string) (TokenValidator, string)
+
 // Middleware returns an HTTP middleware that validates inbound Bearer tokens (or API keys).
 // apiKeyHeader: when non-empty, the token is extracted from this header instead of Authorization: Bearer.
 // The middleware skips validation for tools/call requests where the tool has AuthRequired==false.
 // For all other requests (tools/list, initialize, etc.), auth is always enforced.
 func Middleware(validator TokenValidator, registry RegistryReader, apiKeyHeader string) func(http.Handler) http.Handler {
+	return MiddlewareWithSelector(func(_ string) (TokenValidator, string) {
+		return validator, apiKeyHeader
+	}, registry)
+}
+
+// MiddlewareWithSelector is like Middleware but selects the validator per tool name, enabling
+// per-upstream authentication overrides.
+func MiddlewareWithSelector(selectValidator ValidatorSelector, registry RegistryReader) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Peek at the request body to detect tools/call with auth bypass.
@@ -63,6 +75,8 @@ func Middleware(validator TokenValidator, registry RegistryReader, apiKeyHeader 
 				next.ServeHTTP(w, r)
 				return
 			}
+
+			validator, apiKeyHeader := selectValidator(toolName)
 
 			// Extract token from the appropriate header.
 			var token string
@@ -130,7 +144,12 @@ func writeUnauthorized(w http.ResponseWriter, r *http.Request, errCode string) {
 	w.Header().Set("WWW-Authenticate", wwwAuth)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusUnauthorized)
-	_, _ = w.Write([]byte(`{"error":"` + errCode + `"}`))
+	resp, err := json.Marshal(map[string]string{"error": errCode})
+	if err != nil {
+		_, _ = w.Write([]byte(`{"error":"internal_error"}`))
+		return
+	}
+	_, _ = w.Write(resp)
 }
 
 // resourceMetadataURL constructs the well-known metadata URL from the request.

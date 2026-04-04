@@ -1,4 +1,6 @@
 FROM alpine:3.21
 RUN apk add --no-cache ca-certificates
-COPY proxy /usr/local/bin/proxy
+ARG TARGETOS
+ARG TARGETARCH
+COPY ${TARGETOS}/${TARGETARCH}/proxy /usr/local/bin/proxy
 ENTRYPOINT ["proxy"]

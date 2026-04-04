@@ -1,6 +1,7 @@
 package telemetry
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"sync/atomic"
@@ -14,8 +15,17 @@ var (
 // IncrConfigReloadTotal increments the total reload attempt counter.
 func IncrConfigReloadTotal() { configReloadTotal.Add(1) }
 
-// IncrConfigReloadErrors increments the reload error counter.
-func IncrConfigReloadErrors() { configReloadErrors.Add(1) }
+// IncrConfigReloadErrors increments the reload error counter and emits an OTel failure event.
+func IncrConfigReloadErrors(ctx context.Context) {
+	configReloadErrors.Add(1)
+	RecordConfigReload(ctx, false)
+}
+
+// IncrConfigReloadSuccess emits an OTel success event for a completed reload.
+// It does not affect the atomic counters (which only track total/errors).
+func IncrConfigReloadSuccess(ctx context.Context) {
+	RecordConfigReload(ctx, true)
+}
 
 // ReloadTotal returns the total number of reload attempts.
 func ReloadTotal() int64 { return configReloadTotal.Load() }

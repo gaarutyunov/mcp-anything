@@ -6,6 +6,7 @@ import (
 
 	"github.com/gaarutyunov/mcp-anything/internal/auth/outbound"
 	"github.com/gaarutyunov/mcp-anything/internal/config"
+	"github.com/gaarutyunov/mcp-anything/internal/telemetry"
 )
 
 // headerRoundTripper injects static headers into every outbound request.
@@ -45,6 +46,9 @@ func NewHTTPClient(cfg *config.UpstreamConfig, provider outbound.TokenProvider) 
 	}
 
 	rt = &outbound.AuthTransport{Base: rt, Provider: provider}
+
+	// Wrap with OTel client instrumentation to emit http.client.request.duration.
+	rt = telemetry.ClientTransport(rt)
 
 	return &http.Client{
 		Timeout:   cfg.Timeout,

@@ -106,15 +106,16 @@ func (l *Loader) tryReload(ctx context.Context) {
 	cfg, err := Load(l.path)
 	if err != nil {
 		slog.Error("config reload failed", "error", err)
-		telemetry.IncrConfigReloadErrors()
+		telemetry.IncrConfigReloadErrors(ctx)
 		return
 	}
 	if err := l.onLoad(cfg); err != nil {
 		slog.Error("config reload failed", "error", err)
-		telemetry.IncrConfigReloadErrors()
+		telemetry.IncrConfigReloadErrors(ctx)
 		return
 	}
 	l.current.Store(cfg)
+	telemetry.IncrConfigReloadSuccess(ctx)
 	slog.Info("config reloaded", "upstreams", len(cfg.Upstreams))
 }
 

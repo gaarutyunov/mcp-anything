@@ -10,17 +10,21 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/openapi3filter"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/speakeasy-api/jsonpath/pkg/jsonpath"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 	"gopkg.in/yaml.v3"
 
 	outboundauth "github.com/gaarutyunov/mcp-anything/internal/auth/outbound"
 	"github.com/gaarutyunov/mcp-anything/internal/config"
 	"github.com/gaarutyunov/mcp-anything/internal/content"
 	"github.com/gaarutyunov/mcp-anything/internal/openapi"
+	"github.com/gaarutyunov/mcp-anything/internal/telemetry"
 	"github.com/gaarutyunov/mcp-anything/internal/transform"
 )
 
@@ -296,8 +300,19 @@ func (r *Registry) Dispatch(ctx context.Context, name string, args map[string]an
 
 // handleToolCall executes the full request pipeline from SPEC.md §17 for a single tool call.
 func (r *Registry) handleToolCall(ctx context.Context, entry *RegistryEntry, args map[string]any) (*sdkmcp.CallToolResult, error) {
+	toolAttrs := metric.WithAttributes(attribute.String("mcp.tool.name", entry.PrefixedName))
+
 	// Apply request transform jq → RequestEnvelope.
+	reqStart := time.Now()
 	envelope, err := entry.Transforms.RunRequest(ctx, args)
+	if telemetry.TransformDuration != nil {
+		telemetry.TransformDuration.Record(ctx, time.Since(reqStart).Seconds(),
+			metric.WithAttributes(
+				attribute.String("mcp.tool.name", entry.PrefixedName),
+				attribute.String("transform.stage", "request"),
+			),
+		)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("request transform: %w", err)
 	}
@@ -380,36 +395,67 @@ func (r *Registry) handleToolCall(ctx context.Context, entry *RegistryEntry, arg
 	inError := statusIn(entry.ValidationCfg.ErrorStatus, resp.StatusCode)
 
 	if !inSuccess && !inError {
-		return &sdkmcp.CallToolResult{
+		result := &sdkmcp.CallToolResult{
 			IsError: true,
 			Content: []sdkmcp.Content{
 				&sdkmcp.TextContent{Text: fmt.Sprintf("unexpected HTTP %d", resp.StatusCode)},
 			},
-		}, nil
+		}
+		if telemetry.ToolCallErrors != nil {
+			telemetry.ToolCallErrors.Add(ctx, 1, toolAttrs)
+		}
+		return result, nil
 	}
 
 	contentType := resp.Header.Get("Content-Type")
 
 	if inError {
-		return buildErrorResult(ctx, entry.Transforms, resp.StatusCode, contentType, body), nil
+		errStart := time.Now()
+		result := buildErrorResult(ctx, entry.Transforms, resp.StatusCode, contentType, body)
+		if telemetry.TransformDuration != nil {
+			telemetry.TransformDuration.Record(ctx, time.Since(errStart).Seconds(),
+				metric.WithAttributes(
+					attribute.String("mcp.tool.name", entry.PrefixedName),
+					attribute.String("transform.stage", "error"),
+				),
+			)
+		}
+		if telemetry.ToolCallErrors != nil {
+			telemetry.ToolCallErrors.Add(ctx, 1, toolAttrs)
+		}
+		return result, nil
 	}
 
 	// Success path: validate response if configured.
 	if entry.ValidationCfg.ValidateResponse && reqInput != nil && entry.Validator != nil {
 		if valErr := entry.Validator.ValidateResponse(ctx, reqInput, resp, body); valErr != nil {
 			if entry.ValidationCfg.ResponseValidationFailure == "fail" {
-				return &sdkmcp.CallToolResult{
+				result := &sdkmcp.CallToolResult{
 					IsError: true,
 					Content: []sdkmcp.Content{
 						&sdkmcp.TextContent{Text: fmt.Sprintf("response validation failed: %v", valErr)},
 					},
-				}, nil
+				}
+				if telemetry.ToolCallErrors != nil {
+					telemetry.ToolCallErrors.Add(ctx, 1, toolAttrs)
+				}
+				return result, nil
 			}
 			slog.Warn("response validation failed", "tool", entry.PrefixedName, "error", valErr)
 		}
 	}
 
-	return buildSuccessResult(ctx, entry.Transforms, entry.ResponseFormat, contentType, body), nil
+	respStart := time.Now()
+	result := buildSuccessResult(ctx, entry.Transforms, entry.ResponseFormat, contentType, body)
+	if telemetry.TransformDuration != nil {
+		telemetry.TransformDuration.Record(ctx, time.Since(respStart).Seconds(),
+			metric.WithAttributes(
+				attribute.String("mcp.tool.name", entry.PrefixedName),
+				attribute.String("transform.stage", "response"),
+			),
+		)
+	}
+	return result, nil
 }
 
 // newErrorResult creates an IsError CallToolResult with the given message.

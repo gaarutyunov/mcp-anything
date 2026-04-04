@@ -7,13 +7,20 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
+	"time"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 	"gopkg.in/yaml.v3"
 
 	"github.com/gaarutyunov/mcp-anything/internal/auth/outbound"
 	"github.com/gaarutyunov/mcp-anything/internal/config"
 	"github.com/gaarutyunov/mcp-anything/internal/openapi"
+	"github.com/gaarutyunov/mcp-anything/internal/telemetry"
 	upstreampkg "github.com/gaarutyunov/mcp-anything/internal/upstream"
 )
 
@@ -233,11 +240,51 @@ func (m *Manager) applyRegistryLocked(newRegistry *upstreampkg.Registry, groups 
 			t := tool       // capture
 			gn := groupName // capture
 			srv.AddTool(t, func(callCtx context.Context, req *sdkmcp.CallToolRequest) (*sdkmcp.CallToolResult, error) {
+				// Extract W3C trace context from MCP _meta.traceparent (AC-28.4).
+				if tp, ok := req.Params.Meta["traceparent"].(string); ok && tp != "" {
+					carrier := propagation.MapCarrier{"traceparent": tp}
+					if ts, ok2 := req.Params.Meta["tracestate"].(string); ok2 && ts != "" {
+						carrier["tracestate"] = ts
+					}
+					callCtx = otel.GetTextMapPropagator().Extract(callCtx, carrier)
+				}
+
+				// Get session ID for span attributes.
+				sessionID := ""
+				if req.Session != nil {
+					sessionID = req.Session.ID()
+				}
+
+				spanName := "tools/call " + t.Name
+				callCtx, span := otel.Tracer("mcp-anything").Start(callCtx, spanName,
+					trace.WithAttributes(telemetry.ToolCallAttributes(t.Name, "tools/call", sessionID)...),
+					trace.WithSpanKind(trace.SpanKindServer),
+				)
+				defer span.End()
+
+				start := time.Now()
+
 				args, parseErr := managerParseArguments(req.Params.Arguments)
 				if parseErr != nil {
+					span.RecordError(parseErr)
 					return nil, fmt.Errorf("parsing tool arguments: %w", parseErr)
 				}
-				return m.DispatchForGroup(callCtx, gn, req.Params.Name, args)
+
+				result, dispErr := m.DispatchForGroup(callCtx, gn, req.Params.Name, args)
+
+				elapsed := time.Since(start).Seconds()
+				toolAttrs := metric.WithAttributes(
+					attribute.String("mcp.tool.name", t.Name),
+					attribute.String("mcp.method", "tools/call"),
+				)
+				if telemetry.ToolCallDuration != nil {
+					telemetry.ToolCallDuration.Record(callCtx, elapsed, toolAttrs)
+				}
+				if dispErr != nil {
+					span.RecordError(dispErr)
+				}
+
+				return result, dispErr
 			})
 		}
 

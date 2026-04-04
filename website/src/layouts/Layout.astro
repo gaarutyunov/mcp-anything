@@ -7,6 +7,31 @@ interface Props {
 }
 
 const { title, description } = Astro.props;
+const canonicalURL = new URL(Astro.url.pathname, Astro.site);
+
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "mcp-anything",
+  "description": description,
+  "url": "https://mcp-anything.ai",
+  "applicationCategory": "DeveloperApplication",
+  "operatingSystem": "Linux, macOS, Windows",
+  "license": "https://github.com/gaarutyunov/mcp-anything/blob/main/LICENSE",
+  "programmingLanguage": "Go",
+  "offers": {
+    "@type": "Offer",
+    "price": "0",
+    "priceCurrency": "USD"
+  },
+  "author": {
+    "@type": "Person",
+    "name": "German Arutyunov",
+    "url": "https://github.com/gaarutyunov"
+  },
+  "codeRepository": "https://github.com/gaarutyunov/mcp-anything",
+  "keywords": ["MCP", "Model Context Protocol", "proxy", "OpenAPI", "REST API", "MCP server", "MCP tools", "Go", "Kubernetes"]
+};
 ---
 
 <!doctype html>
@@ -15,16 +40,24 @@ const { title, description } = Astro.props;
     <meta charset="utf-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="canonical" href={canonicalURL} />
     <meta name="description" content={description} />
+    <meta name="keywords" content="MCP, Model Context Protocol, proxy, OpenAPI, REST API, MCP server, MCP tools, Go, Kubernetes, shell commands, JavaScript" />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
     <meta property="og:type" content="website" />
-    <meta property="og:url" content="https://mcp-anything.ai" />
+    <meta property="og:url" content={canonicalURL} />
+    <meta property="og:site_name" content="mcp-anything" />
+    <meta property="og:image" content="https://mcp-anything.ai/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content={title} />
     <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content="https://mcp-anything.ai/og.png" />
     <meta name="generator" content={Astro.generator} />
     <title>{title}</title>
+    <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} />
     <!-- Prevent FOUC: apply theme before render -->
     <script is:inline>
       (function() {

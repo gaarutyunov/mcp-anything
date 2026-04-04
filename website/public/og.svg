@@ -1,0 +1,23 @@
+<svg width="1200" height="630" viewBox="0 0 1200 630" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="630" fill="#0a0a0a"/>
+  <!-- Logo mark -->
+  <g transform="translate(520, 140) scale(0.35)">
+    <mask id="og-m" style="mask-type:luminance" maskUnits="userSpaceOnUse" x="7" y="7" width="166" height="166">
+      <path d="M173 7H7V173H173V7Z" fill="white"/>
+    </mask>
+    <g mask="url(#og-m)">
+      <path d="M23.6 85.25L86.2 22.65C94.85 14.01 108.86 14.01 117.5 22.65C126.15 31.29 126.15 45.31 117.5 53.95L70.23 101.23" stroke="white" stroke-width="11.07" stroke-linecap="round"/>
+      <path d="M70.88 100.58L117.5 53.95C126.15 45.31 140.16 45.31 148.81 53.95L149.13 54.28C157.78 62.92 157.78 76.94 149.13 85.58L92.51 142.2C89.63 145.08 89.63 149.75 92.51 152.63L104.14 164.26" stroke="white" stroke-width="11.07" stroke-linecap="round"/>
+      <path d="M101.85 38.3L55.55 84.6C46.91 93.24 46.91 107.26 55.55 115.9C64.2 124.55 78.21 124.55 86.85 115.9L133.15 69.6" stroke="white" stroke-width="11.07" stroke-linecap="round"/>
+    </g>
+    <g transform="translate(140, 140)" stroke="white" stroke-width="7" stroke-linecap="round">
+      <line x1="0" y1="-14" x2="0" y2="14"/><line x1="-12.12" y1="-7" x2="12.12" y2="7"/><line x1="-12.12" y1="7" x2="12.12" y2="-7"/>
+    </g>
+  </g>
+  <!-- Title -->
+  <text x="600" y="320" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-weight="700" font-size="48" fill="white">mcp-anything</text>
+  <!-- Subtitle -->
+  <text x="600" y="380" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-weight="400" font-size="24" fill="#a3a3a3">Turn anything into MCP tools</text>
+  <!-- URL -->
+  <text x="600" y="540" text-anchor="middle" font-family="ui-monospace, monospace" font-weight="400" font-size="18" fill="#525252">mcp-anything.ai</text>
+</svg>

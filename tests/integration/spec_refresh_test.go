@@ -127,14 +127,14 @@ func startRefreshProxy(ctx context.Context, t *testing.T, net *testcontainers.Do
 }
 
 // updateWireMockStub updates (replaces) a WireMock stub by ID.
-func updateWireMockStub(t *testing.T, base, stubID, body string) {
+func updateWireMockStub(ctx context.Context, t *testing.T, base, stubID, body string) {
 	t.Helper()
-	req, err := http.NewRequest(http.MethodPut, base+"/__admin/mappings/"+stubID, bytes.NewBufferString(body)) //nolint:noctx // test helper
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, base+"/__admin/mappings/"+stubID, bytes.NewBufferString(body))
 	if err != nil {
 		t.Fatalf("build update stub request: %v", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req) //nolint:noctx // test helper
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("update wiremock stub: %v", err)
 	}
@@ -146,9 +146,14 @@ func updateWireMockStub(t *testing.T, base, stubID, body string) {
 }
 
 // registerStubGetID registers a WireMock stub and returns its assigned ID.
-func registerStubGetID(t *testing.T, base, body string) string {
+func registerStubGetID(ctx context.Context, t *testing.T, base, body string) string {
 	t.Helper()
-	resp, err := http.Post(base+"/__admin/mappings", "application/json", bytes.NewBufferString(body)) //nolint:noctx // test helper
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/__admin/mappings", bytes.NewBufferString(body))
+	if err != nil {
+		t.Fatalf("build register stub request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("register wiremock stub: %v", err)
 	}
@@ -168,9 +173,13 @@ func registerStubGetID(t *testing.T, base, body string) string {
 
 // wiremockSpecRequests returns the If-None-Match header values seen in WireMock requests
 // to the given URL path.
-func wiremockSpecRequests(t *testing.T, base, path string) []string {
+func wiremockSpecRequests(ctx context.Context, t *testing.T, base, path string) []string {
 	t.Helper()
-	resp, err := http.Get(base + "/__admin/requests") //nolint:noctx // test helper
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/__admin/requests", nil)
+	if err != nil {
+		t.Fatalf("build wiremock requests request: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("get wiremock requests: %v", err)
 	}
@@ -207,9 +216,13 @@ func wiremockSpecRequests(t *testing.T, base, path string) []string {
 }
 
 // assertHTTPStatusBody asserts the status code and optionally checks the body contains a substring.
-func assertHTTPStatusBody(t *testing.T, url string, wantStatus int, wantBodyContains string) {
+func assertHTTPStatusBody(ctx context.Context, t *testing.T, url string, wantStatus int, wantBodyContains string) {
 	t.Helper()
-	resp, err := http.Get(url) //nolint:noctx // test helper
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		t.Fatalf("build GET %s request: %v", url, err)
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("GET %s: %v", url, err)
 	}
@@ -238,7 +251,7 @@ func TestBackgroundRefreshAddsNewTool(t *testing.T) {
 	wiremockURL := startWiremock(ctx, t, net)
 
 	// Register spec v1 stub.
-	specStubID := registerStubGetID(t, wiremockURL, `{
+	specStubID := registerStubGetID(ctx, t, wiremockURL, `{
 		"request": {"method": "GET", "url": "/specs/openapi.yaml"},
 		"response": {
 			"status": 200,
@@ -279,7 +292,7 @@ func TestBackgroundRefreshAddsNewTool(t *testing.T) {
 
 	// Update WireMock stub to return spec v2 with new ETag.
 	// When the proxy sends If-None-Match: "v1", the server returns 200 with v2.
-	updateWireMockStub(t, wiremockURL, specStubID, `{
+	updateWireMockStub(ctx, t, wiremockURL, specStubID, `{
 		"request": {"method": "GET", "url": "/specs/openapi.yaml"},
 		"response": {
 			"status": 200,
@@ -380,11 +393,18 @@ func TestConditionalGetSkipsUnchangedSpec(t *testing.T) {
 		t.Fatalf("expected 1 initial tool, got %d", len(initialTools.Tools))
 	}
 
-	// Wait for at least one refresh cycle to fire.
-	time.Sleep(700 * time.Millisecond)
+	// Poll WireMock journal until at least one conditional request is seen.
+	var ifNoneMatchValues []string
+	pollDeadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(pollDeadline) {
+		ifNoneMatchValues = wiremockSpecRequests(ctx, t, wiremockURL, "/specs/openapi.yaml")
+		if len(ifNoneMatchValues) > 0 {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 
 	// Check WireMock journal: the second request to the spec URL should include If-None-Match.
-	ifNoneMatchValues := wiremockSpecRequests(t, wiremockURL, "/specs/openapi.yaml")
 	if len(ifNoneMatchValues) == 0 {
 		t.Error("expected proxy to send If-None-Match header on spec refresh, but none seen in journal")
 	} else {
@@ -425,7 +445,7 @@ func TestMaxRefreshFailuresRemovesTools(t *testing.T) {
 	wiremockURL := startWiremock(ctx, t, net)
 
 	// Register spec stub for initial successful load.
-	specStubID := registerStubGetID(t, wiremockURL, `{
+	specStubID := registerStubGetID(ctx, t, wiremockURL, `{
 		"request": {"method": "GET", "url": "/specs/openapi.yaml"},
 		"response": {
 			"status": 200,
@@ -466,24 +486,21 @@ func TestMaxRefreshFailuresRemovesTools(t *testing.T) {
 	assertHTTPStatus(t, proxyURL+"/readyz", http.StatusOK)
 
 	// Make spec server return 500 to simulate failures.
-	updateWireMockStub(t, wiremockURL, specStubID, `{
+	updateWireMockStub(ctx, t, wiremockURL, specStubID, `{
 		"request": {"method": "GET", "url": "/specs/openapi.yaml"},
 		"response": {"status": 500, "body": "internal server error"}
 	}`)
 
-	// Wait for 3 failed refreshes: 3 * 200ms + buffer = ~1.5s.
-	time.Sleep(1500 * time.Millisecond)
-
-	// After max_refresh_failures exceeded, tools should be removed.
+	// Poll until tools are removed (max_refresh_failures exceeded).
 	degradedTools := pollToolsUntil(t, session, callCtx, func(tools []*sdkmcp.Tool) bool {
 		return len(tools) == 0
-	}, 3*time.Second)
+	}, 5*time.Second)
 	if len(degradedTools) != 0 {
 		t.Errorf("expected 0 tools after max_refresh_failures, got %d: %v", len(degradedTools), toolNames(degradedTools))
 	}
 
 	// /readyz should return 503.
-	assertHTTPStatusBody(t, proxyURL+"/readyz", http.StatusServiceUnavailable, "pets")
+	assertHTTPStatusBody(ctx, t, proxyURL+"/readyz", http.StatusServiceUnavailable, "pets")
 }
 
 // TestRefreshRecoveryAfterFailures verifies that the proxy recovers when the spec server
@@ -501,7 +518,7 @@ func TestRefreshRecoveryAfterFailures(t *testing.T) {
 	wiremockURL := startWiremock(ctx, t, net)
 
 	// Register spec stub for initial load.
-	specStubID := registerStubGetID(t, wiremockURL, `{
+	specStubID := registerStubGetID(ctx, t, wiremockURL, `{
 		"request": {"method": "GET", "url": "/specs/openapi.yaml"},
 		"response": {
 			"status": 200,
@@ -541,19 +558,19 @@ func TestRefreshRecoveryAfterFailures(t *testing.T) {
 	}
 
 	// Break the spec server.
-	updateWireMockStub(t, wiremockURL, specStubID, `{
+	updateWireMockStub(ctx, t, wiremockURL, specStubID, `{
 		"request": {"method": "GET", "url": "/specs/openapi.yaml"},
 		"response": {"status": 500, "body": "error"}
 	}`)
 
-	// Wait for degradation.
+	// Poll until tools are removed (degradation).
 	pollToolsUntil(t, session, callCtx, func(tools []*sdkmcp.Tool) bool {
 		return len(tools) == 0
-	}, 3*time.Second)
-	assertHTTPStatusBody(t, proxyURL+"/readyz", http.StatusServiceUnavailable, "pets")
+	}, 5*time.Second)
+	assertHTTPStatusBody(ctx, t, proxyURL+"/readyz", http.StatusServiceUnavailable, "pets")
 
 	// Restore the spec server.
-	updateWireMockStub(t, wiremockURL, specStubID, `{
+	updateWireMockStub(ctx, t, wiremockURL, specStubID, `{
 		"request": {"method": "GET", "url": "/specs/openapi.yaml"},
 		"response": {
 			"status": 200,
@@ -573,9 +590,10 @@ func TestRefreshRecoveryAfterFailures(t *testing.T) {
 
 	// /readyz should return 200 again.
 	// Poll readyz since the failure counter reset happens after a successful refresh.
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		resp, getErr := http.Get(proxyURL + "/readyz") //nolint:noctx // test helper
+	readyzDeadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(readyzDeadline) {
+		req, _ := http.NewRequestWithContext(callCtx, http.MethodGet, proxyURL+"/readyz", nil)
+		resp, getErr := http.DefaultClient.Do(req)
 		if getErr == nil {
 			_ = resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {

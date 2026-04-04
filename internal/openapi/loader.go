@@ -134,8 +134,9 @@ func FetchSpecConditional(ctx context.Context, cfg config.OpenAPISourceConfig, i
 		}
 
 		if resp.StatusCode == http.StatusNotModified {
+			etag := resp.Header.Get("ETag")
 			_ = resp.Body.Close()
-			return nil, "", true, nil
+			return nil, etag, true, nil
 		}
 
 		if resp.StatusCode >= 500 {

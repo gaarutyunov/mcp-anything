@@ -47,7 +47,7 @@ func New(cfg *config.ProxyConfig, mcpHandlers map[string]http.Handler, wellKnown
 			}
 		}
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok"))
+		_, _ = w.Write([]byte("ok\n"))
 	})
 
 	// Reload metrics endpoint.

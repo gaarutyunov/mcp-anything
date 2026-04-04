@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/gaarutyunov/mcp-anything/internal/auth/inbound"
@@ -142,5 +143,5 @@ func main() {
 
 // isURLSource reports whether the given source string is an HTTP/HTTPS URL.
 func isURLSource(source string) bool {
-	return len(source) >= 4 && source[:4] == "http"
+	return strings.HasPrefix(source, "http")
 }

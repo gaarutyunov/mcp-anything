@@ -98,7 +98,7 @@ func FetchOverlayConditional(ctx context.Context, cfg *config.OverlayConfig, ifN
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusNotModified {
-		return nil, "", true, nil
+		return nil, resp.Header.Get("ETag"), true, nil
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, "", false, fmt.Errorf("fetching overlay from %q: unexpected status %d", cfg.Source, resp.StatusCode)

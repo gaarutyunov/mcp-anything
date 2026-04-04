@@ -149,7 +149,7 @@ func (r *Refresher) refresh(ctx context.Context) error {
 	}
 
 	// 2. Fetch overlay bytes (conditional if URL-based).
-	overlayBytes, newOverlayETag, err := r.fetchOverlay(ctx, prev)
+	overlayBytes, newOverlayETag, overlayFetched, err := r.fetchOverlay(ctx, prev)
 	if err != nil {
 		return fmt.Errorf("fetching overlay: %w", err)
 	}
@@ -190,9 +190,10 @@ func (r *Refresher) refresh(ctx context.Context) error {
 	}
 
 	up := &Upstream{
-		Name:    r.cfg.Name,
-		BaseURL: r.cfg.BaseURL,
-		Client:  NewHTTPClient(r.cfg, provider),
+		Name:       r.cfg.Name,
+		ToolPrefix: r.cfg.ToolPrefix,
+		BaseURL:    r.cfg.BaseURL,
+		Client:     NewHTTPClient(r.cfg, provider),
 	}
 	validator := openapi.NewValidator(doc, router)
 
@@ -233,13 +234,15 @@ func (r *Refresher) refresh(ctx context.Context) error {
 		cachedOverlayBytes: overlayBytes,
 	}
 
-	// 7. Atomically swap snapshot.
-	r.current.Store(snap)
-	r.lastOverlayFetch = time.Now()
-
-	// 8. Notify registry manager.
+	// 7. Notify registry manager before advancing snapshot state.
 	if err := r.manager.UpdateUpstream(r.cfg.Name, entries, specYAMLRoot); err != nil {
 		return fmt.Errorf("updating upstream registry: %w", err)
+	}
+
+	// 8. Atomically swap snapshot only after registry publish succeeds.
+	r.current.Store(snap)
+	if overlayFetched {
+		r.lastOverlayFetch = time.Now()
 	}
 
 	slog.Info("spec refreshed", "upstream", r.cfg.Name, "spec_etag", newSpecETag, "tools", len(entries))
@@ -262,25 +265,26 @@ func (r *Refresher) shouldRefreshOverlay() bool {
 // fetchOverlay fetches overlay bytes, using conditional GET if the overlay is a URL.
 // Returns nil bytes if there is no overlay or if the overlay hasn't changed (304).
 // When returning nil due to 304, the caller should reuse the previous snapshot's cached bytes.
-func (r *Refresher) fetchOverlay(ctx context.Context, prev *Snapshot) ([]byte, string, error) {
+// The fetched bool reports whether an HTTP request was actually made (true = polled the URL).
+func (r *Refresher) fetchOverlay(ctx context.Context, prev *Snapshot) (data []byte, etag string, fetched bool, err error) {
 	if r.cfg.Overlay == nil {
-		return nil, "", nil
+		return nil, "", false, nil
 	}
 
 	if !r.shouldRefreshOverlay() {
-		// Reuse cached overlay from previous snapshot.
-		return prev.cachedOverlayBytes, prev.OverlayETag, nil
+		// Reuse cached overlay from previous snapshot — no network request made.
+		return prev.cachedOverlayBytes, prev.OverlayETag, false, nil
 	}
 
 	ifNoneMatch := prev.OverlayETag
-	data, etag, notModified, err := openapi.FetchOverlayConditional(ctx, r.cfg.Overlay, ifNoneMatch)
-	if err != nil {
-		return nil, "", err
+	respData, respETag, notModified, fetchErr := openapi.FetchOverlayConditional(ctx, r.cfg.Overlay, ifNoneMatch)
+	if fetchErr != nil {
+		return nil, "", true, fetchErr
 	}
 	if notModified {
-		return prev.cachedOverlayBytes, prev.OverlayETag, nil
+		return prev.cachedOverlayBytes, prev.OverlayETag, true, nil
 	}
-	return data, etag, nil
+	return respData, respETag, true, nil
 }
 
 // buildSnapshot performs the initial load: fetches spec + overlay, runs the full pipeline,
@@ -291,7 +295,7 @@ func (r *Refresher) buildSnapshot(ctx context.Context, prev *Snapshot) (*Snapsho
 		return nil, fmt.Errorf("fetching spec: %w", err)
 	}
 
-	overlayBytes, overlayETag, err := r.fetchOverlay(ctx, &Snapshot{})
+	overlayBytes, overlayETag, overlayFetched, err := r.fetchOverlay(ctx, &Snapshot{})
 	if err != nil {
 		return nil, fmt.Errorf("fetching overlay: %w", err)
 	}
@@ -329,9 +333,10 @@ func (r *Refresher) buildSnapshot(ctx context.Context, prev *Snapshot) (*Snapsho
 	}
 
 	up := &Upstream{
-		Name:    r.cfg.Name,
-		BaseURL: r.cfg.BaseURL,
-		Client:  NewHTTPClient(r.cfg, provider),
+		Name:       r.cfg.Name,
+		ToolPrefix: r.cfg.ToolPrefix,
+		BaseURL:    r.cfg.BaseURL,
+		Client:     NewHTTPClient(r.cfg, provider),
 	}
 	validator := openapi.NewValidator(doc, router)
 
@@ -361,7 +366,9 @@ func (r *Refresher) buildSnapshot(ctx context.Context, prev *Snapshot) (*Snapsho
 
 	_ = prev
 
-	r.lastOverlayFetch = time.Now()
+	if overlayFetched {
+		r.lastOverlayFetch = time.Now()
+	}
 	return &Snapshot{
 		Doc:                doc,
 		Router:             router,

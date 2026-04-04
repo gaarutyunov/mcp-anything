@@ -26,9 +26,10 @@ import (
 
 // Upstream holds the per-upstream HTTP routing state.
 type Upstream struct {
-	Name    string
-	BaseURL string
-	Client  *http.Client
+	Name       string
+	ToolPrefix string
+	BaseURL    string
+	Client     *http.Client
 }
 
 // RegistryEntry associates a prefixed tool name with its upstream and runtime state.
@@ -99,9 +100,10 @@ func New(upstreams []*ValidatedUpstream, naming *config.NamingConfig, groups []c
 
 	for _, vu := range upstreams {
 		up := &Upstream{
-			Name:    vu.Config.Name,
-			BaseURL: vu.Config.BaseURL,
-			Client:  NewHTTPClient(vu.Config, vu.Provider),
+			Name:       vu.Config.Name,
+			ToolPrefix: vu.Config.ToolPrefix,
+			BaseURL:    vu.Config.BaseURL,
+			Client:     NewHTTPClient(vu.Config, vu.Provider),
 		}
 		r.byPrefix[vu.Config.ToolPrefix] = up
 		r.specRootByName[vu.Config.Name] = vu.SpecYAMLRoot
@@ -532,7 +534,7 @@ func NewFromEntries(
 			}
 			r.byPrefixedName[entry.PrefixedName] = entry
 			if entry.Upstream != nil {
-				r.byPrefix[entry.Upstream.Name] = entry.Upstream
+				r.byPrefix[entry.Upstream.ToolPrefix] = entry.Upstream
 			}
 			if entry.MCPTool != nil {
 				r.toolList = append(r.toolList, entry.MCPTool)

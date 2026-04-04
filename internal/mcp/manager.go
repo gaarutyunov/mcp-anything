@@ -280,8 +280,12 @@ func (m *Manager) RemoveUpstream(upstreamName string) {
 		return
 	}
 
+	oldState := m.upstreamByName[upstreamName]
 	delete(m.upstreamByName, upstreamName)
 	if err := m.rebuildFromStateLocked(); err != nil {
+		if oldState != nil {
+			m.upstreamByName[upstreamName] = oldState
+		}
 		slog.Error("failed to remove upstream from registry", "upstream", upstreamName, "error", err)
 	}
 }

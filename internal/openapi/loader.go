@@ -81,46 +81,65 @@ var httpClient = &http.Client{Timeout: 30 * time.Second}
 // loadSpecBytes loads the raw spec bytes and returns the ETag (empty for file-based).
 // For HTTP URLs, it retries up to 5 times on transient connection errors and 5xx responses.
 func loadSpecBytes(ctx context.Context, cfg config.OpenAPISourceConfig) ([]byte, string, error) {
+	data, etag, _, err := FetchSpecConditional(ctx, cfg, "", 5)
+	return data, etag, err
+}
+
+// FetchSpecConditional fetches spec bytes, optionally using conditional GET.
+// If ifNoneMatch is non-empty and the server returns 304 Not Modified, returns
+// notModified=true with nil data and empty etag.
+// For file-based sources, ifNoneMatch is ignored and notModified is always false.
+// maxAttempts controls the number of attempts for HTTP sources (1 = no retry).
+func FetchSpecConditional(ctx context.Context, cfg config.OpenAPISourceConfig, ifNoneMatch string, maxAttempts int) (data []byte, etag string, notModified bool, err error) {
 	if !strings.HasPrefix(cfg.Source, "http") {
-		data, err := os.ReadFile(cfg.Source)
-		if err != nil {
-			return nil, "", fmt.Errorf("reading spec file %q: %w", cfg.Source, err)
+		d, readErr := os.ReadFile(cfg.Source)
+		if readErr != nil {
+			return nil, "", false, fmt.Errorf("reading spec file %q: %w", cfg.Source, readErr)
 		}
-		return data, "", nil
+		return d, "", false, nil
+	}
+	if maxAttempts <= 0 {
+		maxAttempts = 1
 	}
 
 	authHeader := os.ExpandEnv(cfg.AuthHeader)
 
-	const maxAttempts = 5
 	var lastErr error
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if attempt > 0 {
 			slog.Warn("retrying spec fetch", "url", cfg.Source, "attempt", attempt+1)
 			select {
 			case <-ctx.Done():
-				return nil, "", fmt.Errorf("processing spec %s: %w", cfg.Source, ctx.Err())
+				return nil, "", false, fmt.Errorf("processing spec %s: %w", cfg.Source, ctx.Err())
 			case <-time.After(2 * time.Second):
 			}
 		}
 
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, cfg.Source, nil)
 		if err != nil {
-			return nil, "", fmt.Errorf("creating request for %q: %w", cfg.Source, err)
+			return nil, "", false, fmt.Errorf("creating request for %q: %w", cfg.Source, err)
 		}
 		if authHeader != "" {
 			req.Header.Set("Authorization", authHeader)
 		}
+		if ifNoneMatch != "" {
+			req.Header.Set("If-None-Match", ifNoneMatch)
+		}
 
 		resp, err := httpClient.Do(req)
 		if err != nil {
-			// Connection error — may be transient (e.g. DNS not yet ready); retry.
 			lastErr = fmt.Errorf("fetching spec from %q: %w", cfg.Source, err)
 			slog.Warn("spec fetch failed, will retry", "url", cfg.Source, "error", err)
 			continue
 		}
 
+		if resp.StatusCode == http.StatusNotModified {
+			etag := resp.Header.Get("ETag")
+			_ = resp.Body.Close()
+			return nil, etag, true, nil
+		}
+
 		if resp.StatusCode >= 500 {
-			// Server-side error — may be transient; retry.
 			_ = resp.Body.Close()
 			lastErr = fmt.Errorf("fetching spec from %q: unexpected status %d", cfg.Source, resp.StatusCode)
 			slog.Warn("spec fetch got server error, will retry", "url", cfg.Source, "status", resp.StatusCode)
@@ -129,18 +148,55 @@ func loadSpecBytes(ctx context.Context, cfg config.OpenAPISourceConfig) ([]byte,
 
 		if resp.StatusCode != http.StatusOK {
 			_ = resp.Body.Close()
-			return nil, "", fmt.Errorf("fetching spec from %q: unexpected status %d", cfg.Source, resp.StatusCode)
+			return nil, "", false, fmt.Errorf("fetching spec from %q: unexpected status %d", cfg.Source, resp.StatusCode)
 		}
 
-		data, err := io.ReadAll(resp.Body)
+		d, readErr := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
-		if err != nil {
-			return nil, "", fmt.Errorf("reading spec response from %q: %w", cfg.Source, err)
+		if readErr != nil {
+			return nil, "", false, fmt.Errorf("reading spec response from %q: %w", cfg.Source, readErr)
 		}
 
-		return data, resp.Header.Get("ETag"), nil
+		return d, resp.Header.Get("ETag"), false, nil
 	}
-	return nil, "", lastErr
+	return nil, "", false, lastErr
+}
+
+// LoadPipelineFromBytes runs the OpenAPI loading pipeline from pre-fetched spec bytes
+// (with overlay already applied). Used by background refresh to avoid re-fetching.
+func LoadPipelineFromBytes(ctx context.Context, specBytes []byte, specCfg config.OpenAPISourceConfig) (*openapi3.T, routers.Router, *yaml.Node, error) {
+	var specYAMLRoot yaml.Node
+	if err := yaml.Unmarshal(specBytes, &specYAMLRoot); err != nil {
+		return nil, nil, nil, fmt.Errorf("parsing spec YAML root: %w", err)
+	}
+
+	loader := openapi3.NewLoader()
+	loader.IsExternalRefsAllowed = specCfg.AllowExternalRefs
+	loader.ReadFromURIFunc = openapi3.URIMapCache(openapi3.ReadFromURIs(
+		buildAuthHTTPReader(ctx, os.ExpandEnv(specCfg.AuthHeader)),
+		openapi3.ReadFromFile,
+	))
+
+	parsedBaseURI, err := specBaseURI(specCfg.Source)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("resolving spec base URI: %w", err)
+	}
+
+	doc, err := loader.LoadFromDataWithPath(specBytes, parsedBaseURI)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("parsing OpenAPI spec: %w", err)
+	}
+
+	if err := doc.Validate(ctx); err != nil {
+		return nil, nil, nil, fmt.Errorf("validating OpenAPI spec: %w", err)
+	}
+
+	router, err := gorillamux.NewRouter(doc)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("building router from OpenAPI spec: %w", err)
+	}
+
+	return doc, router, &specYAMLRoot, nil
 }
 
 // buildAuthHTTPReader returns a ReadFromURIFunc that adds an Authorization header on all HTTP requests.

@@ -104,7 +104,7 @@ func ValidateUpstream(ctx context.Context, upstreamCfg *config.UpstreamConfig, n
 
 	validated := make([]*ValidatedTool, 0, len(tools))
 	for _, gt := range tools {
-		vt, err := validateTool(ctx, gt, doc)
+		vt, err := ValidateTool(ctx, gt, doc)
 		if err != nil {
 			return nil, nil, fmt.Errorf("validating tool %q: %w", gt.PrefixedName, err)
 		}
@@ -115,8 +115,8 @@ func ValidateUpstream(ctx context.Context, upstreamCfg *config.UpstreamConfig, n
 	return validated, specYAMLRoot, nil
 }
 
-// validateTool compiles jq expressions and runs dry-run validation for a single tool.
-func validateTool(ctx context.Context, gt *GeneratedTool, doc *openapi3.T) (*ValidatedTool, error) {
+// ValidateTool compiles jq expressions and runs dry-run validation for a single tool.
+func ValidateTool(ctx context.Context, gt *GeneratedTool, doc *openapi3.T) (*ValidatedTool, error) {
 	op := gt.Operation
 
 	// Compute arg name mapping (handles collision renaming from DeriveInputSchema).

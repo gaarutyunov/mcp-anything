@@ -9,12 +9,20 @@ import (
 	"sync"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	"gopkg.in/yaml.v3"
 
 	"github.com/gaarutyunov/mcp-anything/internal/auth/outbound"
 	"github.com/gaarutyunov/mcp-anything/internal/config"
 	"github.com/gaarutyunov/mcp-anything/internal/openapi"
 	upstreampkg "github.com/gaarutyunov/mcp-anything/internal/upstream"
 )
+
+// upstreamState holds the current per-upstream entries and spec YAML root,
+// used for incremental registry rebuilds triggered by background refresh.
+type upstreamState struct {
+	entries      []*upstreampkg.RegistryEntry
+	specYAMLRoot *yaml.Node
+}
 
 // Manager owns the MCP servers and live tool registry.
 // It rebuilds and updates them on config reload.
@@ -23,12 +31,18 @@ type Manager struct {
 	registry *upstreampkg.Registry
 	impl     *sdkmcp.Implementation // set on first Rebuild
 	mu       sync.RWMutex
+
+	// State needed for per-upstream incremental updates (background refresh).
+	groups         []config.GroupConfig
+	namingCfg      *config.NamingConfig
+	upstreamByName map[string]*upstreamState // latest state per upstream name
 }
 
 // NewManager creates a Manager with no active servers.
 func NewManager() *Manager {
 	return &Manager{
-		servers: make(map[string]*sdkmcp.Server),
+		servers:        make(map[string]*sdkmcp.Server),
+		upstreamByName: make(map[string]*upstreamState),
 	}
 }
 
@@ -151,9 +165,29 @@ func (m *Manager) Rebuild(ctx context.Context, cfg *config.ProxyConfig) error {
 		return fmt.Errorf("building tool registry: %w", err)
 	}
 
+	// Build per-upstream state map from the new registry.
+	newUpstreamByName := make(map[string]*upstreamState, len(validatedUpstreams))
+	for _, vu := range validatedUpstreams {
+		newUpstreamByName[vu.Config.Name] = &upstreamState{
+			entries:      newRegistry.EntriesForUpstream(vu.Config.Name),
+			specYAMLRoot: newRegistry.SpecRootForUpstream(vu.Config.Name),
+		}
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	m.applyRegistryLocked(newRegistry, groups)
+
+	m.groups = groups
+	m.namingCfg = &cfg.Naming
+	m.upstreamByName = newUpstreamByName
+	return nil
+}
+
+// applyRegistryLocked diffs the new registry against the current one and updates
+// MCP servers accordingly. Must be called with m.mu held for writing.
+func (m *Manager) applyRegistryLocked(newRegistry *upstreampkg.Registry, groups []config.GroupConfig) {
 	for _, g := range groups {
 		groupName := g.Name // capture for closure
 
@@ -208,11 +242,70 @@ func (m *Manager) Rebuild(ctx context.Context, cfg *config.ProxyConfig) error {
 		}
 
 		if len(addedNames) > 0 || len(removedNames) > 0 {
-			slog.Info("config reloaded tools", "group", g.Name, "added", addedNames, "removed", removedNames)
+			slog.Info("tools updated", "group", g.Name, "added", addedNames, "removed", removedNames)
 		}
 	}
 
 	m.registry = newRegistry
+}
+
+// UpdateUpstream atomically replaces the tools for one upstream in the registry.
+// It is called by the background Refresher after a successful spec re-fetch.
+// Implements upstream.RegistryManager.
+func (m *Manager) UpdateUpstream(upstreamName string, entries []*upstreampkg.RegistryEntry, specYAMLRoot *yaml.Node) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.namingCfg == nil {
+		return fmt.Errorf("manager not yet initialised (no Rebuild called)")
+	}
+
+	// Update per-upstream state.
+	m.upstreamByName[upstreamName] = &upstreamState{
+		entries:      entries,
+		specYAMLRoot: specYAMLRoot,
+	}
+
+	return m.rebuildFromStateLocked()
+}
+
+// RemoveUpstream removes all tools for one upstream from the registry.
+// It is called by the background Refresher after max_refresh_failures is exceeded.
+// Implements upstream.RegistryManager.
+func (m *Manager) RemoveUpstream(upstreamName string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.namingCfg == nil {
+		return
+	}
+
+	oldState := m.upstreamByName[upstreamName]
+	delete(m.upstreamByName, upstreamName)
+	if err := m.rebuildFromStateLocked(); err != nil {
+		if oldState != nil {
+			m.upstreamByName[upstreamName] = oldState
+		}
+		slog.Error("failed to remove upstream from registry", "upstream", upstreamName, "error", err)
+	}
+}
+
+// rebuildFromStateLocked builds a new Registry from m.upstreamByName and applies it.
+// Must be called with m.mu held for writing.
+func (m *Manager) rebuildFromStateLocked() error {
+	entriesByUpstream := make(map[string][]*upstreampkg.RegistryEntry, len(m.upstreamByName))
+	specRootByUpstream := make(map[string]*yaml.Node, len(m.upstreamByName))
+	for name, state := range m.upstreamByName {
+		entriesByUpstream[name] = state.entries
+		specRootByUpstream[name] = state.specYAMLRoot
+	}
+
+	newRegistry, err := upstreampkg.NewFromEntries(entriesByUpstream, specRootByUpstream, m.namingCfg, m.groups)
+	if err != nil {
+		return fmt.Errorf("rebuilding registry: %w", err)
+	}
+
+	m.applyRegistryLocked(newRegistry, m.groups)
 	return nil
 }
 

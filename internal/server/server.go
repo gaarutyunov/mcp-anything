@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/gaarutyunov/mcp-anything/internal/config"
+	"github.com/gaarutyunov/mcp-anything/internal/telemetry"
 )
 
 // ReadinessChecker can report whether the proxy is ready to serve.
@@ -30,8 +31,9 @@ type Server struct {
 // wellKnown is an optional handler for the OAuth 2.0 Protected Resource Metadata endpoint
 // (GET /.well-known/oauth-protected-resource); pass nil to skip mounting it.
 // reloadMetrics is an optional handler for the GET /metrics/reload endpoint; pass nil to skip.
+// prometheusMetrics is an optional handler for the GET /metrics endpoint (Prometheus scrape); pass nil to skip.
 // readiness is an optional checker for /readyz; pass nil to always return 200 OK.
-func New(cfg *config.ProxyConfig, mcpHandlers map[string]http.Handler, wellKnown http.HandlerFunc, reloadMetrics http.HandlerFunc, readiness ReadinessChecker) *Server {
+func New(cfg *config.ProxyConfig, mcpHandlers map[string]http.Handler, wellKnown http.HandlerFunc, reloadMetrics http.HandlerFunc, prometheusMetrics http.Handler, readiness ReadinessChecker) *Server {
 	r := chi.NewRouter()
 
 	// Health endpoints.
@@ -50,9 +52,14 @@ func New(cfg *config.ProxyConfig, mcpHandlers map[string]http.Handler, wellKnown
 		_, _ = w.Write([]byte("ok\n"))
 	})
 
-	// Reload metrics endpoint.
+	// Reload metrics endpoint (plain text, backward compatible).
 	if reloadMetrics != nil {
 		r.Get("/metrics/reload", reloadMetrics)
+	}
+
+	// Prometheus scrape endpoint.
+	if prometheusMetrics != nil {
+		r.Get("/metrics", prometheusMetrics.ServeHTTP)
 	}
 
 	// Well-known OAuth metadata endpoint (always public, mounted before auth middleware).
@@ -60,9 +67,9 @@ func New(cfg *config.ProxyConfig, mcpHandlers map[string]http.Handler, wellKnown
 		r.Get("/.well-known/oauth-protected-resource", wellKnown)
 	}
 
-	// Mount MCP handlers.
+	// Mount MCP handlers wrapped with OTel server instrumentation.
 	for path, handler := range mcpHandlers {
-		r.Mount(path, handler)
+		r.Mount(path, telemetry.ServerMiddleware(handler, path))
 	}
 
 	httpSrv := &http.Server{

@@ -11,6 +11,8 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+
 	"github.com/gaarutyunov/mcp-anything/internal/auth/inbound"
 	"github.com/gaarutyunov/mcp-anything/internal/config"
 	mcppkg "github.com/gaarutyunov/mcp-anything/internal/mcp"
@@ -30,6 +32,33 @@ func main() {
 
 	// Create the Manager — MCP servers and registry are populated by the first Rebuild.
 	manager := mcppkg.NewManager()
+
+	// Load initial config to get telemetry settings for SDK init.
+	// The full load happens below via NewLoader; we just need the telemetry section here.
+	earlyTelemetryCfg := &telemetry.Config{
+		ServiceName:    "mcp-anything",
+		ServiceVersion: "unknown",
+	}
+	if earlyCfg, loadErr := config.Load(cfgPath); loadErr == nil {
+		earlyTelemetryCfg = &telemetry.Config{
+			ServiceName:    earlyCfg.Telemetry.ServiceName,
+			ServiceVersion: earlyCfg.Telemetry.ServiceVersion,
+			OTLPEndpoint:   earlyCfg.Telemetry.OTLPEndpoint,
+			Insecure:       earlyCfg.Telemetry.Insecure,
+		}
+	}
+
+	// Initialise OpenTelemetry SDK.
+	shutdown, telErr := telemetry.Init(ctx, earlyTelemetryCfg)
+	if telErr != nil {
+		slog.Error("telemetry init failed", "error", telErr)
+		os.Exit(1)
+	}
+	defer func() {
+		if err := shutdown(context.Background()); err != nil {
+			slog.Error("telemetry shutdown", "error", err)
+		}
+	}()
 
 	// NewLoader performs the initial config load and calls manager.Rebuild.
 	// Fatal on initial load or validation failure.
@@ -130,7 +159,7 @@ func main() {
 		readiness = upstreampkg.NewRefresherSet(refreshers)
 	}
 
-	srv := server.New(cfg, mcpHandlers, wellKnown, telemetry.ReloadMetricsHandler(), readiness)
+	srv := server.New(cfg, mcpHandlers, wellKnown, telemetry.ReloadMetricsHandler(), promhttp.Handler(), readiness)
 
 	// Start config watcher in background.
 	go loader.Watch(ctx)

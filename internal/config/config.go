@@ -65,6 +65,8 @@ type ServerConfig struct {
 type TelemetryConfig struct {
 	ServiceName    string `koanf:"service_name"`
 	ServiceVersion string `koanf:"service_version"`
+	OTLPEndpoint   string `koanf:"otlp_endpoint"` // e.g. "localhost:4317"; empty = no trace exporter
+	Insecure       bool   `koanf:"insecure"`      // skip TLS for OTLP gRPC (useful in tests)
 }
 
 // SlugRulesConfig controls which slug transformations are applied.

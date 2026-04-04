@@ -2,9 +2,11 @@ package openapi
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/getkin/kin-openapi/openapi3"
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	"gopkg.in/yaml.v3"
 
 	"github.com/gaarutyunov/mcp-anything/internal/config"
 )
@@ -20,15 +22,16 @@ type ParamInfo struct {
 // GeneratedTool associates an MCP tool definition with routing information
 // needed to construct and execute the upstream HTTP request.
 type GeneratedTool struct {
-	MCPTool      *mcp.Tool
-	PrefixedName string
-	OriginalName string
-	Method       string   // HTTP method (GET, POST, etc.)
-	PathTemplate string   // e.g. /pets/{petId}
-	PathParams   []string // ordered list of path param names
-	QueryParams  []ParamInfo
-	HeaderParams []ParamInfo
-	Operation    *openapi3.Operation // original operation for jq generation and response schema extraction
+	MCPTool       *mcp.Tool
+	PrefixedName  string
+	OriginalName  string
+	Method        string   // HTTP method (GET, POST, etc.)
+	PathTemplate  string   // e.g. /pets/{petId}
+	PathParams    []string // ordered list of path param names
+	QueryParams   []ParamInfo
+	HeaderParams  []ParamInfo
+	Operation     *openapi3.Operation // original operation for jq generation and response schema extraction
+	OperationNode *yaml.Node          // YAML node for this operation, used for JSONPath group filter evaluation
 }
 
 // GenerateTools walks all operations in the OpenAPI document and returns a list of MCP
@@ -196,4 +199,38 @@ func classifyParams(params openapi3.Parameters) ([]string, []ParamInfo, []ParamI
 		}
 	}
 	return pathParams, queryParams, headerParams
+}
+
+// FindOperationYAMLNode navigates a parsed YAML spec tree to find the yaml.Node
+// for a specific HTTP method operation under the given path.
+// method should be lowercase (e.g. "get", "post").
+// Returns nil if the path or method is not found.
+func FindOperationYAMLNode(root *yaml.Node, path, method string) *yaml.Node {
+	node := root
+	if node.Kind == yaml.DocumentNode && len(node.Content) > 0 {
+		node = node.Content[0]
+	}
+	pathsNode := yamlMappingGet(node, "paths")
+	if pathsNode == nil {
+		return nil
+	}
+	pathNode := yamlMappingGet(pathsNode, path)
+	if pathNode == nil {
+		return nil
+	}
+	return yamlMappingGet(pathNode, strings.ToLower(method))
+}
+
+// yamlMappingGet returns the value node for the given key in a YAML mapping node.
+// Returns nil if node is not a mapping or the key is not found.
+func yamlMappingGet(node *yaml.Node, key string) *yaml.Node {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		if node.Content[i].Value == key {
+			return node.Content[i+1]
+		}
+	}
+	return nil
 }

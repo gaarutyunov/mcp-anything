@@ -10,6 +10,16 @@ type ProxyConfig struct {
 	Naming      NamingConfig      `koanf:"naming"`
 	Upstreams   []UpstreamConfig  `koanf:"upstreams"`
 	InboundAuth InboundAuthConfig `koanf:"inbound_auth"`
+	Groups      []GroupConfig     `koanf:"groups"`
+}
+
+// GroupConfig configures a named group of upstreams exposed at a single MCP endpoint.
+// If no groups are configured, a synthetic default group is created at /mcp with all upstreams.
+type GroupConfig struct {
+	Name      string   `koanf:"name"`
+	Endpoint  string   `koanf:"endpoint"`  // e.g. /mcp or /mcp/readonly
+	Upstreams []string `koanf:"upstreams"` // upstream names to include
+	Filter    string   `koanf:"filter"`    // RFC 9535 JSONPath expression (optional)
 }
 
 // InboundAuthConfig controls how inbound MCP clients are authenticated.

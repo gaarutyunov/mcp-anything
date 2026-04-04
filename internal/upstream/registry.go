@@ -14,6 +14,8 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/openapi3filter"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/speakeasy-api/jsonpath/pkg/jsonpath"
+	"gopkg.in/yaml.v3"
 
 	outboundauth "github.com/gaarutyunov/mcp-anything/internal/auth/outbound"
 	"github.com/gaarutyunov/mcp-anything/internal/config"
@@ -41,6 +43,13 @@ type RegistryEntry struct {
 	PathTemplate   string // e.g. /pets/{petId}
 	Validator      *openapi.Validator
 	ValidationCfg  config.ValidationConfig
+	OperationNode  *yaml.Node // YAML node for JSONPath group filter evaluation
+}
+
+// groupData holds pre-computed membership for a single tool group.
+type groupData struct {
+	toolList []*sdkmcp.Tool
+	toolSet  map[string]bool // set of prefixed tool names in this group
 }
 
 // Registry maps prefixed tool names to their upstream and compiled tool state.
@@ -50,22 +59,27 @@ type Registry struct {
 	byPrefix       map[string]*Upstream
 	toolList       []*sdkmcp.Tool
 	separator      string
+	groups         map[string]*groupData // group name → pre-computed membership
 }
 
 // ValidatedUpstream is the result of validating a single upstream configuration.
 type ValidatedUpstream struct {
-	Config   *config.UpstreamConfig
-	Tools    []*openapi.ValidatedTool
-	Provider outboundauth.TokenProvider
+	Config       *config.UpstreamConfig
+	Tools        []*openapi.ValidatedTool
+	Provider     outboundauth.TokenProvider
+	SpecYAMLRoot *yaml.Node // post-overlay YAML root for JSONPath group filter evaluation
 }
 
-// New builds a Registry from all validated upstreams.
-// Returns an error if any tool prefix is shared (AC-07.5).
-func New(upstreams []*ValidatedUpstream, naming *config.NamingConfig) (*Registry, error) {
+// New builds a Registry from all validated upstreams and group configurations.
+// groups is the list of tool groups to build; if empty, a default group at /mcp with all
+// upstreams is assumed to have been created by the caller.
+// Returns an error if any tool prefix is shared (AC-07.5) or if a group filter is invalid.
+func New(upstreams []*ValidatedUpstream, naming *config.NamingConfig, groups []config.GroupConfig) (*Registry, error) {
 	r := &Registry{
 		byPrefixedName: make(map[string]*RegistryEntry),
 		byPrefix:       make(map[string]*Upstream),
 		separator:      naming.Separator,
+		groups:         make(map[string]*groupData),
 	}
 
 	// Check for shared prefixes — AC-07.5: fatal error.
@@ -106,13 +120,107 @@ func New(upstreams []*ValidatedUpstream, naming *config.NamingConfig) (*Registry
 				PathTemplate:   vt.PathTemplate,
 				Validator:      vt.Validator,
 				ValidationCfg:  vu.Config.Validation,
+				OperationNode:  vt.OperationNode,
 			}
 			r.byPrefixedName[vt.PrefixedName] = entry
 			r.toolList = append(r.toolList, vt.MCPTool)
 		}
 	}
 
+	// Validate all group filter expressions upfront — invalid filter is a fatal startup error.
+	compiledFilters := make(map[string]*jsonpath.JSONPath, len(groups))
+	for _, g := range groups {
+		if g.Filter == "" {
+			continue
+		}
+		jp, err := jsonpath.NewPath(g.Filter)
+		if err != nil {
+			return nil, fmt.Errorf("group %q has invalid JSONPath filter %q: %w", g.Name, g.Filter, err)
+		}
+		compiledFilters[g.Name] = jp
+	}
+
+	// Build group membership by evaluating filters at build time.
+	for _, g := range groups {
+		gd := &groupData{
+			toolSet: make(map[string]bool),
+		}
+		upstreamSet := make(map[string]bool, len(g.Upstreams))
+		for _, name := range g.Upstreams {
+			upstreamSet[name] = true
+		}
+
+		jp := compiledFilters[g.Name] // nil if no filter
+
+		for _, vu := range upstreams {
+			if !upstreamSet[vu.Config.Name] {
+				continue
+			}
+			// Build a set of nodes selected by the filter for this upstream's spec.
+			var matchedNodes map[*yaml.Node]bool
+			if jp != nil && vu.SpecYAMLRoot != nil {
+				results := jp.Query(vu.SpecYAMLRoot)
+				matchedNodes = make(map[*yaml.Node]bool, len(results))
+				for _, n := range results {
+					matchedNodes[n] = true
+				}
+			}
+
+			for _, vt := range vu.Tools {
+				entry := r.byPrefixedName[vt.PrefixedName]
+				if entry == nil {
+					continue
+				}
+				if jp != nil {
+					// Include only if the operation's YAML node was selected by the filter.
+					if entry.OperationNode == nil || !matchedNodes[entry.OperationNode] {
+						continue
+					}
+				}
+				gd.toolSet[vt.PrefixedName] = true
+			}
+		}
+
+		// Build ordered tool list for this group, preserving registry insertion order.
+		for _, t := range r.toolList {
+			if gd.toolSet[t.Name] {
+				gd.toolList = append(gd.toolList, t)
+			}
+		}
+
+		r.groups[g.Name] = gd
+	}
+
 	return r, nil
+}
+
+// ToolsForGroup returns the MCP tool list for the given group.
+// Only tools whose upstream is in the group's upstream list AND whose operation
+// satisfies the JSONPath filter (if set) are returned.
+// Returns nil if the group is unknown.
+func (r *Registry) ToolsForGroup(groupName string) []*sdkmcp.Tool {
+	gd, ok := r.groups[groupName]
+	if !ok {
+		return nil
+	}
+	return gd.toolList
+}
+
+// DispatchForGroup routes a tool call, but only if the tool belongs to the group.
+// Returns IsError: true if the tool exists globally but not in this group.
+func (r *Registry) DispatchForGroup(ctx context.Context, groupName, name string, args map[string]any) (*sdkmcp.CallToolResult, error) {
+	gd, ok := r.groups[groupName]
+	if !ok {
+		return newErrorResult("unknown group: " + groupName), nil
+	}
+	if !gd.toolSet[name] {
+		return newErrorResult("tool not available in this group: " + name), nil
+	}
+	entry, ok := r.byPrefixedName[name]
+	if !ok {
+		return newErrorResult("unknown tool: " + name), nil
+	}
+	return r.handleToolCall(ctx, entry, args)
 }
 
 // Tools returns all tools for use in MCP tools/list.

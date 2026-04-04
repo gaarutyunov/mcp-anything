@@ -15,26 +15,34 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/routers"
 	"github.com/getkin/kin-openapi/routers/gorillamux"
+	"gopkg.in/yaml.v3"
 
 	"github.com/gaarutyunov/mcp-anything/internal/config"
 )
 
 // LoadPipeline executes the full OpenAPI loading pipeline for a single upstream:
 // load spec bytes → apply overlay → parse with kin-openapi → validate → build router.
+// It also returns the post-overlay YAML root node for JSONPath filter evaluation.
 // It is safe to call from multiple goroutines if cfg is read-only.
-func LoadPipeline(ctx context.Context, specCfg config.OpenAPISourceConfig, overlayCfg *config.OverlayConfig) (*openapi3.T, routers.Router, error) {
+func LoadPipeline(ctx context.Context, specCfg config.OpenAPISourceConfig, overlayCfg *config.OverlayConfig) (*openapi3.T, routers.Router, *yaml.Node, error) {
 	specBytes, etag, err := loadSpecBytes(ctx, specCfg)
 	if err != nil {
-		return nil, nil, fmt.Errorf("loading spec bytes: %w", err)
+		return nil, nil, nil, fmt.Errorf("loading spec bytes: %w", err)
 	}
 	_ = etag // TODO: use for conditional refresh (If-None-Match) in a future task
 
 	modifiedBytes, warnings, err := ApplyOverlay(ctx, specBytes, overlayCfg)
 	if err != nil {
-		return nil, nil, fmt.Errorf("applying overlay: %w", err)
+		return nil, nil, nil, fmt.Errorf("applying overlay: %w", err)
 	}
 	for _, w := range warnings {
 		slog.Warn("overlay unmatched target", "warning", w)
+	}
+
+	// Parse the post-overlay bytes into a YAML node tree for JSONPath filter evaluation.
+	var specYAMLRoot yaml.Node
+	if err := yaml.Unmarshal(modifiedBytes, &specYAMLRoot); err != nil {
+		return nil, nil, nil, fmt.Errorf("parsing spec YAML root: %w", err)
 	}
 
 	loader := openapi3.NewLoader()
@@ -46,24 +54,24 @@ func LoadPipeline(ctx context.Context, specCfg config.OpenAPISourceConfig, overl
 
 	parsedBaseURI, err := specBaseURI(specCfg.Source)
 	if err != nil {
-		return nil, nil, fmt.Errorf("resolving spec base URI: %w", err)
+		return nil, nil, nil, fmt.Errorf("resolving spec base URI: %w", err)
 	}
 
 	doc, err := loader.LoadFromDataWithPath(modifiedBytes, parsedBaseURI)
 	if err != nil {
-		return nil, nil, fmt.Errorf("parsing OpenAPI spec: %w", err)
+		return nil, nil, nil, fmt.Errorf("parsing OpenAPI spec: %w", err)
 	}
 
 	if err := doc.Validate(ctx); err != nil {
-		return nil, nil, fmt.Errorf("validating OpenAPI spec: %w", err)
+		return nil, nil, nil, fmt.Errorf("validating OpenAPI spec: %w", err)
 	}
 
 	router, err := gorillamux.NewRouter(doc)
 	if err != nil {
-		return nil, nil, fmt.Errorf("building router from OpenAPI spec: %w", err)
+		return nil, nil, nil, fmt.Errorf("building router from OpenAPI spec: %w", err)
 	}
 
-	return doc, router, nil
+	return doc, router, &specYAMLRoot, nil
 }
 
 // httpClient is used for fetching specs and overlays from remote URLs.

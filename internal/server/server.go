@@ -23,7 +23,8 @@ type Server struct {
 // New creates a new Server. mcpHandlers maps mount paths to their HTTP handlers.
 // wellKnown is an optional handler for the OAuth 2.0 Protected Resource Metadata endpoint
 // (GET /.well-known/oauth-protected-resource); pass nil to skip mounting it.
-func New(cfg *config.ProxyConfig, mcpHandlers map[string]http.Handler, wellKnown http.HandlerFunc) *Server {
+// reloadMetrics is an optional handler for the GET /metrics/reload endpoint; pass nil to skip.
+func New(cfg *config.ProxyConfig, mcpHandlers map[string]http.Handler, wellKnown http.HandlerFunc, reloadMetrics http.HandlerFunc) *Server {
 	r := chi.NewRouter()
 
 	// Health endpoints.
@@ -33,6 +34,11 @@ func New(cfg *config.ProxyConfig, mcpHandlers map[string]http.Handler, wellKnown
 	r.Get("/readyz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
+
+	// Reload metrics endpoint.
+	if reloadMetrics != nil {
+		r.Get("/metrics/reload", reloadMetrics)
+	}
 
 	// Well-known OAuth metadata endpoint (always public, mounted before auth middleware).
 	if wellKnown != nil {

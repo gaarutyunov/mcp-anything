@@ -17,6 +17,7 @@ import (
 
 	outboundauth "github.com/gaarutyunov/mcp-anything/internal/auth/outbound"
 	"github.com/gaarutyunov/mcp-anything/internal/config"
+	"github.com/gaarutyunov/mcp-anything/internal/content"
 	"github.com/gaarutyunov/mcp-anything/internal/openapi"
 	"github.com/gaarutyunov/mcp-anything/internal/transform"
 )
@@ -248,8 +249,10 @@ func (r *Registry) handleToolCall(ctx context.Context, entry *RegistryEntry, arg
 		}, nil
 	}
 
+	contentType := resp.Header.Get("Content-Type")
+
 	if inError {
-		return buildErrorResult(ctx, entry.Transforms, resp.StatusCode, body), nil
+		return buildErrorResult(ctx, entry.Transforms, resp.StatusCode, contentType, body), nil
 	}
 
 	// Success path: validate response if configured.
@@ -267,7 +270,7 @@ func (r *Registry) handleToolCall(ctx context.Context, entry *RegistryEntry, arg
 		}
 	}
 
-	return buildSuccessResult(ctx, entry.Transforms, body), nil
+	return buildSuccessResult(ctx, entry.Transforms, entry.ResponseFormat, contentType, body), nil
 }
 
 // newErrorResult creates an IsError CallToolResult with the given message.
@@ -281,55 +284,23 @@ func newErrorResult(msg string) *sdkmcp.CallToolResult {
 }
 
 // buildErrorResult transforms an error response body and returns an error CallToolResult.
-func buildErrorResult(ctx context.Context, transforms *transform.CompiledTransforms, statusCode int, body []byte) *sdkmcp.CallToolResult {
-	var parsed any
-	if err := json.Unmarshal(body, &parsed); err != nil {
-		parsed = map[string]any{"status": statusCode, "body": string(body)}
-	} else if m, ok := parsed.(map[string]any); ok {
-		if m["status"] == nil {
-			m["status"] = statusCode
-		}
-	} else {
-		parsed = map[string]any{"status": statusCode, "body": parsed}
-	}
-
-	transformed, err := transforms.RunError(ctx, parsed)
-	if err != nil {
-		slog.Warn("error transform failed, using raw body", "error", err)
-		transformed = map[string]any{"error": fmt.Sprintf("upstream returned %d", statusCode), "body": string(body)}
-	}
-
-	return &sdkmcp.CallToolResult{
-		IsError: true,
-		Content: []sdkmcp.Content{
-			&sdkmcp.TextContent{Text: marshalToString(transformed)},
-		},
-	}
+func buildErrorResult(ctx context.Context, transforms *transform.CompiledTransforms, statusCode int, contentType string, body []byte) *sdkmcp.CallToolResult {
+	return content.ToErrorResult(ctx, body, contentType, statusCode, transforms.Error)
 }
 
-// buildSuccessResult transforms a success response body and returns a CallToolResult.
-func buildSuccessResult(ctx context.Context, transforms *transform.CompiledTransforms, body []byte) *sdkmcp.CallToolResult {
-	var parsed any = string(body)
-	var jsonParsed any
-	if err := json.Unmarshal(body, &jsonParsed); err == nil {
-		parsed = jsonParsed
-	}
-
-	transformed, err := transforms.RunResponse(ctx, parsed)
+// buildSuccessResult converts a success response body to MCP content and returns a CallToolResult.
+func buildSuccessResult(ctx context.Context, transforms *transform.CompiledTransforms, responseFormat, contentType string, body []byte) *sdkmcp.CallToolResult {
+	format := content.Detect(content.Format(responseFormat), contentType)
+	contents, err := content.ToMCPContent(ctx, format, body, contentType, transforms.Response)
 	if err != nil {
-		slog.Warn("response transform failed, using raw body", "error", err)
+		slog.Warn("response content conversion failed, using raw body", "error", err)
 		return &sdkmcp.CallToolResult{
 			Content: []sdkmcp.Content{
 				&sdkmcp.TextContent{Text: string(body)},
 			},
 		}
 	}
-
-	return &sdkmcp.CallToolResult{
-		Content: []sdkmcp.Content{
-			&sdkmcp.TextContent{Text: marshalToString(transformed)},
-		},
-	}
+	return &sdkmcp.CallToolResult{Content: contents}
 }
 
 // buildUpstreamURL constructs the upstream URL using the request envelope.
@@ -355,18 +326,6 @@ func buildUpstreamURL(baseURL, pathTemplate string, envelope *transform.RequestE
 	}
 
 	return u.String(), nil
-}
-
-// marshalToString marshals v to a JSON string, or returns a string representation on error.
-func marshalToString(v any) string {
-	if s, ok := v.(string); ok {
-		return s
-	}
-	data, err := json.Marshal(v)
-	if err != nil {
-		return fmt.Sprintf("%v", v)
-	}
-	return string(data)
 }
 
 // statusIn reports whether status is in the list.

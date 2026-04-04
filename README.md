@@ -1,5 +1,9 @@
 # mcp-anything
 
+[![Website](https://img.shields.io/badge/website-mcp--anything.ai-blue)](https://mcp-anything.ai)
+[![License](https://img.shields.io/github/license/gaarutyunov/mcp-anything)](LICENSE)
+[![CI](https://github.com/gaarutyunov/mcp-anything/actions/workflows/ci.yml/badge.svg)](https://github.com/gaarutyunov/mcp-anything/actions/workflows/ci.yml)
+
 A stateless Kubernetes-native proxy that converts any HTTP REST API into an MCP (Model Context Protocol) server. Define your upstream API via an OpenAPI 3.0 spec, optionally apply an OpenAPI Overlay to filter and rename operations, and the proxy automatically generates MCP tools — no code required.
 
 ## Status

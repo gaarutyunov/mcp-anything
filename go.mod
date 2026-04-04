@@ -14,6 +14,7 @@ require (
 	github.com/knadh/koanf/v2 v2.1.2
 	github.com/lucasjones/reggen v0.0.0-20200904144131-37ba4fa293bb
 	github.com/modelcontextprotocol/go-sdk v1.4.1
+	github.com/speakeasy-api/jsonpath v0.6.0
 	github.com/speakeasy-api/openapi-overlay v0.10.3
 	github.com/testcontainers/testcontainers-go v0.36.0
 	github.com/zitadel/oidc/v3 v3.46.0
@@ -81,7 +82,6 @@ require (
 	github.com/segmentio/encoding v0.5.4 // indirect
 	github.com/shirou/gopsutil/v4 v4.25.1 // indirect
 	github.com/sirupsen/logrus v1.9.4 // indirect
-	github.com/speakeasy-api/jsonpath v0.6.0 // indirect
 	github.com/stretchr/testify v1.11.1 // indirect
 	github.com/tklauser/go-sysconf v0.3.12 // indirect
 	github.com/tklauser/numcpus v0.6.1 // indirect

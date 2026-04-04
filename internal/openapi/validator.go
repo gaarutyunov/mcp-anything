@@ -7,10 +7,12 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/openapi3filter"
 	"github.com/getkin/kin-openapi/routers"
+	"gopkg.in/yaml.v3"
 
 	"github.com/gaarutyunov/mcp-anything/internal/config"
 	"github.com/gaarutyunov/mcp-anything/internal/transform"
@@ -81,30 +83,36 @@ type ValidatedTool struct {
 // It loads the spec, applies overlays, generates tools, compiles jq expressions,
 // and dry-runs all three transforms against synthetic data.
 // Respects the provided context (for startup_validation_timeout).
-func ValidateUpstream(ctx context.Context, upstreamCfg *config.UpstreamConfig, namingCfg *config.NamingConfig) ([]*ValidatedTool, error) {
-	doc, router, err := LoadPipeline(ctx, upstreamCfg.OpenAPI, upstreamCfg.Overlay)
+// Returns the validated tools and the post-overlay YAML root node for JSONPath filter evaluation.
+func ValidateUpstream(ctx context.Context, upstreamCfg *config.UpstreamConfig, namingCfg *config.NamingConfig) ([]*ValidatedTool, *yaml.Node, error) {
+	doc, router, specYAMLRoot, err := LoadPipeline(ctx, upstreamCfg.OpenAPI, upstreamCfg.Overlay)
 	if err != nil {
-		return nil, fmt.Errorf("loading spec for upstream %q: %w", upstreamCfg.Name, err)
+		return nil, nil, fmt.Errorf("loading spec for upstream %q: %w", upstreamCfg.Name, err)
 	}
 
 	validator := NewValidator(doc, router)
 
 	tools, err := GenerateTools(doc, upstreamCfg, namingCfg)
 	if err != nil {
-		return nil, fmt.Errorf("generating tools for upstream %q: %w", upstreamCfg.Name, err)
+		return nil, nil, fmt.Errorf("generating tools for upstream %q: %w", upstreamCfg.Name, err)
+	}
+
+	// Populate OperationNode for each tool so it can be used in JSONPath group filter evaluation.
+	for _, gt := range tools {
+		gt.OperationNode = FindOperationYAMLNode(specYAMLRoot, gt.PathTemplate, strings.ToLower(gt.Method))
 	}
 
 	validated := make([]*ValidatedTool, 0, len(tools))
 	for _, gt := range tools {
 		vt, err := validateTool(ctx, gt, doc)
 		if err != nil {
-			return nil, fmt.Errorf("validating tool %q: %w", gt.PrefixedName, err)
+			return nil, nil, fmt.Errorf("validating tool %q: %w", gt.PrefixedName, err)
 		}
 		vt.Validator = validator
 		validated = append(validated, vt)
 	}
 
-	return validated, nil
+	return validated, specYAMLRoot, nil
 }
 
 // validateTool compiles jq expressions and runs dry-run validation for a single tool.

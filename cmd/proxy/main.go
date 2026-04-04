@@ -52,7 +52,7 @@ func main() {
 		}
 
 		valCtx, valCancel := context.WithTimeout(ctx, upCfg.StartupValidationTimeout)
-		tools, valErr := openapi.ValidateUpstream(valCtx, upCfg, &cfg.Naming)
+		tools, specYAMLRoot, valErr := openapi.ValidateUpstream(valCtx, upCfg, &cfg.Naming)
 		valCancel()
 		if valErr != nil {
 			slog.Error("upstream validation failed", "upstream", upCfg.Name, "error", valErr)
@@ -67,28 +67,31 @@ func main() {
 		}
 
 		validatedUpstreams = append(validatedUpstreams, &upstreampkg.ValidatedUpstream{
-			Config:   upCfg,
-			Tools:    tools,
-			Provider: provider,
+			Config:       upCfg,
+			Tools:        tools,
+			Provider:     provider,
+			SpecYAMLRoot: specYAMLRoot,
 		})
 	}
 
-	registry, err := upstreampkg.New(validatedUpstreams, &cfg.Naming)
+	// Build groups config — create a default group if none configured.
+	groups := cfg.Groups
+	if len(groups) == 0 {
+		allNames := make([]string, 0, len(validatedUpstreams))
+		for _, vu := range validatedUpstreams {
+			allNames = append(allNames, vu.Config.Name)
+		}
+		groups = []config.GroupConfig{{
+			Name:      "default",
+			Endpoint:  "/mcp",
+			Upstreams: allNames,
+		}}
+	}
+
+	registry, err := upstreampkg.New(validatedUpstreams, &cfg.Naming, groups)
 	if err != nil {
 		slog.Error("build tool registry", "error", err)
 		os.Exit(1)
-	}
-
-	mcpSrv := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "mcp-anything", Version: cfg.Telemetry.ServiceVersion}, nil)
-	for _, tool := range registry.Tools() {
-		t := tool // capture for closure
-		mcpSrv.AddTool(t, func(callCtx context.Context, req *sdkmcp.CallToolRequest) (*sdkmcp.CallToolResult, error) {
-			args, parseErr := parseArguments(req.Params.Arguments)
-			if parseErr != nil {
-				return nil, fmt.Errorf("parsing tool arguments: %w", parseErr)
-			}
-			return registry.Dispatch(callCtx, req.Params.Name, args)
-		})
 	}
 
 	// Build inbound auth middleware if configured.
@@ -134,16 +137,37 @@ func main() {
 		authMiddleware = inbound.MiddlewareWithSelector(selectValidator, registry)
 	}
 
-	var mcpHandler http.Handler = sdkmcp.NewStreamableHTTPHandler(func(_ *http.Request) *sdkmcp.Server { return mcpSrv }, nil)
-	if authMiddleware != nil {
-		mcpHandler = authMiddleware(mcpHandler)
+	// Build one MCP handler per group, each mounted at the group's endpoint.
+	mcpHandlers := make(map[string]http.Handler, len(groups))
+	for _, g := range groups {
+		groupName := g.Name
+		groupToolList := registry.ToolsForGroup(groupName)
+
+		groupSrv := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "mcp-anything", Version: cfg.Telemetry.ServiceVersion}, nil)
+		for _, tool := range groupToolList {
+			t := tool // capture for closure
+			groupSrv.AddTool(t, func(callCtx context.Context, req *sdkmcp.CallToolRequest) (*sdkmcp.CallToolResult, error) {
+				args, parseErr := parseArguments(req.Params.Arguments)
+				if parseErr != nil {
+					return nil, fmt.Errorf("parsing tool arguments: %w", parseErr)
+				}
+				return registry.DispatchForGroup(callCtx, groupName, req.Params.Name, args)
+			})
+		}
+
+		var groupHandler http.Handler = sdkmcp.NewStreamableHTTPHandler(func(_ *http.Request) *sdkmcp.Server { return groupSrv }, nil)
+		if authMiddleware != nil {
+			groupHandler = authMiddleware(groupHandler)
+		}
+		mcpHandlers[g.Endpoint] = groupHandler
+		slog.Info("mounted group", "name", groupName, "endpoint", g.Endpoint, "tools", len(groupToolList))
 	}
 
 	var wellKnown http.HandlerFunc
 	if cfg.InboundAuth.Strategy == "jwt" || cfg.InboundAuth.Strategy == "introspection" {
 		wellKnown = inbound.WellKnownHandler(cfg)
 	}
-	srv := server.New(cfg, map[string]http.Handler{"/mcp": mcpHandler}, wellKnown)
+	srv := server.New(cfg, mcpHandlers, wellKnown)
 
 	if err := srv.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		slog.Error("server", "error", err)

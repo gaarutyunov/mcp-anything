@@ -60,7 +60,7 @@ func main() {
 		}
 		slog.Info("validated tools", "upstream", upCfg.Name, "count", len(tools))
 
-		provider, provErr := outbound.New(ctx, &upCfg.OutboundAuth)
+		provider, provErr := outbound.NewRegistry().New(ctx, &upCfg.OutboundAuth)
 		if provErr != nil {
 			slog.Error("build outbound auth provider", "upstream", upCfg.Name, "error", provErr)
 			os.Exit(1)
@@ -94,7 +94,8 @@ func main() {
 	// Build inbound auth middleware if configured.
 	var authMiddleware func(http.Handler) http.Handler
 	if cfg.InboundAuth.Strategy != "" && cfg.InboundAuth.Strategy != "none" {
-		globalValidator, globalHeader, buildErr := buildInboundAuth(ctx, &cfg.InboundAuth)
+		inboundRegistry := inbound.NewValidatorRegistry()
+		globalValidator, globalHeader, buildErr := inboundRegistry.New(ctx, &cfg.InboundAuth)
 		if buildErr != nil {
 			slog.Error("build inbound auth validator", "error", buildErr)
 			os.Exit(1)
@@ -112,7 +113,7 @@ func main() {
 			if !up.Enabled || up.InboundAuthOverride == nil {
 				continue
 			}
-			ov, oh, ovErr := buildInboundAuth(ctx, up.InboundAuthOverride)
+			ov, oh, ovErr := inboundRegistry.New(ctx, up.InboundAuthOverride)
 			if ovErr != nil {
 				slog.Error("build inbound auth override", "upstream", up.Name, "error", ovErr)
 				os.Exit(1)
@@ -147,26 +148,6 @@ func main() {
 	if err := srv.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		slog.Error("server", "error", err)
 		os.Exit(1)
-	}
-}
-
-// buildInboundAuth constructs the token validator and returns the API key header (if applicable).
-func buildInboundAuth(ctx context.Context, cfg *config.InboundAuthConfig) (inbound.TokenValidator, string, error) {
-	switch cfg.Strategy {
-	case "jwt":
-		v, err := inbound.NewJWTValidator(ctx, cfg.JWT)
-		return v, "", err
-	case "introspection":
-		v, err := inbound.NewIntrospectionValidator(ctx, cfg.Introspection)
-		return v, "", err
-	case "apikey":
-		v, err := inbound.NewAPIKeyValidator(cfg.APIKey)
-		if err != nil {
-			return nil, "", err
-		}
-		return v, cfg.APIKey.Header, nil
-	default:
-		return nil, "", fmt.Errorf("unknown inbound auth strategy: %q", cfg.Strategy)
 	}
 }
 

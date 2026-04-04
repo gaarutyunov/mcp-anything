@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"net/http"
 
+	"github.com/gaarutyunov/mcp-anything/internal/auth/outbound"
 	"github.com/gaarutyunov/mcp-anything/internal/config"
 )
 
@@ -26,7 +27,8 @@ func (h *headerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error
 // NewHTTPClient builds an *http.Client for an upstream.
 // It honours cfg.Timeout, cfg.TLSSkipVerify, and injects cfg.Headers via a
 // custom RoundTripper so every request carries the configured static headers.
-func NewHTTPClient(cfg *config.UpstreamConfig) *http.Client {
+// The provider wraps the transport to inject outbound authentication on every request.
+func NewHTTPClient(cfg *config.UpstreamConfig, provider outbound.TokenProvider) *http.Client {
 	transport, ok := http.DefaultTransport.(*http.Transport)
 	if !ok {
 		transport = &http.Transport{}
@@ -41,6 +43,8 @@ func NewHTTPClient(cfg *config.UpstreamConfig) *http.Client {
 	if len(cfg.Headers) > 0 {
 		rt = &headerRoundTripper{headers: cfg.Headers, wrapped: transport}
 	}
+
+	rt = &outbound.AuthTransport{Base: rt, Provider: provider}
 
 	return &http.Client{
 		Timeout:   cfg.Timeout,

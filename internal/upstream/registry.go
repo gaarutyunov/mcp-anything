@@ -15,6 +15,7 @@ import (
 	"github.com/getkin/kin-openapi/openapi3filter"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	outboundauth "github.com/gaarutyunov/mcp-anything/internal/auth/outbound"
 	"github.com/gaarutyunov/mcp-anything/internal/config"
 	"github.com/gaarutyunov/mcp-anything/internal/openapi"
 	"github.com/gaarutyunov/mcp-anything/internal/transform"
@@ -25,7 +26,6 @@ type Upstream struct {
 	Name    string
 	BaseURL string
 	Client  *http.Client
-	// OutboundAuth will be added in TASK-10.
 }
 
 // RegistryEntry associates a prefixed tool name with its upstream and runtime state.
@@ -53,8 +53,9 @@ type Registry struct {
 
 // ValidatedUpstream is the result of validating a single upstream configuration.
 type ValidatedUpstream struct {
-	Config *config.UpstreamConfig
-	Tools  []*openapi.ValidatedTool
+	Config   *config.UpstreamConfig
+	Tools    []*openapi.ValidatedTool
+	Provider outboundauth.TokenProvider
 }
 
 // New builds a Registry from all validated upstreams.
@@ -80,7 +81,7 @@ func New(upstreams []*ValidatedUpstream, naming *config.NamingConfig) (*Registry
 		up := &Upstream{
 			Name:    vu.Config.Name,
 			BaseURL: vu.Config.BaseURL,
-			Client:  NewHTTPClient(vu.Config),
+			Client:  NewHTTPClient(vu.Config, vu.Provider),
 		}
 		r.byPrefix[vu.Config.ToolPrefix] = up
 

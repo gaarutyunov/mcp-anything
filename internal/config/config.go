@@ -98,6 +98,35 @@ type UpstreamConfig struct {
 	StartupValidationTimeout time.Duration       `koanf:"startup_validation_timeout"`
 	Validation               ValidationConfig    `koanf:"validation"`
 	InboundAuthOverride      *InboundAuthConfig  `koanf:"inbound_auth_override"`
+	OutboundAuth             OutboundAuthConfig  `koanf:"outbound_auth"`
+}
+
+// OutboundAuthConfig controls how the proxy authenticates outbound requests to an upstream API.
+type OutboundAuthConfig struct {
+	Strategy                string               `koanf:"strategy"` // bearer|api_key|oauth2_client_credentials|none
+	Bearer                  BearerOutboundConfig `koanf:"bearer"`
+	APIKey                  APIKeyOutboundConfig `koanf:"api_key"`
+	OAuth2ClientCredentials OAuth2CCConfig       `koanf:"oauth2_client_credentials"`
+}
+
+// BearerOutboundConfig configures static Bearer token injection.
+type BearerOutboundConfig struct {
+	TokenEnv string `koanf:"token_env"` // env var name containing the token
+}
+
+// APIKeyOutboundConfig configures API key header injection.
+type APIKeyOutboundConfig struct {
+	Header   string `koanf:"header"`    // header name to inject
+	ValueEnv string `koanf:"value_env"` // env var name containing the value
+	Prefix   string `koanf:"prefix"`    // prepended to value, e.g. "ApiKey "
+}
+
+// OAuth2CCConfig configures OAuth2 client credentials flow.
+type OAuth2CCConfig struct {
+	TokenURL     string   `koanf:"token_url"`
+	ClientID     string   `koanf:"client_id"`
+	ClientSecret string   `koanf:"client_secret"` // supports ${ENV_VAR} expansion
+	Scopes       []string `koanf:"scopes"`
 }
 
 // OpenAPISourceConfig points to an OpenAPI spec file or URL.

@@ -21,7 +21,15 @@ import (
 	upstreampkg "github.com/gaarutyunov/mcp-anything/internal/upstream"
 )
 
+// Set by goreleaser ldflags.
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
 func main() {
+	slog.Info("starting mcp-anything", "version", version, "commit", commit, "date", date)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 

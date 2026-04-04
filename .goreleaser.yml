@@ -1,0 +1,62 @@
+version: 2
+
+project_name: mcp-anything
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: proxy
+    main: ./cmd/proxy
+    binary: proxy
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.ShortCommit}}
+      - -X main.date={{.Date}}
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - id: default
+    formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+dockers_v2:
+  - ids: [proxy]
+    images:
+      - "ghcr.io/gaarutyunov/mcp-anything"
+    tags:
+      - "{{ .Version }}"
+      - "latest"
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    dockerfile: Dockerfile.goreleaser
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - "^chore:"
+
+release:
+  github:
+    owner: gaarutyunov
+    name: mcp-anything
+  prerelease: auto
+  name_template: "v{{ .Version }}"

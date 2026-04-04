@@ -1,13 +1,122 @@
 package config
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
+	"path/filepath"
+	"sync/atomic"
 	"time"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/knadh/koanf/parsers/yaml"
 	"github.com/knadh/koanf/providers/file"
 	"github.com/knadh/koanf/v2"
+
+	"github.com/gaarutyunov/mcp-anything/internal/telemetry"
 )
+
+// Loader watches a config file and atomically updates the live configuration on change.
+type Loader struct {
+	path    string
+	current atomic.Pointer[ProxyConfig]
+	onLoad  func(*ProxyConfig) error
+}
+
+// NewLoader creates a Loader, performs the initial load and validation, and returns.
+// If the initial load or validation fails, it returns an error (callers should treat this as fatal).
+func NewLoader(path string, onLoad func(*ProxyConfig) error) (*Loader, error) {
+	l := &Loader{
+		path:   path,
+		onLoad: onLoad,
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		return nil, fmt.Errorf("initial config load: %w", err)
+	}
+	if err := onLoad(cfg); err != nil {
+		return nil, fmt.Errorf("initial validation: %w", err)
+	}
+	l.current.Store(cfg)
+	return l, nil
+}
+
+// Current returns the currently active configuration. Safe for concurrent reads.
+func (l *Loader) Current() *ProxyConfig {
+	return l.current.Load()
+}
+
+// Watch starts the fsnotify watcher for the parent directory of the config file.
+// It debounces CREATE events (500 ms) before triggering a reload.
+// Blocks until ctx is cancelled.
+func (l *Loader) Watch(ctx context.Context) {
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		slog.Error("creating config watcher", "error", err)
+		return
+	}
+	defer func() {
+		if closeErr := watcher.Close(); closeErr != nil {
+			slog.Warn("closing config watcher", "error", closeErr)
+		}
+	}()
+
+	dir := filepath.Dir(l.path)
+	if err := watcher.Add(dir); err != nil {
+		slog.Error("watching config directory", "path", dir, "error", err)
+		return
+	}
+	slog.Info("config watcher started", "path", l.path)
+
+	var debounceTimer *time.Timer
+	for {
+		select {
+		case <-ctx.Done():
+			if debounceTimer != nil {
+				debounceTimer.Stop()
+			}
+			return
+		case event, ok := <-watcher.Events:
+			if !ok {
+				return
+			}
+			if event.Op&(fsnotify.Create|fsnotify.Write) == 0 {
+				continue
+			}
+			if debounceTimer != nil {
+				debounceTimer.Stop()
+			}
+			debounceTimer = time.AfterFunc(500*time.Millisecond, func() {
+				l.tryReload(ctx)
+			})
+		case err, ok := <-watcher.Errors:
+			if !ok {
+				return
+			}
+			slog.Error("config watcher error", "error", err)
+		}
+	}
+}
+
+// tryReload attempts to load and validate the config file. On success it atomically swaps
+// the active config. On failure it retains the previous config and logs the error.
+func (l *Loader) tryReload(ctx context.Context) {
+	telemetry.IncrConfigReloadTotal()
+
+	cfg, err := Load(l.path)
+	if err != nil {
+		slog.Error("config reload failed", "error", err)
+		telemetry.IncrConfigReloadErrors()
+		return
+	}
+	if err := l.onLoad(cfg); err != nil {
+		slog.Error("config reload failed", "error", err)
+		telemetry.IncrConfigReloadErrors()
+		return
+	}
+	l.current.Store(cfg)
+	slog.Info("config reloaded", "upstreams", len(cfg.Upstreams))
+}
 
 // Load reads the YAML config file at path and returns a ProxyConfig with
 // defaults applied for any missing fields.

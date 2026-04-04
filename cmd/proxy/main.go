@@ -15,6 +15,7 @@ import (
 	mcppkg "github.com/gaarutyunov/mcp-anything/internal/mcp"
 	"github.com/gaarutyunov/mcp-anything/internal/server"
 	"github.com/gaarutyunov/mcp-anything/internal/telemetry"
+	upstreampkg "github.com/gaarutyunov/mcp-anything/internal/upstream"
 )
 
 func main() {
@@ -102,7 +103,33 @@ func main() {
 		wellKnown = inbound.WellKnownHandler(cfg)
 	}
 
-	srv := server.New(cfg, mcpHandlers, wellKnown, telemetry.ReloadMetricsHandler())
+	// Create background refreshers for URL-based upstreams.
+	var refreshers []*upstreampkg.Refresher
+	for i := range cfg.Upstreams {
+		upCfg := &cfg.Upstreams[i]
+		if !upCfg.Enabled || upCfg.OpenAPI.RefreshInterval <= 0 {
+			continue
+		}
+		if !isURLSource(upCfg.OpenAPI.Source) {
+			continue
+		}
+		refresher, refErr := upstreampkg.NewRefresher(ctx, upCfg, &cfg.Naming, manager)
+		if refErr != nil {
+			slog.Error("creating refresher", "upstream", upCfg.Name, "error", refErr)
+			os.Exit(1)
+		}
+		refreshers = append(refreshers, refresher)
+	}
+	for _, r := range refreshers {
+		r.Start(ctx)
+	}
+
+	var readiness server.ReadinessChecker
+	if len(refreshers) > 0 {
+		readiness = upstreampkg.NewRefresherSet(refreshers)
+	}
+
+	srv := server.New(cfg, mcpHandlers, wellKnown, telemetry.ReloadMetricsHandler(), readiness)
 
 	// Start config watcher in background.
 	go loader.Watch(ctx)
@@ -111,4 +138,9 @@ func main() {
 		slog.Error("server", "error", err)
 		os.Exit(1)
 	}
+}
+
+// isURLSource reports whether the given source string is an HTTP/HTTPS URL.
+func isURLSource(source string) bool {
+	return len(source) >= 4 && source[:4] == "http"
 }

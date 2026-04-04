@@ -36,6 +36,7 @@ type RegistryEntry struct {
 	PrefixedName   string
 	OriginalName   string // without prefix — used for upstream HTTP path
 	Upstream       *Upstream
+	MCPTool        *sdkmcp.Tool // MCP tool definition for tools/list
 	Transforms     *transform.CompiledTransforms
 	ResponseFormat string // x-mcp-response-format value; default "json"
 	AuthRequired   bool   // x-mcp-auth-required; default true
@@ -57,6 +58,8 @@ type groupData struct {
 type Registry struct {
 	byPrefixedName map[string]*RegistryEntry
 	byPrefix       map[string]*Upstream
+	byUpstreamName map[string][]*RegistryEntry // upstream name → ordered entries
+	specRootByName map[string]*yaml.Node       // upstream name → post-overlay YAML root
 	toolList       []*sdkmcp.Tool
 	separator      string
 	groups         map[string]*groupData // group name → pre-computed membership
@@ -78,6 +81,8 @@ func New(upstreams []*ValidatedUpstream, naming *config.NamingConfig, groups []c
 	r := &Registry{
 		byPrefixedName: make(map[string]*RegistryEntry),
 		byPrefix:       make(map[string]*Upstream),
+		byUpstreamName: make(map[string][]*RegistryEntry),
+		specRootByName: make(map[string]*yaml.Node),
 		separator:      naming.Separator,
 		groups:         make(map[string]*groupData),
 	}
@@ -99,6 +104,7 @@ func New(upstreams []*ValidatedUpstream, naming *config.NamingConfig, groups []c
 			Client:  NewHTTPClient(vu.Config, vu.Provider),
 		}
 		r.byPrefix[vu.Config.ToolPrefix] = up
+		r.specRootByName[vu.Config.Name] = vu.SpecYAMLRoot
 
 		for _, vt := range vu.Tools {
 			if existing, ok := r.byPrefixedName[vt.PrefixedName]; ok {
@@ -113,6 +119,7 @@ func New(upstreams []*ValidatedUpstream, naming *config.NamingConfig, groups []c
 				PrefixedName:   vt.PrefixedName,
 				OriginalName:   vt.OriginalName,
 				Upstream:       up,
+				MCPTool:        vt.MCPTool,
 				Transforms:     vt.Transforms,
 				ResponseFormat: extractResponseFormat(vt.Operation),
 				AuthRequired:   authRequired,
@@ -123,6 +130,7 @@ func New(upstreams []*ValidatedUpstream, naming *config.NamingConfig, groups []c
 				OperationNode:  vt.OperationNode,
 			}
 			r.byPrefixedName[vt.PrefixedName] = entry
+			r.byUpstreamName[vu.Config.Name] = append(r.byUpstreamName[vu.Config.Name], entry)
 			r.toolList = append(r.toolList, vt.MCPTool)
 		}
 	}
@@ -192,6 +200,27 @@ func New(upstreams []*ValidatedUpstream, naming *config.NamingConfig, groups []c
 	}
 
 	return r, nil
+}
+
+// EntriesForUpstream returns all RegistryEntry objects for the named upstream.
+// Returns nil if the upstream is unknown.
+func (r *Registry) EntriesForUpstream(upstreamName string) []*RegistryEntry {
+	return r.byUpstreamName[upstreamName]
+}
+
+// SpecRootForUpstream returns the post-overlay YAML root for the named upstream.
+// Returns nil if the upstream is unknown or has no YAML root.
+func (r *Registry) SpecRootForUpstream(upstreamName string) *yaml.Node {
+	return r.specRootByName[upstreamName]
+}
+
+// UpstreamNames returns the names of all registered upstreams.
+func (r *Registry) UpstreamNames() []string {
+	names := make([]string, 0, len(r.byUpstreamName))
+	for name := range r.byUpstreamName {
+		names = append(names, name)
+	}
+	return names
 }
 
 // ToolsForGroup returns the MCP tool list for the given group.
@@ -459,6 +488,119 @@ func extractResponseFormat(op *openapi3.Operation) string {
 		return s
 	}
 	return "json"
+}
+
+// NewFromEntries builds a Registry from pre-compiled RegistryEntry objects.
+// This is used by background refresh (UpdateUpstream / RemoveUpstream) to rebuild
+// the registry without re-running the full validation pipeline.
+// entriesByUpstream maps upstream name → ordered slice of entries (each entry must
+// have MCPTool set). specRootByUpstream maps upstream name → post-overlay YAML root
+// used for JSONPath group filter evaluation (may be nil to skip filtering).
+func NewFromEntries(
+	entriesByUpstream map[string][]*RegistryEntry,
+	specRootByUpstream map[string]*yaml.Node,
+	naming *config.NamingConfig,
+	groups []config.GroupConfig,
+) (*Registry, error) {
+	r := &Registry{
+		byPrefixedName: make(map[string]*RegistryEntry),
+		byPrefix:       make(map[string]*Upstream),
+		byUpstreamName: make(map[string][]*RegistryEntry),
+		specRootByName: make(map[string]*yaml.Node),
+		separator:      naming.Separator,
+		groups:         make(map[string]*groupData),
+	}
+
+	for upName, root := range specRootByUpstream {
+		r.specRootByName[upName] = root
+	}
+
+	// Register all entries.
+	for upName, entries := range entriesByUpstream {
+		r.byUpstreamName[upName] = entries
+		for _, entry := range entries {
+			if existing, ok := r.byPrefixedName[entry.PrefixedName]; ok {
+				upA := ""
+				upB := ""
+				if existing.Upstream != nil {
+					upA = existing.Upstream.Name
+				}
+				if entry.Upstream != nil {
+					upB = entry.Upstream.Name
+				}
+				return nil, fmt.Errorf("tool name conflict %q between upstreams %q and %q", entry.PrefixedName, upA, upB)
+			}
+			r.byPrefixedName[entry.PrefixedName] = entry
+			if entry.Upstream != nil {
+				r.byPrefix[entry.Upstream.Name] = entry.Upstream
+			}
+			if entry.MCPTool != nil {
+				r.toolList = append(r.toolList, entry.MCPTool)
+			}
+		}
+	}
+
+	// Compile group filters.
+	compiledFilters := make(map[string]*jsonpath.JSONPath, len(groups))
+	for _, g := range groups {
+		if g.Filter == "" {
+			continue
+		}
+		jp, err := jsonpath.NewPath(g.Filter)
+		if err != nil {
+			return nil, fmt.Errorf("group %q has invalid JSONPath filter %q: %w", g.Name, g.Filter, err)
+		}
+		compiledFilters[g.Name] = jp
+	}
+
+	// Build group membership.
+	for _, g := range groups {
+		gd := &groupData{
+			toolSet: make(map[string]bool),
+		}
+		upstreamSet := make(map[string]bool, len(g.Upstreams))
+		for _, name := range g.Upstreams {
+			upstreamSet[name] = true
+		}
+
+		jp := compiledFilters[g.Name]
+
+		for upName, entries := range entriesByUpstream {
+			if !upstreamSet[upName] {
+				continue
+			}
+			specRoot := specRootByUpstream[upName]
+
+			var matchedNodes map[*yaml.Node]bool
+			if jp != nil && specRoot != nil {
+				results := jp.Query(specRoot)
+				matchedNodes = make(map[*yaml.Node]bool, len(results))
+				for _, n := range results {
+					matchedNodes[n] = true
+				}
+			}
+
+			for _, entry := range entries {
+				if jp != nil {
+					if entry.OperationNode == nil || !matchedNodes[entry.OperationNode] {
+						continue
+					}
+				}
+				gd.toolSet[entry.PrefixedName] = true
+			}
+		}
+
+		// Build ordered tool list for this group.
+		for _, t := range r.toolList {
+			if gd.toolSet[t.Name] {
+				gd.toolList = append(gd.toolList, t)
+			}
+		}
+
+		r.groups[g.Name] = gd
+	}
+
+	return r, nil
 }
 
 // extractAuthRequired reads x-mcp-auth-required from an operation extension (default true).

@@ -1,4 +1,5 @@
-package outbound
+// Package jsprovider registers the "js_script" outbound auth strategy.
+package jsprovider
 
 import (
 	"context"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/grafana/sobek"
 
+	"github.com/gaarutyunov/mcp-anything/internal/auth/outbound"
 	"github.com/gaarutyunov/mcp-anything/internal/config"
 	"github.com/gaarutyunov/mcp-anything/internal/runtime"
 	"github.com/gaarutyunov/mcp-anything/internal/script"
@@ -22,28 +24,22 @@ import (
 
 const defaultJSOutboundTimeout = 500 * time.Millisecond
 const defaultJSOutboundFetchTimeout = 30 * time.Second
-
-// jsOutboundNoCacheExpiry is a short-lived expiry (1 second) used when the JS script
-// returns no expiry. This prevents double-execution within the same RoundTrip() call,
-// while still refreshing credentials on subsequent requests.
 const jsOutboundNoCacheExpiry = int64(1)
 
+func init() {
+	outbound.RegisterProvider("js_script", func(_ context.Context, cfg *config.OutboundAuthConfig, pools *runtime.Registry) (outbound.TokenProvider, error) {
+		return NewJSProvider(cfg.Upstream, cfg.JS, pools.JSAuth)
+	})
+}
+
 // JSProvider implements TokenProvider using a JavaScript (Sobek) script.
-// The script receives (upstream, ctx) and must return an object:
-//
-//	{ token?: string, raw_headers?: object, expiry?: number, error?: string }
-//
-// A fresh sobek.Runtime is created per script invocation (Sobek is not goroutine-safe).
-// The pre-compiled program is reused. Results are cached at the Go level to avoid
-// re-invoking the script on every request. The shared pool bounds the maximum number
-// of concurrent JS runtimes to prevent OOM under load.
 type JSProvider struct {
 	upstreamName string
 	program      *sobek.Program
 	timeout      time.Duration
 	env          map[string]string
 	cache        *jsOutboundCache
-	scriptCache  *jsOutboundScriptCache // persists across callScript invocations
+	scriptCache  *jsOutboundScriptCache
 	httpClient   *http.Client
 	pool         *runtime.Pool
 }
@@ -51,13 +47,11 @@ type JSProvider struct {
 type jsOutboundCache struct {
 	mu         sync.Mutex
 	token      string
-	expiry     int64 // unix timestamp; 0 = fetch on next call
+	expiry     int64
 	rawHeaders map[string]string
 }
 
 // NewJSProvider creates a JSProvider by reading and pre-compiling the JS script.
-// pool bounds the number of concurrent JS runtimes; it is shared with the inbound
-// JS auth validator to enforce a single global limit for all auth scripts.
 func NewJSProvider(upstreamName string, cfg config.JSOutboundConfig, pool *runtime.Pool) (*JSProvider, error) {
 	src, err := os.ReadFile(cfg.ScriptPath)
 	if err != nil {
@@ -84,7 +78,6 @@ func NewJSProvider(upstreamName string, cfg config.JSOutboundConfig, pool *runti
 }
 
 // Token returns the current Bearer token, invoking the JS script if the cache has expired.
-// Returns empty string if the script provides raw headers instead.
 func (p *JSProvider) Token(ctx context.Context) (string, error) {
 	if err := p.ensureToken(ctx); err != nil {
 		return "", err
@@ -114,7 +107,6 @@ func (p *JSProvider) RawHeaders(ctx context.Context) (map[string]string, error) 
 	return out, nil
 }
 
-// ensureToken refreshes the cached credentials if expired or absent.
 func (p *JSProvider) ensureToken(ctx context.Context) error {
 	p.cache.mu.Lock()
 	defer p.cache.mu.Unlock()
@@ -139,7 +131,6 @@ func (p *JSProvider) ensureToken(ctx context.Context) error {
 	return nil
 }
 
-// callScript invokes the JS script and returns (token, expiry, rawHeaders, error).
 func (p *JSProvider) callScript(ctx context.Context) (token string, expiry int64, rawHeaders map[string]string, err error) {
 	release, acquireErr := p.pool.Acquire(ctx)
 	if acquireErr != nil {
@@ -149,7 +140,6 @@ func (p *JSProvider) callScript(ctx context.Context) (token string, expiry int64
 
 	rt := sobek.New()
 
-	// scriptCtx bounds ctx.fetch HTTP calls to the script deadline.
 	scriptCtx := ctx
 	if p.timeout > 0 {
 		var cancel context.CancelFunc
@@ -183,7 +173,6 @@ func (p *JSProvider) callScript(ctx context.Context) (token string, expiry int64
 	return parseJSOutboundResult(result)
 }
 
-// parseJSOutboundResult extracts token, expiry, and rawHeaders from the JS return value.
 func parseJSOutboundResult(result sobek.Value) (token string, expiry int64, rawHeaders map[string]string, err error) {
 	exported := result.Export()
 	resMap, ok := exported.(map[string]any)
@@ -224,12 +213,9 @@ func parseJSOutboundResult(result sobek.Value) (token string, expiry int64, rawH
 	return token, expiry, rawHeaders, nil
 }
 
-// buildCtxObject constructs the JS ctx object for outbound auth scripts.
-// Provides: ctx.env, ctx.log, ctx.jwt.decode, ctx.cache.get/set, ctx.fetch.
 func (p *JSProvider) buildCtxObject(ctx context.Context, rt *sobek.Runtime, scriptCache *jsOutboundScriptCache) *sobek.Object {
 	ctxObj := rt.NewObject()
 
-	// ctx.env — read-only environment variables.
 	envObj := rt.NewObject()
 	for k, val := range p.env {
 		expanded := os.ExpandEnv(val)
@@ -241,7 +227,6 @@ func (p *JSProvider) buildCtxObject(ctx context.Context, rt *sobek.Runtime, scri
 		slog.Warn("js outbound auth: failed to set ctx.env", "error", err)
 	}
 
-	// ctx.log(level, msg) — structured logging.
 	if err := ctxObj.Set("log", func(level, msg string) {
 		switch strings.ToLower(level) {
 		case "debug":
@@ -257,7 +242,6 @@ func (p *JSProvider) buildCtxObject(ctx context.Context, rt *sobek.Runtime, scri
 		slog.Warn("js outbound auth: failed to set ctx.log", "error", err)
 	}
 
-	// ctx.jwt.decode(token) — decode a JWT payload without verification.
 	jwtObj := rt.NewObject()
 	if err := jwtObj.Set("decode", func(call sobek.FunctionCall) sobek.Value {
 		if len(call.Arguments) == 0 {
@@ -284,9 +268,6 @@ func (p *JSProvider) buildCtxObject(ctx context.Context, rt *sobek.Runtime, scri
 		slog.Warn("js outbound auth: failed to set ctx.jwt", "error", err)
 	}
 
-	// ctx.cache.get(key) / ctx.cache.set(key, value, ttlSeconds) — shared in-memory cache.
-	// This cache persists across callScript invocations via the JSProvider.cache field.
-	// The scriptCache here is a per-invocation wrapper that safely exports values back to Go.
 	cacheObj := rt.NewObject()
 	if err := cacheObj.Set("get", func(call sobek.FunctionCall) sobek.Value {
 		if len(call.Arguments) == 0 {
@@ -320,7 +301,6 @@ func (p *JSProvider) buildCtxObject(ctx context.Context, rt *sobek.Runtime, scri
 		slog.Warn("js outbound auth: failed to set ctx.cache", "error", err)
 	}
 
-	// ctx.fetch(url, opts) — sandboxed HTTP client.
 	if err := ctxObj.Set("fetch", func(call sobek.FunctionCall) sobek.Value {
 		return jsOutboundFetch(ctx, rt, p.httpClient, call)
 	}); err != nil {
@@ -330,7 +310,6 @@ func (p *JSProvider) buildCtxObject(ctx context.Context, rt *sobek.Runtime, scri
 	return ctxObj
 }
 
-// jsOutboundFetch implements ctx.fetch(url, opts) for outbound auth scripts.
 func jsOutboundFetch(ctx context.Context, rt *sobek.Runtime, client *http.Client, call sobek.FunctionCall) sobek.Value {
 	if len(call.Arguments) == 0 {
 		panic(rt.NewTypeError("ctx.fetch requires a URL argument"))
@@ -391,9 +370,6 @@ func jsOutboundFetch(ctx context.Context, rt *sobek.Runtime, client *http.Client
 	return rt.ToValue(string(body))
 }
 
-// jsOutboundScriptCache is a thread-safe key-value cache with optional TTL.
-// It is shared across callScript invocations within the same JSProvider,
-// allowing scripts to cache tokens between invocations via ctx.cache.get/set.
 type jsOutboundScriptCache struct {
 	mu    sync.Mutex
 	items map[string]jsOutboundScriptCacheItem

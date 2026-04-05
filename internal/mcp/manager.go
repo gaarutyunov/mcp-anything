@@ -49,6 +49,8 @@ type Manager struct {
 // NewManager creates a Manager with no active servers.
 // pools is used to bound the number of concurrent script runtime instances
 // across all upstream builders and auth factories.
+// The BuilderRegistry is created from globally registered builder factories
+// (populated by init() calls in upstream sub-packages).
 func NewManager(pools *runtime.Registry) *Manager {
 	return &Manager{
 		servers:        make(map[string]*sdkmcp.Server),
@@ -290,7 +292,7 @@ func (m *Manager) applyRegistryLocked(newRegistry *upstreampkg.Registry, groups 
 
 // UpdateUpstream atomically replaces the tools for one upstream in the registry.
 // It is called by the background Refresher after a successful spec re-fetch.
-// Implements upstream.RegistryManager.
+// Implements upstream/http.RegistryManager.
 func (m *Manager) UpdateUpstream(upstreamName string, entries []*upstreampkg.RegistryEntry, specYAMLRoot *yaml.Node) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -310,7 +312,7 @@ func (m *Manager) UpdateUpstream(upstreamName string, entries []*upstreampkg.Reg
 
 // RemoveUpstream removes all tools for one upstream from the registry.
 // It is called by the background Refresher after max_refresh_failures is exceeded.
-// Implements upstream.RegistryManager.
+// Implements upstream/http.RegistryManager.
 func (m *Manager) RemoveUpstream(upstreamName string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

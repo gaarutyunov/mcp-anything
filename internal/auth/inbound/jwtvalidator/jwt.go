@@ -1,4 +1,5 @@
-package inbound
+// Package jwtvalidator registers the "jwt" inbound auth strategy.
+package jwtvalidator
 
 import (
 	"context"
@@ -7,8 +8,17 @@ import (
 
 	"github.com/coreos/go-oidc/v3/oidc"
 
+	"github.com/gaarutyunov/mcp-anything/internal/auth/inbound"
 	"github.com/gaarutyunov/mcp-anything/internal/config"
+	"github.com/gaarutyunov/mcp-anything/internal/runtime"
 )
+
+func init() {
+	inbound.RegisterValidator("jwt", func(ctx context.Context, cfg *config.InboundAuthConfig, _ *runtime.Registry) (inbound.TokenValidator, string, error) {
+		v, err := NewJWTValidator(ctx, cfg.JWT)
+		return v, "", err
+	})
+}
 
 // JWTValidator validates JWT Bearer tokens using OIDC/JWKS.
 type JWTValidator struct {
@@ -16,7 +26,6 @@ type JWTValidator struct {
 }
 
 // NewJWTValidator creates a JWTValidator from the given config.
-// If cfg.JWKSURL is set, it uses that directly; otherwise it performs OIDC discovery.
 func NewJWTValidator(ctx context.Context, cfg config.JWTAuthConfig) (*JWTValidator, error) {
 	oidcConfig := &oidc.Config{ClientID: cfg.Audience}
 
@@ -36,7 +45,7 @@ func NewJWTValidator(ctx context.Context, cfg config.JWTAuthConfig) (*JWTValidat
 }
 
 // ValidateToken verifies the JWT signature, expiry, and audience, then returns TokenInfo.
-func (v *JWTValidator) ValidateToken(ctx context.Context, raw string) (*TokenInfo, error) {
+func (v *JWTValidator) ValidateToken(ctx context.Context, raw string) (*inbound.TokenInfo, error) {
 	token, err := v.verifier.Verify(ctx, raw)
 	if err != nil {
 		return nil, fmt.Errorf("verifying JWT: %w", err)
@@ -49,7 +58,7 @@ func (v *JWTValidator) ValidateToken(ctx context.Context, raw string) (*TokenInf
 		return nil, fmt.Errorf("extracting JWT claims: %w", err)
 	}
 
-	return &TokenInfo{
+	return &inbound.TokenInfo{
 		Subject:  token.Subject,
 		Scopes:   strings.Fields(claims.Scope),
 		Audience: token.Audience,

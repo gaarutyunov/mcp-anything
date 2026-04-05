@@ -1,4 +1,5 @@
-package inbound
+// Package jsvalidator registers the "js_script" inbound auth strategy.
+package jsvalidator
 
 import (
 	"context"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/grafana/sobek"
 
+	"github.com/gaarutyunov/mcp-anything/internal/auth/inbound"
 	"github.com/gaarutyunov/mcp-anything/internal/config"
 	"github.com/gaarutyunov/mcp-anything/internal/runtime"
 	"github.com/gaarutyunov/mcp-anything/internal/script"
@@ -23,14 +25,14 @@ import (
 const defaultJSInboundTimeout = 500 * time.Millisecond
 const defaultJSInboundFetchTimeout = 30 * time.Second
 
+func init() {
+	inbound.RegisterValidator("js_script", func(_ context.Context, cfg *config.InboundAuthConfig, pools *runtime.Registry) (inbound.TokenValidator, string, error) {
+		v, err := NewJSValidator(cfg.JS, pools.JSAuth)
+		return v, "", err
+	})
+}
+
 // JSValidator implements TokenValidator using a sandboxed Sobek JS runtime.
-// The JavaScript script receives (token, ctx) and must return an object:
-//
-//	{ allowed: bool, status?: number, error?: string, subject?: string, extra_headers?: object }
-//
-// A fresh sobek.Runtime is created per call (Sobek is not goroutine-safe).
-// The pre-compiled program is reused across calls. The shared pool bounds
-// the maximum number of concurrent JS runtimes to prevent OOM under load.
 type JSValidator struct {
 	program    *sobek.Program
 	timeout    time.Duration
@@ -41,8 +43,6 @@ type JSValidator struct {
 }
 
 // NewJSValidator creates a JSValidator by reading and pre-compiling the JS script.
-// pool bounds the number of concurrent JS runtimes; it is shared with the outbound
-// JS auth provider to enforce a single global limit for all auth scripts.
 func NewJSValidator(cfg config.JSAuthConfig, pool *runtime.Pool) (*JSValidator, error) {
 	src, err := os.ReadFile(cfg.ScriptPath)
 	if err != nil {
@@ -67,7 +67,7 @@ func NewJSValidator(cfg config.JSAuthConfig, pool *runtime.Pool) (*JSValidator, 
 }
 
 // ValidateToken runs the JS script with the token and returns identity info on success.
-func (v *JSValidator) ValidateToken(ctx context.Context, token string) (*TokenInfo, error) {
+func (v *JSValidator) ValidateToken(ctx context.Context, token string) (*inbound.TokenInfo, error) {
 	release, err := v.pool.Acquire(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("js auth: %w", err)
@@ -76,7 +76,6 @@ func (v *JSValidator) ValidateToken(ctx context.Context, token string) (*TokenIn
 
 	rt := sobek.New()
 
-	// scriptCtx bounds ctx.fetch HTTP calls to the script deadline.
 	scriptCtx := ctx
 	if v.timeout > 0 {
 		var cancel context.CancelFunc
@@ -110,8 +109,7 @@ func (v *JSValidator) ValidateToken(ctx context.Context, token string) (*TokenIn
 	return parseJSInboundResult(result)
 }
 
-// parseJSInboundResult extracts TokenInfo from the JS script's return value.
-func parseJSInboundResult(result sobek.Value) (*TokenInfo, error) {
+func parseJSInboundResult(result sobek.Value) (*inbound.TokenInfo, error) {
 	exported := result.Export()
 	resMap, ok := exported.(map[string]any)
 	if !ok {
@@ -133,10 +131,10 @@ func parseJSInboundResult(result sobek.Value) (*TokenInfo, error) {
 		if e, ok := resMap["error"].(string); ok {
 			errMsg = e
 		}
-		return nil, &DeniedError{Status: status, Message: errMsg}
+		return nil, &inbound.DeniedError{Status: status, Message: errMsg}
 	}
 
-	info := &TokenInfo{Subject: "js-authenticated", Extra: make(map[string]any)}
+	info := &inbound.TokenInfo{Subject: "js-authenticated", Extra: make(map[string]any)}
 	if sub, ok := resMap["subject"].(string); ok && sub != "" {
 		info.Subject = sub
 	}
@@ -150,12 +148,9 @@ func parseJSInboundResult(result sobek.Value) (*TokenInfo, error) {
 	return info, nil
 }
 
-// buildCtxObject constructs the JS ctx object exposed to auth scripts.
-// Provides: ctx.env, ctx.log, ctx.jwt.decode, ctx.cache.get/set, ctx.fetch.
 func (v *JSValidator) buildCtxObject(ctx context.Context, rt *sobek.Runtime) *sobek.Object {
 	ctxObj := rt.NewObject()
 
-	// ctx.env — read-only environment variables.
 	envObj := rt.NewObject()
 	for k, val := range v.env {
 		expanded := os.ExpandEnv(val)
@@ -167,7 +162,6 @@ func (v *JSValidator) buildCtxObject(ctx context.Context, rt *sobek.Runtime) *so
 		slog.Warn("js auth: failed to set ctx.env", "error", err)
 	}
 
-	// ctx.log(level, msg) — structured logging.
 	if err := ctxObj.Set("log", func(level, msg string) {
 		switch strings.ToLower(level) {
 		case "debug":
@@ -183,7 +177,6 @@ func (v *JSValidator) buildCtxObject(ctx context.Context, rt *sobek.Runtime) *so
 		slog.Warn("js auth: failed to set ctx.log", "error", err)
 	}
 
-	// ctx.jwt.decode(token) — decode a JWT payload without verification.
 	jwtObj := rt.NewObject()
 	if err := jwtObj.Set("decode", func(call sobek.FunctionCall) sobek.Value {
 		if len(call.Arguments) == 0 {
@@ -210,7 +203,6 @@ func (v *JSValidator) buildCtxObject(ctx context.Context, rt *sobek.Runtime) *so
 		slog.Warn("js auth: failed to set ctx.jwt", "error", err)
 	}
 
-	// ctx.cache.get(key) / ctx.cache.set(key, value, ttlSeconds) — shared in-memory cache.
 	cacheObj := rt.NewObject()
 	if err := cacheObj.Set("get", func(call sobek.FunctionCall) sobek.Value {
 		if len(call.Arguments) == 0 {
@@ -244,7 +236,6 @@ func (v *JSValidator) buildCtxObject(ctx context.Context, rt *sobek.Runtime) *so
 		slog.Warn("js auth: failed to set ctx.cache", "error", err)
 	}
 
-	// ctx.fetch(url, opts) — sandboxed HTTP client.
 	if err := ctxObj.Set("fetch", func(call sobek.FunctionCall) sobek.Value {
 		return jsInboundFetch(ctx, rt, v.httpClient, call)
 	}); err != nil {
@@ -254,7 +245,6 @@ func (v *JSValidator) buildCtxObject(ctx context.Context, rt *sobek.Runtime) *so
 	return ctxObj
 }
 
-// jsInboundFetch implements ctx.fetch(url, opts) for inbound auth scripts.
 func jsInboundFetch(ctx context.Context, rt *sobek.Runtime, client *http.Client, call sobek.FunctionCall) sobek.Value {
 	if len(call.Arguments) == 0 {
 		panic(rt.NewTypeError("ctx.fetch requires a URL argument"))
@@ -315,8 +305,6 @@ func jsInboundFetch(ctx context.Context, rt *sobek.Runtime, client *http.Client,
 	return rt.ToValue(string(body))
 }
 
-// jsInboundCache is a thread-safe key-value cache with optional TTL,
-// shared across ValidateToken calls for the same JSValidator instance.
 type jsInboundCache struct {
 	mu    sync.Mutex
 	items map[string]jsInboundCacheItem

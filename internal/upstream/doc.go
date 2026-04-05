@@ -1,5 +1,6 @@
-// Package upstream manages the per-upstream tool registry, HTTP clients with
-// OpenTelemetry instrumentation, and background refresh of OpenAPI specs and
-// overlays. Each upstream snapshot is stored as an atomic pointer to allow
-// lock-free hot-reload without request interruption.
+// Package upstream defines the core registry, builder, and executor interfaces
+// for mcp-anything upstreams. Concrete implementations (HTTP, command, script)
+// live in sub-packages and register via init() for IoC-based discovery.
+// Import the desired sub-packages for side effects, or use the all/ convenience
+// package to register all built-in upstream types.
 package upstream

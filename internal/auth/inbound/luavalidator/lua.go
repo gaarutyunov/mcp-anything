@@ -1,4 +1,5 @@
-package inbound
+// Package luavalidator registers the "lua" inbound auth strategy.
+package luavalidator
 
 import (
 	"context"
@@ -10,26 +11,28 @@ import (
 	lua "github.com/yuin/gopher-lua"
 	"github.com/yuin/gopher-lua/parse"
 
+	"github.com/gaarutyunov/mcp-anything/internal/auth/inbound"
 	"github.com/gaarutyunov/mcp-anything/internal/config"
 	"github.com/gaarutyunov/mcp-anything/internal/runtime"
 )
 
 const defaultLuaInboundTimeout = 500 * time.Millisecond
 
+func init() {
+	inbound.RegisterValidator("lua", func(_ context.Context, cfg *config.InboundAuthConfig, pools *runtime.Registry) (inbound.TokenValidator, string, error) {
+		v, err := NewLuaValidator(cfg.Lua, pools.LuaAuth)
+		return v, "", err
+	})
+}
+
 // LuaValidator implements TokenValidator using a sandboxed gopher-lua VM.
-// The Lua script receives the token as its first argument (via ...) and must return:
-// allowed (bool), status (int), extra_headers (table), error_msg (string).
-// The shared pool bounds the maximum number of concurrent Lua runtimes to prevent OOM.
 type LuaValidator struct {
 	proto   *lua.FunctionProto
 	pool    *runtime.Pool
 	timeout time.Duration
 }
 
-// NewLuaValidator creates a LuaValidator by reading and pre-compiling the Lua
-// script at cfg.ScriptPath to bytecode. The bytecode is reused across calls.
-// pool bounds the number of concurrent Lua runtimes; it is shared with the outbound
-// Lua auth provider to enforce a single global limit for all auth scripts.
+// NewLuaValidator creates a LuaValidator by reading and pre-compiling the Lua script.
 func NewLuaValidator(cfg config.LuaAuthConfig, pool *runtime.Pool) (*LuaValidator, error) {
 	src, err := os.ReadFile(cfg.ScriptPath)
 	if err != nil {
@@ -54,7 +57,7 @@ func NewLuaValidator(cfg config.LuaAuthConfig, pool *runtime.Pool) (*LuaValidato
 }
 
 // ValidateToken calls the Lua script with the token and returns identity info on success.
-func (v *LuaValidator) ValidateToken(ctx context.Context, token string) (*TokenInfo, error) {
+func (v *LuaValidator) ValidateToken(ctx context.Context, token string) (*inbound.TokenInfo, error) {
 	release, err := v.pool.Acquire(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("lua auth: %w", err)
@@ -75,7 +78,6 @@ func (v *LuaValidator) ValidateToken(ctx context.Context, token string) (*TokenI
 		return nil, fmt.Errorf("lua check_auth: %w", err)
 	}
 
-	// Pop 4 return values in reverse order (top of stack = last return value).
 	errMsg := L.ToString(-1)
 	L.Pop(1)
 	extraHeaders := luaTableToMap(L.ToTable(-1))
@@ -89,30 +91,24 @@ func (v *LuaValidator) ValidateToken(ctx context.Context, token string) (*TokenI
 		return nil, fmt.Errorf("lua auth denied (status %d): %s", status, errMsg)
 	}
 
-	info := &TokenInfo{Subject: "lua-authenticated", Extra: make(map[string]any)}
+	info := &inbound.TokenInfo{Subject: "lua-authenticated", Extra: make(map[string]any)}
 	for k, val := range extraHeaders {
 		info.Extra["header:"+k] = val
 	}
 	return info, nil
 }
 
-// newSandboxedVM creates a new LState with only safe stdlib modules opened.
-// I/O, OS, package, debug, and coroutine modules are intentionally excluded.
-// dofile and loadfile are explicitly removed from the base library to prevent
-// scripts from reading local files via the base library's file-loading functions.
 func newSandboxedVM() *lua.LState {
 	L := lua.NewState(lua.Options{SkipOpenLibs: true, CallStackSize: 64})
 	lua.OpenBase(L)
 	lua.OpenTable(L)
 	lua.OpenString(L)
 	lua.OpenMath(L)
-	// Remove file-loading globals exposed by OpenBase to prevent sandbox escape.
 	L.SetGlobal("dofile", lua.LNil)
 	L.SetGlobal("loadfile", lua.LNil)
 	return L
 }
 
-// compileLuaSource parses and compiles a Lua source string to bytecode.
 func compileLuaSource(src, name string) (*lua.FunctionProto, error) {
 	chunk, err := parse.Parse(strings.NewReader(src), name)
 	if err != nil {
@@ -121,8 +117,6 @@ func compileLuaSource(src, name string) (*lua.FunctionProto, error) {
 	return lua.Compile(chunk, name)
 }
 
-// luaTableToMap converts a *lua.LTable to map[string]string.
-// Non-string keys and values are skipped.
 func luaTableToMap(tbl *lua.LTable) map[string]string {
 	m := make(map[string]string)
 	if tbl == nil {

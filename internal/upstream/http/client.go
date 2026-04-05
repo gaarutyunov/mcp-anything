@@ -1,4 +1,4 @@
-package upstream
+package http
 
 import (
 	"crypto/tls"

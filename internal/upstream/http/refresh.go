@@ -1,4 +1,4 @@
-package upstream
+package http
 
 import (
 	"context"
@@ -17,6 +17,7 @@ import (
 	"github.com/gaarutyunov/mcp-anything/internal/openapi"
 	"github.com/gaarutyunov/mcp-anything/internal/runtime"
 	"github.com/gaarutyunov/mcp-anything/internal/telemetry"
+	"github.com/gaarutyunov/mcp-anything/internal/upstream"
 )
 
 // Snapshot is the compiled state for one upstream at a point in time.
@@ -24,7 +25,7 @@ import (
 type Snapshot struct {
 	Doc           *openapi3.T
 	Router        routers.Router
-	CompiledTools []*RegistryEntry
+	CompiledTools []*upstream.RegistryEntry
 	SpecYAMLRoot  *yaml.Node
 	SpecETag      string
 	OverlayETag   string
@@ -41,7 +42,7 @@ type Snapshot struct {
 // from background refresh goroutines.
 type RegistryManager interface {
 	// UpdateUpstream atomically replaces the tools for one upstream in the registry.
-	UpdateUpstream(upstreamName string, entries []*RegistryEntry, specYAMLRoot *yaml.Node) error
+	UpdateUpstream(upstreamName string, entries []*upstream.RegistryEntry, specYAMLRoot *yaml.Node) error
 	// RemoveUpstream removes all tools for one upstream from the registry.
 	RemoveUpstream(upstreamName string)
 }
@@ -142,11 +143,9 @@ func (r *Refresher) refresh(ctx context.Context) error {
 		return fmt.Errorf("fetching spec: %w", err)
 	}
 	if notModified && !r.shouldRefreshOverlay() {
-		// Neither spec nor overlay has changed.
 		return nil
 	}
 	if notModified {
-		// Spec unchanged — reuse cached bytes from the previous snapshot.
 		specData = prev.cachedSpecBytes
 		newSpecETag = prev.SpecETag
 	}
@@ -197,34 +196,39 @@ func (r *Refresher) refresh(ctx context.Context) error {
 		return fmt.Errorf("building outbound auth: %w", err)
 	}
 
-	up := &Upstream{
+	up := &upstream.Upstream{
 		Name:       r.cfg.Name,
 		ToolPrefix: r.cfg.ToolPrefix,
 		BaseURL:    r.cfg.BaseURL,
-		Client:     NewHTTPClient(r.cfg, provider),
 	}
+	client := NewHTTPClient(r.cfg, provider)
 	validator := openapi.NewValidator(doc, router)
 
-	var entries []*RegistryEntry
+	var entries []*upstream.RegistryEntry
 	for _, gt := range tools {
 		vt, valErr := openapi.ValidateTool(ctx, gt, doc)
 		if valErr != nil {
 			return fmt.Errorf("validating tool %q: %w", gt.PrefixedName, valErr)
 		}
 		vt.Validator = validator
-		entry := &RegistryEntry{
-			PrefixedName:   gt.PrefixedName,
-			OriginalName:   gt.OriginalName,
-			Upstream:       up,
-			MCPTool:        gt.MCPTool,
-			Transforms:     vt.Transforms,
-			ResponseFormat: extractResponseFormat(gt.Operation),
-			AuthRequired:   extractAuthRequired(gt.Operation),
-			Method:         gt.Method,
-			PathTemplate:   gt.PathTemplate,
-			Validator:      vt.Validator,
-			ValidationCfg:  r.cfg.Validation,
-			OperationNode:  gt.OperationNode,
+		entry := &upstream.RegistryEntry{
+			PrefixedName:  gt.PrefixedName,
+			OriginalName:  gt.OriginalName,
+			Upstream:      up,
+			MCPTool:       gt.MCPTool,
+			AuthRequired:  extractAuthRequired(gt.Operation),
+			OperationNode: gt.OperationNode,
+			Executor: &Executor{
+				PrefixedName:   gt.PrefixedName,
+				Client:         client,
+				BaseURL:        r.cfg.BaseURL,
+				Method:         gt.Method,
+				PathTemplate:   gt.PathTemplate,
+				Transforms:     vt.Transforms,
+				ResponseFormat: extractResponseFormat(gt.Operation),
+				Validator:      vt.Validator,
+				ValidationCfg:  r.cfg.Validation,
+			},
 		}
 		entries = append(entries, entry)
 	}
@@ -264,7 +268,6 @@ func (r *Refresher) shouldRefreshOverlay() bool {
 	}
 	overlayInterval := r.cfg.Overlay.RefreshInterval
 	if overlayInterval <= 0 {
-		// Overlay is refreshed together with the spec every cycle.
 		return true
 	}
 	return time.Since(r.lastOverlayFetch) >= overlayInterval
@@ -272,15 +275,12 @@ func (r *Refresher) shouldRefreshOverlay() bool {
 
 // fetchOverlay fetches overlay bytes, using conditional GET if the overlay is a URL.
 // Returns nil bytes if there is no overlay or if the overlay hasn't changed (304).
-// When returning nil due to 304, the caller should reuse the previous snapshot's cached bytes.
-// The fetched bool reports whether an HTTP request was actually made (true = polled the URL).
 func (r *Refresher) fetchOverlay(ctx context.Context, prev *Snapshot) (data []byte, etag string, fetched bool, err error) {
 	if r.cfg.Overlay == nil {
 		return nil, "", false, nil
 	}
 
 	if !r.shouldRefreshOverlay() {
-		// Reuse cached overlay from previous snapshot — no network request made.
 		return prev.cachedOverlayBytes, prev.OverlayETag, false, nil
 	}
 
@@ -297,7 +297,7 @@ func (r *Refresher) fetchOverlay(ctx context.Context, prev *Snapshot) (data []by
 
 // buildSnapshot performs the initial load: fetches spec + overlay, runs the full pipeline,
 // and returns the first Snapshot (without notifying the manager).
-func (r *Refresher) buildSnapshot(ctx context.Context, prev *Snapshot) (*Snapshot, error) {
+func (r *Refresher) buildSnapshot(ctx context.Context, _ *Snapshot) (*Snapshot, error) {
 	specData, specETag, _, err := openapi.FetchSpecConditional(ctx, r.cfg.OpenAPI, "", 5)
 	if err != nil {
 		return nil, fmt.Errorf("fetching spec: %w", err)
@@ -342,39 +342,42 @@ func (r *Refresher) buildSnapshot(ctx context.Context, prev *Snapshot) (*Snapsho
 		return nil, fmt.Errorf("building outbound auth: %w", err)
 	}
 
-	up := &Upstream{
+	up := &upstream.Upstream{
 		Name:       r.cfg.Name,
 		ToolPrefix: r.cfg.ToolPrefix,
 		BaseURL:    r.cfg.BaseURL,
-		Client:     NewHTTPClient(r.cfg, provider),
 	}
+	client := NewHTTPClient(r.cfg, provider)
 	validator := openapi.NewValidator(doc, router)
 
-	var entries []*RegistryEntry
+	var entries []*upstream.RegistryEntry
 	for _, gt := range tools {
 		vt, valErr := openapi.ValidateTool(ctx, gt, doc)
 		if valErr != nil {
 			return nil, fmt.Errorf("validating tool %q: %w", gt.PrefixedName, valErr)
 		}
 		vt.Validator = validator
-		entry := &RegistryEntry{
-			PrefixedName:   gt.PrefixedName,
-			OriginalName:   gt.OriginalName,
-			Upstream:       up,
-			MCPTool:        gt.MCPTool,
-			Transforms:     vt.Transforms,
-			ResponseFormat: extractResponseFormat(gt.Operation),
-			AuthRequired:   extractAuthRequired(gt.Operation),
-			Method:         gt.Method,
-			PathTemplate:   gt.PathTemplate,
-			Validator:      vt.Validator,
-			ValidationCfg:  r.cfg.Validation,
-			OperationNode:  gt.OperationNode,
+		entry := &upstream.RegistryEntry{
+			PrefixedName:  gt.PrefixedName,
+			OriginalName:  gt.OriginalName,
+			Upstream:      up,
+			MCPTool:       gt.MCPTool,
+			AuthRequired:  extractAuthRequired(gt.Operation),
+			OperationNode: gt.OperationNode,
+			Executor: &Executor{
+				PrefixedName:   gt.PrefixedName,
+				Client:         client,
+				BaseURL:        r.cfg.BaseURL,
+				Method:         gt.Method,
+				PathTemplate:   gt.PathTemplate,
+				Transforms:     vt.Transforms,
+				ResponseFormat: extractResponseFormat(gt.Operation),
+				Validator:      vt.Validator,
+				ValidationCfg:  r.cfg.Validation,
+			},
 		}
 		entries = append(entries, entry)
 	}
-
-	_ = prev
 
 	if overlayFetched {
 		r.lastOverlayFetch = time.Now()

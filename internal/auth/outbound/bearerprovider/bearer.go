@@ -1,12 +1,21 @@
-package outbound
+// Package bearerprovider registers the "bearer" outbound auth strategy.
+package bearerprovider
 
 import (
 	"context"
 	"fmt"
 	"os"
 
+	"github.com/gaarutyunov/mcp-anything/internal/auth/outbound"
 	"github.com/gaarutyunov/mcp-anything/internal/config"
+	"github.com/gaarutyunov/mcp-anything/internal/runtime"
 )
+
+func init() {
+	outbound.RegisterProvider("bearer", func(_ context.Context, cfg *config.OutboundAuthConfig, _ *runtime.Registry) (outbound.TokenProvider, error) {
+		return NewBearerProvider(cfg.Bearer), nil
+	})
+}
 
 // BearerProvider injects a static Bearer token read from an environment variable.
 type BearerProvider struct {

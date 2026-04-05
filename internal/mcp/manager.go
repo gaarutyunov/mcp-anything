@@ -17,9 +17,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"gopkg.in/yaml.v3"
 
-	"github.com/gaarutyunov/mcp-anything/internal/auth/outbound"
 	"github.com/gaarutyunov/mcp-anything/internal/config"
-	"github.com/gaarutyunov/mcp-anything/internal/openapi"
 	"github.com/gaarutyunov/mcp-anything/internal/telemetry"
 	upstreampkg "github.com/gaarutyunov/mcp-anything/internal/upstream"
 )
@@ -39,6 +37,8 @@ type Manager struct {
 	impl     *sdkmcp.Implementation // set on first Rebuild
 	mu       sync.RWMutex
 
+	builders *upstreampkg.BuilderRegistry
+
 	// State needed for per-upstream incremental updates (background refresh).
 	groups         []config.GroupConfig
 	namingCfg      *config.NamingConfig
@@ -50,6 +50,7 @@ func NewManager() *Manager {
 	return &Manager{
 		servers:        make(map[string]*sdkmcp.Server),
 		upstreamByName: make(map[string]*upstreamState),
+		builders:       upstreampkg.NewBuilderRegistry(),
 	}
 }
 
@@ -131,25 +132,13 @@ func (m *Manager) Rebuild(ctx context.Context, cfg *config.ProxyConfig) error {
 			continue
 		}
 
-		valCtx, valCancel := context.WithTimeout(ctx, upCfg.StartupValidationTimeout)
-		tools, specYAMLRoot, valErr := openapi.ValidateUpstream(valCtx, upCfg, &cfg.Naming)
-		valCancel()
-		if valErr != nil {
-			return fmt.Errorf("upstream %q validation failed: %w", upCfg.Name, valErr)
+		vu, vuErr := m.builders.Build(ctx, upCfg, &cfg.Naming)
+		if vuErr != nil {
+			return fmt.Errorf("upstream %q: %w", upCfg.Name, vuErr)
 		}
-		slog.Info("validated tools", "upstream", upCfg.Name, "count", len(tools))
+		slog.Info("upstream ready", "upstream", upCfg.Name, "tools", len(vu.Entries))
 
-		provider, provErr := outbound.NewRegistry().New(ctx, &upCfg.OutboundAuth)
-		if provErr != nil {
-			return fmt.Errorf("build outbound auth for upstream %q: %w", upCfg.Name, provErr)
-		}
-
-		validatedUpstreams = append(validatedUpstreams, &upstreampkg.ValidatedUpstream{
-			Config:       upCfg,
-			Tools:        tools,
-			Provider:     provider,
-			SpecYAMLRoot: specYAMLRoot,
-		})
+		validatedUpstreams = append(validatedUpstreams, vu)
 	}
 
 	// Build group config — synthesise a default group if none are configured.

@@ -20,7 +20,7 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	"gopkg.in/yaml.v3"
 
-	outboundauth "github.com/gaarutyunov/mcp-anything/internal/auth/outbound"
+	"github.com/gaarutyunov/mcp-anything/internal/command"
 	"github.com/gaarutyunov/mcp-anything/internal/config"
 	"github.com/gaarutyunov/mcp-anything/internal/content"
 	"github.com/gaarutyunov/mcp-anything/internal/openapi"
@@ -45,11 +45,12 @@ type RegistryEntry struct {
 	Transforms     *transform.CompiledTransforms
 	ResponseFormat string // x-mcp-response-format value; default "json"
 	AuthRequired   bool   // x-mcp-auth-required; default true
-	Method         string // HTTP method
-	PathTemplate   string // e.g. /pets/{petId}
+	Method         string // HTTP method (empty for command tools)
+	PathTemplate   string // e.g. /pets/{petId} (empty for command tools)
 	Validator      *openapi.Validator
 	ValidationCfg  config.ValidationConfig
-	OperationNode  *yaml.Node // YAML node for JSONPath group filter evaluation
+	OperationNode  *yaml.Node   // YAML node for JSONPath group filter evaluation (nil for command tools)
+	CommandDef     *command.Def // non-nil for command-backed tools; nil for HTTP tools
 }
 
 // groupData holds pre-computed membership for a single tool group.
@@ -71,11 +72,13 @@ type Registry struct {
 }
 
 // ValidatedUpstream is the result of validating a single upstream configuration.
+// Entries holds the pre-built RegistryEntry objects for all tools in this upstream.
+// SpecYAMLRoot is the post-overlay YAML root used for JSONPath group filter evaluation
+// (nil for non-HTTP upstreams such as type: command).
 type ValidatedUpstream struct {
 	Config       *config.UpstreamConfig
-	Tools        []*openapi.ValidatedTool
-	Provider     outboundauth.TokenProvider
-	SpecYAMLRoot *yaml.Node // post-overlay YAML root for JSONPath group filter evaluation
+	Entries      []*RegistryEntry
+	SpecYAMLRoot *yaml.Node
 }
 
 // New builds a Registry from all validated upstreams and group configurations.
@@ -103,41 +106,19 @@ func New(upstreams []*ValidatedUpstream, naming *config.NamingConfig, groups []c
 	}
 
 	for _, vu := range upstreams {
-		up := &Upstream{
-			Name:       vu.Config.Name,
-			ToolPrefix: vu.Config.ToolPrefix,
-			BaseURL:    vu.Config.BaseURL,
-			Client:     NewHTTPClient(vu.Config, vu.Provider),
-		}
-		r.byPrefix[vu.Config.ToolPrefix] = up
 		r.specRootByName[vu.Config.Name] = vu.SpecYAMLRoot
 
-		for _, vt := range vu.Tools {
-			if existing, ok := r.byPrefixedName[vt.PrefixedName]; ok {
+		for _, entry := range vu.Entries {
+			if existing, ok := r.byPrefixedName[entry.PrefixedName]; ok {
 				return nil, fmt.Errorf("tool name conflict %q between upstreams %q and %q",
-					vt.PrefixedName, existing.Upstream.Name, vu.Config.Name)
+					entry.PrefixedName, existing.Upstream.Name, vu.Config.Name)
 			}
-			authRequired := extractAuthRequired(vt.Operation)
-			if !authRequired {
-				slog.Info("public operation (auth not required)", "tool", vt.PrefixedName)
-			}
-			entry := &RegistryEntry{
-				PrefixedName:   vt.PrefixedName,
-				OriginalName:   vt.OriginalName,
-				Upstream:       up,
-				MCPTool:        vt.MCPTool,
-				Transforms:     vt.Transforms,
-				ResponseFormat: extractResponseFormat(vt.Operation),
-				AuthRequired:   authRequired,
-				Method:         vt.Method,
-				PathTemplate:   vt.PathTemplate,
-				Validator:      vt.Validator,
-				ValidationCfg:  vu.Config.Validation,
-				OperationNode:  vt.OperationNode,
-			}
-			r.byPrefixedName[vt.PrefixedName] = entry
+			r.byPrefixedName[entry.PrefixedName] = entry
 			r.byUpstreamName[vu.Config.Name] = append(r.byUpstreamName[vu.Config.Name], entry)
-			r.toolList = append(r.toolList, vt.MCPTool)
+			if entry.Upstream != nil {
+				r.byPrefix[entry.Upstream.ToolPrefix] = entry.Upstream
+			}
+			r.toolList = append(r.toolList, entry.MCPTool)
 		}
 	}
 
@@ -180,18 +161,15 @@ func New(upstreams []*ValidatedUpstream, naming *config.NamingConfig, groups []c
 				}
 			}
 
-			for _, vt := range vu.Tools {
-				entry := r.byPrefixedName[vt.PrefixedName]
-				if entry == nil {
-					continue
-				}
-				if jp != nil {
-					// Include only if the operation's YAML node was selected by the filter.
+			for _, entry := range vu.Entries {
+				if jp != nil && entry.CommandDef == nil {
+					// HTTP tools: apply the JSONPath filter.
+					// Command tools (CommandDef != nil) are always included regardless of filter.
 					if entry.OperationNode == nil || !matchedNodes[entry.OperationNode] {
 						continue
 					}
 				}
-				gd.toolSet[vt.PrefixedName] = true
+				gd.toolSet[entry.PrefixedName] = true
 			}
 		}
 
@@ -298,8 +276,36 @@ func (r *Registry) Dispatch(ctx context.Context, name string, args map[string]an
 	return r.handleToolCall(ctx, entry, args)
 }
 
-// handleToolCall executes the full request pipeline from SPEC.md §17 for a single tool call.
+// handleToolCall executes the full request pipeline for a single tool call.
+// It dispatches to handleCommandCall for command-backed tools and to the HTTP
+// pipeline for OpenAPI-backed tools.
 func (r *Registry) handleToolCall(ctx context.Context, entry *RegistryEntry, args map[string]any) (*sdkmcp.CallToolResult, error) {
+	if entry.CommandDef != nil {
+		return r.handleCommandCall(ctx, entry, args)
+	}
+	return r.handleHTTPCall(ctx, entry, args)
+}
+
+// handleCommandCall executes a command-backed tool.
+// Latency is recorded by the outer DispatchForGroup instrumentation in manager.go;
+// recording it here would double-count command tools.
+func (r *Registry) handleCommandCall(ctx context.Context, entry *RegistryEntry, args map[string]any) (*sdkmcp.CallToolResult, error) {
+	toolAttrs := metric.WithAttributes(attribute.String("mcp.tool.name", entry.PrefixedName))
+
+	stdout, stderr, err := entry.CommandDef.Execute(ctx, args)
+
+	if err != nil {
+		if telemetry.ToolCallErrors != nil {
+			telemetry.ToolCallErrors.Add(ctx, 1, toolAttrs)
+		}
+		return command.ToErrorResult(stderr, err), nil
+	}
+
+	return command.ToTextResult(stdout), nil
+}
+
+// handleHTTPCall executes the full HTTP request pipeline from SPEC.md §17 for a single tool call.
+func (r *Registry) handleHTTPCall(ctx context.Context, entry *RegistryEntry, args map[string]any) (*sdkmcp.CallToolResult, error) {
 	toolAttrs := metric.WithAttributes(attribute.String("mcp.tool.name", entry.PrefixedName))
 
 	// Apply request transform jq → RequestEnvelope.
@@ -629,7 +635,8 @@ func NewFromEntries(
 			}
 
 			for _, entry := range entries {
-				if jp != nil {
+				if jp != nil && entry.CommandDef == nil {
+					// Command tools have no OperationNode; always include them.
 					if entry.OperationNode == nil || !matchedNodes[entry.OperationNode] {
 						continue
 					}

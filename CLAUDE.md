@@ -59,6 +59,9 @@ Set `TC_CLOUD_TOKEN` environment variable to use Testcontainers Cloud. Without i
 ## Active development
 This project has no public users. There is no backward compatibility requirement. Interfaces, config schemas, and APIs may change freely between tasks.
 
+## Git workflow
+Never commit or push directly to `main`. Always create a feature branch (e.g., `claude/issue-<N>-<description>`) and open a pull request via `gh pr create`.
+
 ## No stubs
 Implementation tasks must produce complete, working code. Do not write placeholder functions that return `nil, nil` or `errors.New("not implemented")`. If a feature is not yet needed, do not create the function at all.
 

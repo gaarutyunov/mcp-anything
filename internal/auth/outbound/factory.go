@@ -30,6 +30,9 @@ func NewRegistry() *Registry {
 	r.Register("none", func(_ context.Context, _ *config.OutboundAuthConfig) (TokenProvider, error) {
 		return &NoneProvider{}, nil
 	})
+	r.Register("lua", func(_ context.Context, cfg *config.OutboundAuthConfig) (TokenProvider, error) {
+		return NewLuaProvider(cfg.Upstream, cfg.Lua)
+	})
 	return r
 }
 

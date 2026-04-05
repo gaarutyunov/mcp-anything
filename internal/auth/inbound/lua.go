@@ -54,10 +54,7 @@ func NewLuaValidator(cfg config.LuaAuthConfig) (*LuaValidator, error) {
 // ValidateToken calls the Lua script with the token and returns identity info on success.
 func (v *LuaValidator) ValidateToken(ctx context.Context, token string) (*TokenInfo, error) {
 	L := v.pool.Get().(*lua.LState)
-	defer func() { //nolint:contextcheck // intentionally reset to background to avoid context leak into pooled VM
-		L.SetContext(context.Background())
-		v.pool.Put(L)
-	}()
+	defer L.Close() // close instead of pool.Put to prevent global state leaking between requests
 
 	tctx, cancel := context.WithTimeout(ctx, v.timeout)
 	defer cancel()
@@ -93,12 +90,17 @@ func (v *LuaValidator) ValidateToken(ctx context.Context, token string) (*TokenI
 
 // newSandboxedVM creates a new LState with only safe stdlib modules opened.
 // I/O, OS, package, debug, and coroutine modules are intentionally excluded.
+// dofile and loadfile are explicitly removed from the base library to prevent
+// scripts from reading local files via the base library's file-loading functions.
 func newSandboxedVM() *lua.LState {
 	L := lua.NewState(lua.Options{SkipOpenLibs: true, CallStackSize: 64})
 	lua.OpenBase(L)
 	lua.OpenTable(L)
 	lua.OpenString(L)
 	lua.OpenMath(L)
+	// Remove file-loading globals exposed by OpenBase to prevent sandbox escape.
+	L.SetGlobal("dofile", lua.LNil)
+	L.SetGlobal("loadfile", lua.LNil)
 	return L
 }
 
@@ -106,7 +108,7 @@ func newSandboxedVM() *lua.LState {
 func compileLuaSource(src, name string) (*lua.FunctionProto, error) {
 	chunk, err := parse.Parse(strings.NewReader(src), name)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("parsing lua source %q: %w", name, err)
 	}
 	return lua.Compile(chunk, name)
 }

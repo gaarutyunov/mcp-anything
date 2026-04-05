@@ -129,6 +129,9 @@ type OutboundAuthConfig struct {
 	APIKey                  APIKeyOutboundConfig `koanf:"api_key"`
 	OAuth2ClientCredentials OAuth2CCConfig       `koanf:"oauth2_client_credentials"`
 	Lua                     LuaOutboundConfig    `koanf:"lua"`
+	// Upstream is set programmatically (not from config file) to the owning upstream's name.
+	// Used by the lua strategy to pass the upstream name to scripts.
+	Upstream string `koanf:"-"`
 }
 
 // LuaOutboundConfig configures outbound credential acquisition via a Lua script.

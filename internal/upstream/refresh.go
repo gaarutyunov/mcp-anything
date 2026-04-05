@@ -187,7 +187,9 @@ func (r *Refresher) refresh(ctx context.Context) error {
 		gt.OperationNode = openapi.FindOperationYAMLNode(specYAMLRoot, gt.PathTemplate, strings.ToLower(gt.Method))
 	}
 
-	provider, err := outboundauth.NewRegistry().New(ctx, &r.cfg.OutboundAuth)
+	outboundCfg := r.cfg.OutboundAuth
+	outboundCfg.Upstream = r.cfg.Name
+	provider, err := outboundauth.NewRegistry().New(ctx, &outboundCfg)
 	if err != nil {
 		return fmt.Errorf("building outbound auth: %w", err)
 	}
@@ -330,7 +332,9 @@ func (r *Refresher) buildSnapshot(ctx context.Context, prev *Snapshot) (*Snapsho
 		gt.OperationNode = openapi.FindOperationYAMLNode(specYAMLRoot, gt.PathTemplate, strings.ToLower(gt.Method))
 	}
 
-	provider, err := outboundauth.NewRegistry().New(ctx, &r.cfg.OutboundAuth)
+	outboundCfg := r.cfg.OutboundAuth
+	outboundCfg.Upstream = r.cfg.Name
+	provider, err := outboundauth.NewRegistry().New(ctx, &outboundCfg)
 	if err != nil {
 		return nil, fmt.Errorf("building outbound auth: %w", err)
 	}

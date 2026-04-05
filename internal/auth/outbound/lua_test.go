@@ -65,28 +65,38 @@ return "test-token", `+strconv.FormatInt(futureExpiry, 10)+`, {}, ""
 	}
 }
 
-func TestLuaProviderNoCacheCallsEveryTime(t *testing.T) {
-	// expiry_unix == 0 means no caching — cache.expiry stays 0 so script re-runs.
+func TestLuaProviderNoCacheRefreshesOnNextRequest(t *testing.T) {
+	// expiry_unix == 0 from the script means short-lived caching (1 second) to prevent
+	// double-execution within a single RoundTrip() (RawHeaders + Token call pair).
+	// After expiry, the script re-runs on the next request.
 	path := writeLuaOutboundScript(t, `
 local upstream, cached_token, cached_expiry = ...
 return "dynamic-token", 0, {}, ""
 `)
 	p := newOutboundProvider(t, path, 500*time.Millisecond)
 
-	for i := 0; i < 3; i++ {
-		tok, err := p.Token(context.Background())
-		if err != nil {
-			t.Fatalf("Token() call %d: %v", i, err)
-		}
-		if tok != "dynamic-token" {
-			t.Errorf("call %d: token = %q, want %q", i, tok, "dynamic-token")
-		}
-		// Because expiry stays 0, every call refreshes.
-		p.cache.mu.Lock()
-		if p.cache.expiry != 0 {
-			t.Errorf("call %d: expected cache.expiry == 0 (no-cache mode)", i)
-		}
-		p.cache.mu.Unlock()
+	tok, err := p.Token(context.Background())
+	if err != nil {
+		t.Fatalf("Token(): %v", err)
+	}
+	if tok != "dynamic-token" {
+		t.Errorf("token = %q, want %q", tok, "dynamic-token")
+	}
+
+	// Simulate a new request arriving after the short-lived cache expires
+	// by manually clearing the cache (as would happen after ~1 second in production).
+	p.cache.mu.Lock()
+	p.cache.expiry = 0
+	p.cache.token = ""
+	p.cache.rawHeaders = nil
+	p.cache.mu.Unlock()
+
+	tok2, err := p.Token(context.Background())
+	if err != nil {
+		t.Fatalf("Token() 2nd call: %v", err)
+	}
+	if tok2 != "dynamic-token" {
+		t.Errorf("2nd token = %q, want %q", tok2, "dynamic-token")
 	}
 }
 

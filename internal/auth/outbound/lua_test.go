@@ -1,4 +1,4 @@
-package luaprovider
+package outbound
 
 import (
 	"context"
@@ -50,6 +50,7 @@ return "test-token", `+strconv.FormatInt(futureExpiry, 10)+`, {}, ""
 		t.Errorf("1st token = %q, want %q", tok1, "test-token")
 	}
 
+	// Second call: cache still valid (expiry is in the future), so token returned without re-calling script.
 	tok2, err := p.Token(context.Background())
 	if err != nil {
 		t.Fatalf("Token() 2nd: %v", err)
@@ -57,6 +58,7 @@ return "test-token", `+strconv.FormatInt(futureExpiry, 10)+`, {}, ""
 	if tok2 != "test-token" {
 		t.Errorf("2nd token = %q, want %q", tok2, "test-token")
 	}
+	// Verify cache is set and expiry matches.
 	p.cache.mu.Lock()
 	cacheExpiry := p.cache.expiry
 	p.cache.mu.Unlock()
@@ -66,6 +68,9 @@ return "test-token", `+strconv.FormatInt(futureExpiry, 10)+`, {}, ""
 }
 
 func TestLuaProviderNoCacheRefreshesOnNextRequest(t *testing.T) {
+	// expiry_unix == 0 from the script means short-lived caching (1 second) to prevent
+	// double-execution within a single RoundTrip() (RawHeaders + Token call pair).
+	// After expiry, the script re-runs on the next request.
 	path := writeLuaOutboundScript(t, `
 local upstream, cached_token, cached_expiry = ...
 return "dynamic-token", 0, {}, ""
@@ -80,6 +85,8 @@ return "dynamic-token", 0, {}, ""
 		t.Errorf("token = %q, want %q", tok, "dynamic-token")
 	}
 
+	// Simulate a new request arriving after the short-lived cache expires
+	// by manually clearing the cache (as would happen after ~1 second in production).
 	p.cache.mu.Lock()
 	p.cache.expiry = 0
 	p.cache.token = ""
@@ -102,6 +109,7 @@ return "", 0, {["X-API-Key"] = "key123", ["X-Tenant"] = "acme"}, ""
 `)
 	p := newOutboundProvider(t, path, 500*time.Millisecond)
 
+	// Token should be empty when raw headers are present.
 	tok, err := p.Token(context.Background())
 	if err != nil {
 		t.Fatalf("Token(): %v", err)
@@ -110,6 +118,7 @@ return "", 0, {["X-API-Key"] = "key123", ["X-Tenant"] = "acme"}, ""
 		t.Errorf("Token() = %q, want empty when raw headers present", tok)
 	}
 
+	// Reset cache so RawHeaders re-calls the script.
 	p.cache.mu.Lock()
 	p.cache.token = ""
 	p.cache.expiry = 0
@@ -129,6 +138,7 @@ return "", 0, {["X-API-Key"] = "key123", ["X-Tenant"] = "acme"}, ""
 }
 
 func TestLuaProviderTimeoutEnforced(t *testing.T) {
+	// Script loops forever; context timeout should kill it.
 	path := writeLuaOutboundScript(t, `
 local upstream, cached_token, cached_expiry = ...
 while true do end

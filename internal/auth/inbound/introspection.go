@@ -1,5 +1,4 @@
-// Package introspectionvalidator registers the "introspection" inbound auth strategy.
-package introspectionvalidator
+package inbound
 
 import (
 	"context"
@@ -11,17 +10,8 @@ import (
 	"github.com/zitadel/oidc/v3/pkg/client/rs"
 	zoidc "github.com/zitadel/oidc/v3/pkg/oidc"
 
-	"github.com/gaarutyunov/mcp-anything/internal/auth/inbound"
 	"github.com/gaarutyunov/mcp-anything/internal/config"
-	"github.com/gaarutyunov/mcp-anything/internal/runtime"
 )
-
-func init() {
-	inbound.RegisterValidator("introspection", func(ctx context.Context, cfg *config.InboundAuthConfig, _ *runtime.Registry) (inbound.TokenValidator, string, error) {
-		v, err := NewIntrospectionValidator(ctx, cfg.Introspection)
-		return v, "", err
-	})
-}
 
 // IntrospectionValidator validates tokens by calling a token introspection endpoint.
 type IntrospectionValidator struct {
@@ -30,6 +20,7 @@ type IntrospectionValidator struct {
 }
 
 // NewIntrospectionValidator creates an IntrospectionValidator using client credentials.
+// cfg.ClientSecret supports ${ENV_VAR} expansion.
 func NewIntrospectionValidator(ctx context.Context, cfg config.IntrospectionConfig) (*IntrospectionValidator, error) {
 	secret := os.ExpandEnv(cfg.ClientSecret)
 	server, err := rs.NewResourceServerClientCredentials(ctx, cfg.Issuer, cfg.ClientID, secret)
@@ -40,7 +31,7 @@ func NewIntrospectionValidator(ctx context.Context, cfg config.IntrospectionConf
 }
 
 // ValidateToken introspects the token and checks it is active and has the expected audience.
-func (v *IntrospectionValidator) ValidateToken(ctx context.Context, raw string) (*inbound.TokenInfo, error) {
+func (v *IntrospectionValidator) ValidateToken(ctx context.Context, raw string) (*TokenInfo, error) {
 	resp, err := rs.Introspect[*zoidc.IntrospectionResponse](ctx, v.server, raw)
 	if err != nil {
 		return nil, fmt.Errorf("introspecting token: %w", err)
@@ -51,7 +42,7 @@ func (v *IntrospectionValidator) ValidateToken(ctx context.Context, raw string) 
 	if v.aud != "" && !slices.Contains(resp.Audience, v.aud) {
 		return nil, errors.New("invalid audience")
 	}
-	return &inbound.TokenInfo{
+	return &TokenInfo{
 		Subject:  resp.Subject,
 		Audience: resp.Audience,
 	}, nil

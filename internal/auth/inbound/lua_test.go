@@ -1,4 +1,4 @@
-package luavalidator
+package inbound
 
 import (
 	"context"
@@ -94,6 +94,7 @@ func TestLuaValidatorCompileError(t *testing.T) {
 }
 
 func TestLuaValidatorOsSandboxed(t *testing.T) {
+	// os.getenv should fail because os library is not loaded.
 	v := newValidator(t, `
 local token = ...
 local val = os.getenv("HOME")
@@ -107,6 +108,7 @@ return true, 200, {}, ""
 }
 
 func TestLuaValidatorIoSandboxed(t *testing.T) {
+	// io.open should fail because io library is not loaded.
 	v := newValidator(t, `
 local token = ...
 local f = io.open("/etc/passwd", "r")

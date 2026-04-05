@@ -1,5 +1,4 @@
-// Package oauth2provider registers the "oauth2_client_credentials" outbound auth strategy.
-package oauth2provider
+package outbound
 
 import (
 	"context"
@@ -9,23 +8,17 @@ import (
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/clientcredentials"
 
-	"github.com/gaarutyunov/mcp-anything/internal/auth/outbound"
 	"github.com/gaarutyunov/mcp-anything/internal/config"
-	"github.com/gaarutyunov/mcp-anything/internal/runtime"
 )
 
-func init() {
-	outbound.RegisterProvider("oauth2_client_credentials", func(ctx context.Context, cfg *config.OutboundAuthConfig, _ *runtime.Registry) (outbound.TokenProvider, error) {
-		return NewOAuth2CCProvider(ctx, cfg.OAuth2ClientCredentials)
-	})
-}
-
 // OAuth2CCProvider obtains tokens via the OAuth2 client credentials flow.
+// It caches the token and refreshes it automatically before expiry.
 type OAuth2CCProvider struct {
 	src oauth2.TokenSource
 }
 
 // NewOAuth2CCProvider creates an OAuth2CCProvider configured for the client credentials flow.
+// The token source handles caching and automatic refresh.
 func NewOAuth2CCProvider(ctx context.Context, cfg config.OAuth2CCConfig) (*OAuth2CCProvider, error) {
 	ccCfg := &clientcredentials.Config{
 		ClientID:     cfg.ClientID,

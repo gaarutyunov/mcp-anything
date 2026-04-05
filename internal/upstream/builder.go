@@ -26,6 +26,7 @@ func NewBuilderRegistry() *BuilderRegistry {
 	r.Register("", &HTTPBuilder{})
 	r.Register("http", &HTTPBuilder{})
 	r.Register("command", &CommandBuilder{})
+	r.Register("script", &ScriptBuilder{})
 	return r
 }
 

@@ -24,10 +24,19 @@ type GroupConfig struct {
 
 // InboundAuthConfig controls how inbound MCP clients are authenticated.
 type InboundAuthConfig struct {
-	Strategy      string              `koanf:"strategy"` // jwt|introspection|apikey|none
+	Strategy      string              `koanf:"strategy"` // jwt|introspection|apikey|lua|none
 	JWT           JWTAuthConfig       `koanf:"jwt"`
 	Introspection IntrospectionConfig `koanf:"introspection"`
 	APIKey        APIKeyAuthConfig    `koanf:"apikey"`
+	Lua           LuaAuthConfig       `koanf:"lua"`
+}
+
+// LuaAuthConfig configures inbound token validation via a Lua script.
+// The script receives the token as its first argument and must return:
+// allowed (bool), status (int), extra_headers (table), error_msg (string).
+type LuaAuthConfig struct {
+	ScriptPath string        `koanf:"script_path"`
+	Timeout    time.Duration `koanf:"timeout"`
 }
 
 // JWTAuthConfig configures JWT Bearer token validation via OIDC/JWKS.
@@ -115,10 +124,19 @@ type UpstreamConfig struct {
 
 // OutboundAuthConfig controls how the proxy authenticates outbound requests to an upstream API.
 type OutboundAuthConfig struct {
-	Strategy                string               `koanf:"strategy"` // bearer|api_key|oauth2_client_credentials|none
+	Strategy                string               `koanf:"strategy"` // bearer|api_key|oauth2_client_credentials|lua|none
 	Bearer                  BearerOutboundConfig `koanf:"bearer"`
 	APIKey                  APIKeyOutboundConfig `koanf:"api_key"`
 	OAuth2ClientCredentials OAuth2CCConfig       `koanf:"oauth2_client_credentials"`
+	Lua                     LuaOutboundConfig    `koanf:"lua"`
+}
+
+// LuaOutboundConfig configures outbound credential acquisition via a Lua script.
+// The script receives (upstream, cached_token, cached_expiry) as arguments and must return:
+// token (string), expiry_unix (int), raw_headers (table), error_msg (string).
+type LuaOutboundConfig struct {
+	ScriptPath string        `koanf:"script_path"`
+	Timeout    time.Duration `koanf:"timeout"`
 }
 
 // BearerOutboundConfig configures static Bearer token injection.

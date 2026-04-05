@@ -19,6 +19,7 @@ require (
 	github.com/speakeasy-api/jsonpath v0.6.0
 	github.com/speakeasy-api/openapi-overlay v0.10.3
 	github.com/testcontainers/testcontainers-go v0.36.0
+	github.com/yuin/gopher-lua v1.1.2
 	github.com/zitadel/oidc/v3 v3.46.0
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.67.0
 	go.opentelemetry.io/otel v1.43.0

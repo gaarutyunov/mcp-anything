@@ -31,6 +31,10 @@ func NewValidatorRegistry() *ValidatorRegistry {
 		v, err := NewAPIKeyValidator(cfg.APIKey)
 		return v, cfg.APIKey.Header, err
 	})
+	r.Register("lua", func(_ context.Context, cfg *config.InboundAuthConfig) (TokenValidator, string, error) {
+		v, err := NewLuaValidator(cfg.Lua)
+		return v, "", err
+	})
 	return r
 }
 

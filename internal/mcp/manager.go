@@ -18,6 +18,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/gaarutyunov/mcp-anything/internal/auth/outbound"
+	"github.com/gaarutyunov/mcp-anything/internal/command"
 	"github.com/gaarutyunov/mcp-anything/internal/config"
 	"github.com/gaarutyunov/mcp-anything/internal/openapi"
 	"github.com/gaarutyunov/mcp-anything/internal/telemetry"
@@ -131,25 +132,34 @@ func (m *Manager) Rebuild(ctx context.Context, cfg *config.ProxyConfig) error {
 			continue
 		}
 
-		valCtx, valCancel := context.WithTimeout(ctx, upCfg.StartupValidationTimeout)
-		tools, specYAMLRoot, valErr := openapi.ValidateUpstream(valCtx, upCfg, &cfg.Naming)
-		valCancel()
-		if valErr != nil {
-			return fmt.Errorf("upstream %q validation failed: %w", upCfg.Name, valErr)
-		}
-		slog.Info("validated tools", "upstream", upCfg.Name, "count", len(tools))
+		vu := &upstreampkg.ValidatedUpstream{Config: upCfg}
 
-		provider, provErr := outbound.NewRegistry().New(ctx, &upCfg.OutboundAuth)
-		if provErr != nil {
-			return fmt.Errorf("build outbound auth for upstream %q: %w", upCfg.Name, provErr)
+		if upCfg.Type == "command" {
+			cmdTools, cmdErr := command.BuildTools(upCfg.Commands, upCfg, &cfg.Naming)
+			if cmdErr != nil {
+				return fmt.Errorf("upstream %q command validation failed: %w", upCfg.Name, cmdErr)
+			}
+			slog.Info("validated command tools", "upstream", upCfg.Name, "count", len(cmdTools))
+			vu.CommandTools = cmdTools
+		} else {
+			valCtx, valCancel := context.WithTimeout(ctx, upCfg.StartupValidationTimeout)
+			tools, specYAMLRoot, valErr := openapi.ValidateUpstream(valCtx, upCfg, &cfg.Naming)
+			valCancel()
+			if valErr != nil {
+				return fmt.Errorf("upstream %q validation failed: %w", upCfg.Name, valErr)
+			}
+			slog.Info("validated tools", "upstream", upCfg.Name, "count", len(tools))
+
+			provider, provErr := outbound.NewRegistry().New(ctx, &upCfg.OutboundAuth)
+			if provErr != nil {
+				return fmt.Errorf("build outbound auth for upstream %q: %w", upCfg.Name, provErr)
+			}
+			vu.Tools = tools
+			vu.Provider = provider
+			vu.SpecYAMLRoot = specYAMLRoot
 		}
 
-		validatedUpstreams = append(validatedUpstreams, &upstreampkg.ValidatedUpstream{
-			Config:       upCfg,
-			Tools:        tools,
-			Provider:     provider,
-			SpecYAMLRoot: specYAMLRoot,
-		})
+		validatedUpstreams = append(validatedUpstreams, vu)
 	}
 
 	// Build group config — synthesise a default group if none are configured.

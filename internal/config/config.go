@@ -105,12 +105,13 @@ type ValidationConfig struct {
 	ErrorStatus               []int  `koanf:"error_status"`
 }
 
-// UpstreamConfig describes a single upstream HTTP API.
+// UpstreamConfig describes a single upstream, either HTTP API or command-backed tools.
 type UpstreamConfig struct {
 	Name                     string              `koanf:"name"`
 	Enabled                  bool                `koanf:"enabled"`
 	ToolPrefix               string              `koanf:"tool_prefix"`
-	BaseURL                  string              `koanf:"base_url"`
+	Type                     string              `koanf:"type"`     // "http" (default) | "command"
+	BaseURL                  string              `koanf:"base_url"` // used by type: http only
 	Timeout                  time.Duration       `koanf:"timeout"`
 	TLSSkipVerify            bool                `koanf:"tls_skip_verify"`
 	Headers                  map[string]string   `koanf:"headers"`
@@ -120,6 +121,33 @@ type UpstreamConfig struct {
 	Validation               ValidationConfig    `koanf:"validation"`
 	InboundAuthOverride      *InboundAuthConfig  `koanf:"inbound_auth_override"`
 	OutboundAuth             OutboundAuthConfig  `koanf:"outbound_auth"`
+	Commands                 []CommandConfig     `koanf:"commands"` // used by type: command only
+}
+
+// CommandConfig defines a single command-backed MCP tool within a command upstream.
+type CommandConfig struct {
+	ToolName    string             `koanf:"tool_name"`
+	Description string             `koanf:"description"`
+	Command     string             `koanf:"command"`
+	InputSchema CommandInputSchema `koanf:"input_schema"`
+	Timeout     time.Duration      `koanf:"timeout"`
+	Env         map[string]string  `koanf:"env"`
+	WorkingDir  string             `koanf:"working_dir"`
+	Shell       bool               `koanf:"shell"`      // execute via sh -c; default false (direct exec)
+	MaxOutput   int64              `koanf:"max_output"` // max bytes from stdout/stderr; 0 = 1 MiB default
+}
+
+// CommandInputSchema is the JSON Schema definition for a command tool's input parameters.
+type CommandInputSchema struct {
+	Type       string                           `koanf:"type"`
+	Properties map[string]CommandSchemaProperty `koanf:"properties"`
+	Required   []string                         `koanf:"required"`
+}
+
+// CommandSchemaProperty describes a single property in a command tool's input schema.
+type CommandSchemaProperty struct {
+	Type        string `koanf:"type"`
+	Description string `koanf:"description"`
 }
 
 // OutboundAuthConfig controls how the proxy authenticates outbound requests to an upstream API.

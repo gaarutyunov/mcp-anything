@@ -21,6 +21,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	outboundauth "github.com/gaarutyunov/mcp-anything/internal/auth/outbound"
+	"github.com/gaarutyunov/mcp-anything/internal/command"
 	"github.com/gaarutyunov/mcp-anything/internal/config"
 	"github.com/gaarutyunov/mcp-anything/internal/content"
 	"github.com/gaarutyunov/mcp-anything/internal/openapi"
@@ -45,11 +46,12 @@ type RegistryEntry struct {
 	Transforms     *transform.CompiledTransforms
 	ResponseFormat string // x-mcp-response-format value; default "json"
 	AuthRequired   bool   // x-mcp-auth-required; default true
-	Method         string // HTTP method
-	PathTemplate   string // e.g. /pets/{petId}
+	Method         string // HTTP method (empty for command tools)
+	PathTemplate   string // e.g. /pets/{petId} (empty for command tools)
 	Validator      *openapi.Validator
 	ValidationCfg  config.ValidationConfig
-	OperationNode  *yaml.Node // YAML node for JSONPath group filter evaluation
+	OperationNode  *yaml.Node   // YAML node for JSONPath group filter evaluation (nil for command tools)
+	CommandDef     *command.Def // non-nil for command-backed tools; nil for HTTP tools
 }
 
 // groupData holds pre-computed membership for a single tool group.
@@ -73,7 +75,8 @@ type Registry struct {
 // ValidatedUpstream is the result of validating a single upstream configuration.
 type ValidatedUpstream struct {
 	Config       *config.UpstreamConfig
-	Tools        []*openapi.ValidatedTool
+	Tools        []*openapi.ValidatedTool // populated for type: http upstreams
+	CommandTools []*command.Tool          // populated for type: command upstreams
 	Provider     outboundauth.TokenProvider
 	SpecYAMLRoot *yaml.Node // post-overlay YAML root for JSONPath group filter evaluation
 }
@@ -103,11 +106,20 @@ func New(upstreams []*ValidatedUpstream, naming *config.NamingConfig, groups []c
 	}
 
 	for _, vu := range upstreams {
-		up := &Upstream{
-			Name:       vu.Config.Name,
-			ToolPrefix: vu.Config.ToolPrefix,
-			BaseURL:    vu.Config.BaseURL,
-			Client:     NewHTTPClient(vu.Config, vu.Provider),
+		var up *Upstream
+		if vu.Config.Type == "command" {
+			// Command upstreams have no HTTP client.
+			up = &Upstream{
+				Name:       vu.Config.Name,
+				ToolPrefix: vu.Config.ToolPrefix,
+			}
+		} else {
+			up = &Upstream{
+				Name:       vu.Config.Name,
+				ToolPrefix: vu.Config.ToolPrefix,
+				BaseURL:    vu.Config.BaseURL,
+				Client:     NewHTTPClient(vu.Config, vu.Provider),
+			}
 		}
 		r.byPrefix[vu.Config.ToolPrefix] = up
 		r.specRootByName[vu.Config.Name] = vu.SpecYAMLRoot
@@ -138,6 +150,25 @@ func New(upstreams []*ValidatedUpstream, naming *config.NamingConfig, groups []c
 			r.byPrefixedName[vt.PrefixedName] = entry
 			r.byUpstreamName[vu.Config.Name] = append(r.byUpstreamName[vu.Config.Name], entry)
 			r.toolList = append(r.toolList, vt.MCPTool)
+		}
+
+		for _, ct := range vu.CommandTools {
+			if existing, ok := r.byPrefixedName[ct.PrefixedName]; ok {
+				return nil, fmt.Errorf("tool name conflict %q between upstreams %q and %q",
+					ct.PrefixedName, existing.Upstream.Name, vu.Config.Name)
+			}
+			entry := &RegistryEntry{
+				PrefixedName: ct.PrefixedName,
+				OriginalName: ct.OriginalName,
+				Upstream:     up,
+				MCPTool:      ct.MCPTool,
+				Transforms:   ct.Transforms,
+				AuthRequired: true, // default: command tools require auth
+				CommandDef:   ct.Def,
+			}
+			r.byPrefixedName[ct.PrefixedName] = entry
+			r.byUpstreamName[vu.Config.Name] = append(r.byUpstreamName[vu.Config.Name], entry)
+			r.toolList = append(r.toolList, ct.MCPTool)
 		}
 	}
 
@@ -192,6 +223,12 @@ func New(upstreams []*ValidatedUpstream, naming *config.NamingConfig, groups []c
 					}
 				}
 				gd.toolSet[vt.PrefixedName] = true
+			}
+
+			// Command tools have no OperationNode and are always included
+			// in their upstream's groups regardless of any JSONPath filter.
+			for _, ct := range vu.CommandTools {
+				gd.toolSet[ct.PrefixedName] = true
 			}
 		}
 
@@ -298,8 +335,43 @@ func (r *Registry) Dispatch(ctx context.Context, name string, args map[string]an
 	return r.handleToolCall(ctx, entry, args)
 }
 
-// handleToolCall executes the full request pipeline from SPEC.md §17 for a single tool call.
+// handleToolCall executes the full request pipeline for a single tool call.
+// It dispatches to handleCommandCall for command-backed tools and to the HTTP
+// pipeline for OpenAPI-backed tools.
 func (r *Registry) handleToolCall(ctx context.Context, entry *RegistryEntry, args map[string]any) (*sdkmcp.CallToolResult, error) {
+	if entry.CommandDef != nil {
+		return r.handleCommandCall(ctx, entry, args)
+	}
+	return r.handleHTTPCall(ctx, entry, args)
+}
+
+// handleCommandCall executes a command-backed tool.
+func (r *Registry) handleCommandCall(ctx context.Context, entry *RegistryEntry, args map[string]any) (*sdkmcp.CallToolResult, error) {
+	toolAttrs := metric.WithAttributes(attribute.String("mcp.tool.name", entry.PrefixedName))
+
+	start := time.Now()
+	stdout, stderr, err := entry.CommandDef.Execute(ctx, args)
+	if telemetry.ToolCallDuration != nil {
+		telemetry.ToolCallDuration.Record(ctx, time.Since(start).Seconds(),
+			metric.WithAttributes(
+				attribute.String("mcp.tool.name", entry.PrefixedName),
+				attribute.String("mcp.method", "tools/call"),
+			),
+		)
+	}
+
+	if err != nil {
+		if telemetry.ToolCallErrors != nil {
+			telemetry.ToolCallErrors.Add(ctx, 1, toolAttrs)
+		}
+		return command.ToErrorResult(stderr, err), nil
+	}
+
+	return command.ToTextResult(stdout), nil
+}
+
+// handleHTTPCall executes the full HTTP request pipeline from SPEC.md §17 for a single tool call.
+func (r *Registry) handleHTTPCall(ctx context.Context, entry *RegistryEntry, args map[string]any) (*sdkmcp.CallToolResult, error) {
 	toolAttrs := metric.WithAttributes(attribute.String("mcp.tool.name", entry.PrefixedName))
 
 	// Apply request transform jq → RequestEnvelope.
@@ -629,7 +701,8 @@ func NewFromEntries(
 			}
 
 			for _, entry := range entries {
-				if jp != nil {
+				if jp != nil && entry.CommandDef == nil {
+					// Command tools have no OperationNode; always include them.
 					if entry.OperationNode == nil || !matchedNodes[entry.OperationNode] {
 						continue
 					}

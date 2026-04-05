@@ -24,11 +24,12 @@ type GroupConfig struct {
 
 // InboundAuthConfig controls how inbound MCP clients are authenticated.
 type InboundAuthConfig struct {
-	Strategy      string              `koanf:"strategy"` // jwt|introspection|apikey|lua|none
+	Strategy      string              `koanf:"strategy"` // jwt|introspection|apikey|lua|js_script|none
 	JWT           JWTAuthConfig       `koanf:"jwt"`
 	Introspection IntrospectionConfig `koanf:"introspection"`
 	APIKey        APIKeyAuthConfig    `koanf:"apikey"`
 	Lua           LuaAuthConfig       `koanf:"lua"`
+	JS            JSAuthConfig        `koanf:"js"`
 }
 
 // LuaAuthConfig configures inbound token validation via a Lua script.
@@ -37,6 +38,15 @@ type InboundAuthConfig struct {
 type LuaAuthConfig struct {
 	ScriptPath string        `koanf:"script_path"`
 	Timeout    time.Duration `koanf:"timeout"`
+}
+
+// JSAuthConfig configures inbound token validation via a JavaScript (Sobek) script.
+// The script receives (token, ctx) and must return:
+// { allowed: bool, status?: number, error?: string, subject?: string, extra_headers?: object }
+type JSAuthConfig struct {
+	ScriptPath string            `koanf:"script_path"`
+	Timeout    time.Duration     `koanf:"timeout"`
+	Env        map[string]string `koanf:"env"`
 }
 
 // JWTAuthConfig configures JWT Bearer token validation via OIDC/JWKS.
@@ -163,13 +173,14 @@ type CommandSchemaProperty struct {
 
 // OutboundAuthConfig controls how the proxy authenticates outbound requests to an upstream API.
 type OutboundAuthConfig struct {
-	Strategy                string               `koanf:"strategy"` // bearer|api_key|oauth2_client_credentials|lua|none
+	Strategy                string               `koanf:"strategy"` // bearer|api_key|oauth2_client_credentials|lua|js_script|none
 	Bearer                  BearerOutboundConfig `koanf:"bearer"`
 	APIKey                  APIKeyOutboundConfig `koanf:"api_key"`
 	OAuth2ClientCredentials OAuth2CCConfig       `koanf:"oauth2_client_credentials"`
 	Lua                     LuaOutboundConfig    `koanf:"lua"`
+	JS                      JSOutboundConfig     `koanf:"js"`
 	// Upstream is set programmatically (not from config file) to the owning upstream's name.
-	// Used by the lua strategy to pass the upstream name to scripts.
+	// Used by the lua and js_script strategies to pass the upstream name to scripts.
 	Upstream string `koanf:"-"`
 }
 
@@ -179,6 +190,15 @@ type OutboundAuthConfig struct {
 type LuaOutboundConfig struct {
 	ScriptPath string        `koanf:"script_path"`
 	Timeout    time.Duration `koanf:"timeout"`
+}
+
+// JSOutboundConfig configures outbound credential acquisition via a JavaScript (Sobek) script.
+// The script receives (upstream, ctx) and must return:
+// { token?: string, raw_headers?: object, expiry?: number, error?: string }
+type JSOutboundConfig struct {
+	ScriptPath string            `koanf:"script_path"`
+	Timeout    time.Duration     `koanf:"timeout"`
+	Env        map[string]string `koanf:"env"`
 }
 
 // BearerOutboundConfig configures static Bearer token injection.

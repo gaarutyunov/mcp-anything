@@ -35,6 +35,10 @@ func NewValidatorRegistry() *ValidatorRegistry {
 		v, err := NewLuaValidator(cfg.Lua)
 		return v, "", err
 	})
+	r.Register("js_script", func(_ context.Context, cfg *config.InboundAuthConfig) (TokenValidator, string, error) {
+		v, err := NewJSValidator(cfg.JS)
+		return v, "", err
+	})
 	return r
 }
 

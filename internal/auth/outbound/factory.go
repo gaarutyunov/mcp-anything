@@ -33,6 +33,9 @@ func NewRegistry() *Registry {
 	r.Register("lua", func(_ context.Context, cfg *config.OutboundAuthConfig) (TokenProvider, error) {
 		return NewLuaProvider(cfg.Upstream, cfg.Lua)
 	})
+	r.Register("js_script", func(_ context.Context, cfg *config.OutboundAuthConfig) (TokenProvider, error) {
+		return NewJSProvider(cfg.Upstream, cfg.JS)
+	})
 	return r
 }
 

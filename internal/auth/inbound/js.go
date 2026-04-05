@@ -64,14 +64,19 @@ func NewJSValidator(cfg config.JSAuthConfig) (*JSValidator, error) {
 func (v *JSValidator) ValidateToken(ctx context.Context, token string) (*TokenInfo, error) {
 	rt := sobek.New()
 
+	// scriptCtx bounds ctx.fetch HTTP calls to the script deadline.
+	scriptCtx := ctx
 	if v.timeout > 0 {
+		var cancel context.CancelFunc
+		scriptCtx, cancel = context.WithTimeout(ctx, v.timeout)
+		defer cancel()
 		timer := time.AfterFunc(v.timeout, func() {
 			rt.Interrupt("js auth script timed out")
 		})
 		defer timer.Stop()
 	}
 
-	ctxObj := v.buildCtxObject(ctx, rt)
+	ctxObj := v.buildCtxObject(scriptCtx, rt)
 	if err := rt.Set("__mcp_ctx__", ctxObj); err != nil {
 		return nil, fmt.Errorf("setting js auth ctx: %w", err)
 	}
@@ -116,7 +121,7 @@ func parseJSInboundResult(result sobek.Value) (*TokenInfo, error) {
 		if e, ok := resMap["error"].(string); ok {
 			errMsg = e
 		}
-		return nil, fmt.Errorf("js auth denied (status %d): %s", status, errMsg)
+		return nil, &DeniedError{Status: status, Message: errMsg}
 	}
 
 	info := &TokenInfo{Subject: "js-authenticated", Extra: make(map[string]any)}

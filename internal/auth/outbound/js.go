@@ -138,14 +138,19 @@ func (p *JSProvider) ensureToken(ctx context.Context) error {
 func (p *JSProvider) callScript(ctx context.Context) (token string, expiry int64, rawHeaders map[string]string, err error) {
 	rt := sobek.New()
 
+	// scriptCtx bounds ctx.fetch HTTP calls to the script deadline.
+	scriptCtx := ctx
 	if p.timeout > 0 {
+		var cancel context.CancelFunc
+		scriptCtx, cancel = context.WithTimeout(ctx, p.timeout)
+		defer cancel()
 		timer := time.AfterFunc(p.timeout, func() {
 			rt.Interrupt("js outbound auth script timed out")
 		})
 		defer timer.Stop()
 	}
 
-	ctxObj := p.buildCtxObject(ctx, rt, p.scriptCache)
+	ctxObj := p.buildCtxObject(scriptCtx, rt, p.scriptCache)
 	if err := rt.Set("__mcp_ctx__", ctxObj); err != nil {
 		return "", 0, nil, fmt.Errorf("setting js outbound ctx: %w", err)
 	}
@@ -159,12 +164,7 @@ func (p *JSProvider) callScript(ctx context.Context) (token string, expiry int64
 		return "", 0, nil, fmt.Errorf("js outbound auth script does not export a callable default function")
 	}
 
-	upstreamObj := rt.NewObject()
-	if err := upstreamObj.Set("name", p.upstreamName); err != nil {
-		return "", 0, nil, fmt.Errorf("setting upstream.name: %w", err)
-	}
-
-	result, err := mainFn(sobek.Undefined(), upstreamObj, ctxObj)
+	result, err := mainFn(sobek.Undefined(), rt.ToValue(p.upstreamName), ctxObj)
 	if err != nil {
 		return "", 0, nil, fmt.Errorf("js get_upstream_token: %w", err)
 	}
@@ -204,6 +204,10 @@ func parseJSOutboundResult(result sobek.Value) (token string, expiry int64, rawH
 				rawHeaders[k] = vs
 			}
 		}
+	}
+
+	if token == "" && len(rawHeaders) == 0 {
+		return "", 0, nil, fmt.Errorf("js get_upstream_token: script must return token or raw_headers")
 	}
 
 	return token, expiry, rawHeaders, nil

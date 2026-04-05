@@ -122,6 +122,7 @@ type UpstreamConfig struct {
 	InboundAuthOverride      *InboundAuthConfig  `koanf:"inbound_auth_override"`
 	OutboundAuth             OutboundAuthConfig  `koanf:"outbound_auth"`
 	Commands                 []CommandConfig     `koanf:"commands"` // used by type: command only
+	Scripts                  []ScriptConfig      `koanf:"scripts"`  // used by type: script only
 }
 
 // CommandConfig defines a single command-backed MCP tool within a command upstream.
@@ -135,6 +136,16 @@ type CommandConfig struct {
 	WorkingDir  string             `koanf:"working_dir"`
 	Shell       bool               `koanf:"shell"`      // execute via sh -c; default false (direct exec)
 	MaxOutput   int64              `koanf:"max_output"` // max bytes from stdout/stderr; 0 = 1 MiB default
+}
+
+// ScriptConfig defines a single JavaScript-backed MCP tool within a script upstream.
+type ScriptConfig struct {
+	ToolName    string             `koanf:"tool_name"`
+	Description string             `koanf:"description"`
+	ScriptPath  string             `koanf:"script_path"`
+	InputSchema CommandInputSchema `koanf:"input_schema"` // reuses CommandInputSchema
+	Timeout     time.Duration      `koanf:"timeout"`
+	Env         map[string]string  `koanf:"env"`
 }
 
 // CommandInputSchema is the JSON Schema definition for a command tool's input parameters.

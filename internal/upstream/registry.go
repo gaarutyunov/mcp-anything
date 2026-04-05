@@ -24,6 +24,7 @@ import (
 	"github.com/gaarutyunov/mcp-anything/internal/config"
 	"github.com/gaarutyunov/mcp-anything/internal/content"
 	"github.com/gaarutyunov/mcp-anything/internal/openapi"
+	"github.com/gaarutyunov/mcp-anything/internal/script"
 	"github.com/gaarutyunov/mcp-anything/internal/telemetry"
 	"github.com/gaarutyunov/mcp-anything/internal/transform"
 )
@@ -50,7 +51,8 @@ type RegistryEntry struct {
 	Validator      *openapi.Validator
 	ValidationCfg  config.ValidationConfig
 	OperationNode  *yaml.Node   // YAML node for JSONPath group filter evaluation (nil for command tools)
-	CommandDef     *command.Def // non-nil for command-backed tools; nil for HTTP tools
+	CommandDef     *command.Def // non-nil for command-backed tools; nil for HTTP/script tools
+	ScriptDef      *script.Def  // non-nil for script-backed tools; nil for HTTP/command tools
 }
 
 // groupData holds pre-computed membership for a single tool group.
@@ -162,9 +164,9 @@ func New(upstreams []*ValidatedUpstream, naming *config.NamingConfig, groups []c
 			}
 
 			for _, entry := range vu.Entries {
-				if jp != nil && entry.CommandDef == nil {
+				if jp != nil && entry.CommandDef == nil && entry.ScriptDef == nil {
 					// HTTP tools: apply the JSONPath filter.
-					// Command tools (CommandDef != nil) are always included regardless of filter.
+					// Command and script tools are always included regardless of filter.
 					if entry.OperationNode == nil || !matchedNodes[entry.OperationNode] {
 						continue
 					}
@@ -277,11 +279,14 @@ func (r *Registry) Dispatch(ctx context.Context, name string, args map[string]an
 }
 
 // handleToolCall executes the full request pipeline for a single tool call.
-// It dispatches to handleCommandCall for command-backed tools and to the HTTP
-// pipeline for OpenAPI-backed tools.
+// It dispatches to handleCommandCall for command-backed tools, handleScriptCall
+// for script-backed tools, and to the HTTP pipeline for OpenAPI-backed tools.
 func (r *Registry) handleToolCall(ctx context.Context, entry *RegistryEntry, args map[string]any) (*sdkmcp.CallToolResult, error) {
 	if entry.CommandDef != nil {
 		return r.handleCommandCall(ctx, entry, args)
+	}
+	if entry.ScriptDef != nil {
+		return r.handleScriptCall(ctx, entry, args)
 	}
 	return r.handleHTTPCall(ctx, entry, args)
 }
@@ -302,6 +307,20 @@ func (r *Registry) handleCommandCall(ctx context.Context, entry *RegistryEntry, 
 	}
 
 	return command.ToTextResult(stdout), nil
+}
+
+// handleScriptCall executes a JavaScript-backed tool.
+func (r *Registry) handleScriptCall(ctx context.Context, entry *RegistryEntry, args map[string]any) (*sdkmcp.CallToolResult, error) {
+	toolAttrs := metric.WithAttributes(attribute.String("mcp.tool.name", entry.PrefixedName))
+
+	out, err := entry.ScriptDef.Execute(ctx, args)
+	if err != nil {
+		if telemetry.ToolCallErrors != nil {
+			telemetry.ToolCallErrors.Add(ctx, 1, toolAttrs)
+		}
+		return script.ToErrorResult(err), nil
+	}
+	return script.ToTextResult(out), nil
 }
 
 // handleHTTPCall executes the full HTTP request pipeline from SPEC.md §17 for a single tool call.

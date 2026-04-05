@@ -36,11 +36,16 @@ func (b *HTTPBuilder) Build(ctx context.Context, cfg *config.UpstreamConfig, nam
 		return nil, fmt.Errorf("build outbound auth for upstream %q: %w", cfg.Name, err)
 	}
 
+	client, err := NewHTTPClient(cfg, provider)
+	if err != nil {
+		return nil, fmt.Errorf("building HTTP client for upstream %q: %w", cfg.Name, err)
+	}
+
 	up := &Upstream{
 		Name:       cfg.Name,
 		ToolPrefix: cfg.ToolPrefix,
 		BaseURL:    cfg.BaseURL,
-		Client:     NewHTTPClient(cfg, provider),
+		Client:     client,
 	}
 
 	entries := make([]*RegistryEntry, 0, len(tools))

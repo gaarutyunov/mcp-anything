@@ -197,11 +197,16 @@ func (r *Refresher) refresh(ctx context.Context) error {
 		return fmt.Errorf("building outbound auth: %w", err)
 	}
 
+	client, err := NewHTTPClient(r.cfg, provider)
+	if err != nil {
+		return fmt.Errorf("building HTTP client: %w", err)
+	}
+
 	up := &Upstream{
 		Name:       r.cfg.Name,
 		ToolPrefix: r.cfg.ToolPrefix,
 		BaseURL:    r.cfg.BaseURL,
-		Client:     NewHTTPClient(r.cfg, provider),
+		Client:     client,
 	}
 	validator := openapi.NewValidator(doc, router)
 
@@ -342,11 +347,16 @@ func (r *Refresher) buildSnapshot(ctx context.Context, prev *Snapshot) (*Snapsho
 		return nil, fmt.Errorf("building outbound auth: %w", err)
 	}
 
+	httpClient, err := NewHTTPClient(r.cfg, provider)
+	if err != nil {
+		return nil, fmt.Errorf("building HTTP client: %w", err)
+	}
+
 	up := &Upstream{
 		Name:       r.cfg.Name,
 		ToolPrefix: r.cfg.ToolPrefix,
 		BaseURL:    r.cfg.BaseURL,
-		Client:     NewHTTPClient(r.cfg, provider),
+		Client:     httpClient,
 	}
 	validator := openapi.NewValidator(doc, router)
 

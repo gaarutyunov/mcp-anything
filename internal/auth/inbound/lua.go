@@ -5,29 +5,32 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"sync"
 	"time"
 
 	lua "github.com/yuin/gopher-lua"
 	"github.com/yuin/gopher-lua/parse"
 
 	"github.com/gaarutyunov/mcp-anything/internal/config"
+	"github.com/gaarutyunov/mcp-anything/internal/runtime"
 )
 
 const defaultLuaInboundTimeout = 500 * time.Millisecond
 
-// LuaValidator implements TokenValidator using a sandboxed gopher-lua VM pool.
+// LuaValidator implements TokenValidator using a sandboxed gopher-lua VM.
 // The Lua script receives the token as its first argument (via ...) and must return:
 // allowed (bool), status (int), extra_headers (table), error_msg (string).
+// The shared pool bounds the maximum number of concurrent Lua runtimes to prevent OOM.
 type LuaValidator struct {
 	proto   *lua.FunctionProto
-	pool    sync.Pool
+	pool    *runtime.Pool
 	timeout time.Duration
 }
 
 // NewLuaValidator creates a LuaValidator by reading and pre-compiling the Lua
-// script at cfg.ScriptPath to bytecode. The bytecode is reused across all pooled VMs.
-func NewLuaValidator(cfg config.LuaAuthConfig) (*LuaValidator, error) {
+// script at cfg.ScriptPath to bytecode. The bytecode is reused across calls.
+// pool bounds the number of concurrent Lua runtimes; it is shared with the outbound
+// Lua auth provider to enforce a single global limit for all auth scripts.
+func NewLuaValidator(cfg config.LuaAuthConfig, pool *runtime.Pool) (*LuaValidator, error) {
 	src, err := os.ReadFile(cfg.ScriptPath)
 	if err != nil {
 		return nil, fmt.Errorf("reading lua auth script %q: %w", cfg.ScriptPath, err)
@@ -43,18 +46,23 @@ func NewLuaValidator(cfg config.LuaAuthConfig) (*LuaValidator, error) {
 		timeout = defaultLuaInboundTimeout
 	}
 
-	v := &LuaValidator{
+	return &LuaValidator{
 		proto:   proto,
 		timeout: timeout,
-	}
-	v.pool = sync.Pool{New: func() any { return newSandboxedVM() }}
-	return v, nil
+		pool:    pool,
+	}, nil
 }
 
 // ValidateToken calls the Lua script with the token and returns identity info on success.
 func (v *LuaValidator) ValidateToken(ctx context.Context, token string) (*TokenInfo, error) {
-	L := v.pool.Get().(*lua.LState)
-	defer L.Close() // close instead of pool.Put to prevent global state leaking between requests
+	release, err := v.pool.Acquire(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("lua auth: %w", err)
+	}
+	defer release()
+
+	L := newSandboxedVM()
+	defer L.Close()
 
 	tctx, cancel := context.WithTimeout(ctx, v.timeout)
 	defer cancel()

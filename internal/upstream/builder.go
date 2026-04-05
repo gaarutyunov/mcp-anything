@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/gaarutyunov/mcp-anything/internal/config"
+	"github.com/gaarutyunov/mcp-anything/internal/runtime"
 )
 
 // Builder validates a single upstream configuration and returns a ValidatedUpstream
@@ -21,12 +22,14 @@ type BuilderRegistry struct {
 }
 
 // NewBuilderRegistry returns a BuilderRegistry pre-populated with built-in upstream types.
-func NewBuilderRegistry() *BuilderRegistry {
+// pools is shared with the auth factories so that the configured runtime limits apply
+// globally across all script executions.
+func NewBuilderRegistry(pools *runtime.Registry) *BuilderRegistry {
 	r := &BuilderRegistry{builders: make(map[string]Builder)}
-	r.Register("", &HTTPBuilder{})
-	r.Register("http", &HTTPBuilder{})
+	r.Register("", &HTTPBuilder{pools: pools})
+	r.Register("http", &HTTPBuilder{pools: pools})
 	r.Register("command", &CommandBuilder{})
-	r.Register("script", &ScriptBuilder{})
+	r.Register("script", &ScriptBuilder{jsPool: pools.JSScript})
 	return r
 }
 

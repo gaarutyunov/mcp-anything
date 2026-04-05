@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gaarutyunov/mcp-anything/internal/config"
+	"github.com/gaarutyunov/mcp-anything/internal/runtime"
 )
 
 func writeLuaOutboundScript(t *testing.T, content string) string {
@@ -25,7 +26,8 @@ func writeLuaOutboundScript(t *testing.T, content string) string {
 
 func newOutboundProvider(t *testing.T, scriptPath string, timeout time.Duration) *LuaProvider {
 	t.Helper()
-	p, err := NewLuaProvider("test-upstream", config.LuaOutboundConfig{ScriptPath: scriptPath, Timeout: timeout})
+	pool := runtime.NewPool(runtime.DefaultMaxAuthVMs)
+	p, err := NewLuaProvider("test-upstream", config.LuaOutboundConfig{ScriptPath: scriptPath, Timeout: timeout}, pool)
 	if err != nil {
 		t.Fatalf("NewLuaProvider: %v", err)
 	}

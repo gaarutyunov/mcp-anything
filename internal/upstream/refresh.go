@@ -15,6 +15,7 @@ import (
 	outboundauth "github.com/gaarutyunov/mcp-anything/internal/auth/outbound"
 	"github.com/gaarutyunov/mcp-anything/internal/config"
 	"github.com/gaarutyunov/mcp-anything/internal/openapi"
+	"github.com/gaarutyunov/mcp-anything/internal/runtime"
 	"github.com/gaarutyunov/mcp-anything/internal/telemetry"
 )
 
@@ -52,17 +53,19 @@ type Refresher struct {
 	current  atomic.Pointer[Snapshot]
 	manager  RegistryManager
 	failures atomic.Int32
+	pools    *runtime.Registry
 
 	lastOverlayFetch time.Time
 }
 
 // NewRefresher creates a Refresher with an initial snapshot loaded synchronously.
 // Returns an error if the initial load fails.
-func NewRefresher(ctx context.Context, cfg *config.UpstreamConfig, naming *config.NamingConfig, manager RegistryManager) (*Refresher, error) {
+func NewRefresher(ctx context.Context, cfg *config.UpstreamConfig, naming *config.NamingConfig, manager RegistryManager, pools *runtime.Registry) (*Refresher, error) {
 	r := &Refresher{
 		cfg:     cfg,
 		naming:  naming,
 		manager: manager,
+		pools:   pools,
 	}
 
 	snap, err := r.buildSnapshot(ctx, nil)
@@ -189,7 +192,7 @@ func (r *Refresher) refresh(ctx context.Context) error {
 
 	outboundCfg := r.cfg.OutboundAuth
 	outboundCfg.Upstream = r.cfg.Name
-	provider, err := outboundauth.NewRegistry().New(ctx, &outboundCfg)
+	provider, err := outboundauth.NewRegistry(r.pools).New(ctx, &outboundCfg)
 	if err != nil {
 		return fmt.Errorf("building outbound auth: %w", err)
 	}
@@ -334,7 +337,7 @@ func (r *Refresher) buildSnapshot(ctx context.Context, prev *Snapshot) (*Snapsho
 
 	outboundCfg := r.cfg.OutboundAuth
 	outboundCfg.Upstream = r.cfg.Name
-	provider, err := outboundauth.NewRegistry().New(ctx, &outboundCfg)
+	provider, err := outboundauth.NewRegistry(r.pools).New(ctx, &outboundCfg)
 	if err != nil {
 		return nil, fmt.Errorf("building outbound auth: %w", err)
 	}

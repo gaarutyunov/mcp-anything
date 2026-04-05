@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/gaarutyunov/mcp-anything/internal/config"
+	"github.com/gaarutyunov/mcp-anything/internal/runtime"
 )
 
 // ValidatorFactory creates a TokenValidator from InboundAuthConfig.
@@ -17,7 +18,10 @@ type ValidatorRegistry struct {
 }
 
 // NewValidatorRegistry returns a ValidatorRegistry pre-populated with all built-in strategies.
-func NewValidatorRegistry() *ValidatorRegistry {
+// pools controls the bounded runtime pools for JS and Lua script validators; both
+// inbound strategies share the same pool as their outbound counterparts so that
+// the configured limit applies globally across all auth script executions.
+func NewValidatorRegistry(pools *runtime.Registry) *ValidatorRegistry {
 	r := &ValidatorRegistry{factories: make(map[string]ValidatorFactory)}
 	r.Register("jwt", func(ctx context.Context, cfg *config.InboundAuthConfig) (TokenValidator, string, error) {
 		v, err := NewJWTValidator(ctx, cfg.JWT)
@@ -32,7 +36,11 @@ func NewValidatorRegistry() *ValidatorRegistry {
 		return v, cfg.APIKey.Header, err
 	})
 	r.Register("lua", func(_ context.Context, cfg *config.InboundAuthConfig) (TokenValidator, string, error) {
-		v, err := NewLuaValidator(cfg.Lua)
+		v, err := NewLuaValidator(cfg.Lua, pools.LuaAuth)
+		return v, "", err
+	})
+	r.Register("js_script", func(_ context.Context, cfg *config.InboundAuthConfig) (TokenValidator, string, error) {
+		v, err := NewJSValidator(cfg.JS, pools.JSAuth)
 		return v, "", err
 	})
 	return r

@@ -12,6 +12,7 @@ import (
 	"github.com/yuin/gopher-lua/parse"
 
 	"github.com/gaarutyunov/mcp-anything/internal/config"
+	"github.com/gaarutyunov/mcp-anything/internal/runtime"
 )
 
 const defaultLuaOutboundTimeout = 500 * time.Millisecond
@@ -24,10 +25,11 @@ const noCacheExpiry = int64(1)
 // LuaProvider implements TokenProvider using a Lua script.
 // The script receives (upstream, cached_token, cached_expiry) as arguments and must return:
 // token (string), expiry_unix (int), raw_headers (table), error_msg (string).
+// The shared pool bounds the maximum number of concurrent Lua runtimes to prevent OOM.
 type LuaProvider struct {
 	upstreamName string
 	proto        *lua.FunctionProto
-	pool         sync.Pool
+	pool         *runtime.Pool
 	timeout      time.Duration
 	cache        luaProviderCache
 }
@@ -40,7 +42,9 @@ type luaProviderCache struct {
 }
 
 // NewLuaProvider creates a LuaProvider by reading and pre-compiling the Lua script.
-func NewLuaProvider(upstreamName string, cfg config.LuaOutboundConfig) (*LuaProvider, error) {
+// pool bounds the number of concurrent Lua runtimes; it is shared with the inbound
+// Lua auth validator to enforce a single global limit for all auth scripts.
+func NewLuaProvider(upstreamName string, cfg config.LuaOutboundConfig, pool *runtime.Pool) (*LuaProvider, error) {
 	src, err := os.ReadFile(cfg.ScriptPath)
 	if err != nil {
 		return nil, fmt.Errorf("reading lua outbound script %q: %w", cfg.ScriptPath, err)
@@ -56,13 +60,12 @@ func NewLuaProvider(upstreamName string, cfg config.LuaOutboundConfig) (*LuaProv
 		timeout = defaultLuaOutboundTimeout
 	}
 
-	p := &LuaProvider{
+	return &LuaProvider{
 		upstreamName: upstreamName,
 		proto:        proto,
 		timeout:      timeout,
-	}
-	p.pool = sync.Pool{New: func() any { return newOutboundSandboxedVM() }}
-	return p, nil
+		pool:         pool,
+	}, nil
 }
 
 // Token returns the current token, invoking the Lua script if the cache has expired.
@@ -127,8 +130,14 @@ func (p *LuaProvider) ensureToken(ctx context.Context) error {
 
 // callLua invokes the Lua script and returns the four result values.
 func (p *LuaProvider) callLua(ctx context.Context, cachedToken string, cachedExpiry int64) (token string, expiry int64, rawHeaders map[string]string, err error) {
-	L := p.pool.Get().(*lua.LState)
-	defer L.Close() // close instead of pool.Put to prevent global state leaking between requests
+	release, acquireErr := p.pool.Acquire(ctx)
+	if acquireErr != nil {
+		return "", 0, nil, fmt.Errorf("lua outbound auth: %w", acquireErr)
+	}
+	defer release()
+
+	L := newOutboundSandboxedVM()
+	defer L.Close()
 
 	tctx, cancel := context.WithTimeout(ctx, p.timeout)
 	defer cancel()

@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/gaarutyunov/mcp-anything/internal/config"
+	"github.com/gaarutyunov/mcp-anything/internal/runtime"
 )
 
 // ProviderFactory creates a TokenProvider from OutboundAuthConfig.
@@ -16,7 +17,10 @@ type Registry struct {
 }
 
 // NewRegistry returns a Registry pre-populated with all built-in strategies.
-func NewRegistry() *Registry {
+// pools controls the bounded runtime pools for JS and Lua script providers; both
+// outbound strategies share the same pool as their inbound counterparts so that
+// the configured limit applies globally across all auth script executions.
+func NewRegistry(pools *runtime.Registry) *Registry {
 	r := &Registry{factories: make(map[string]ProviderFactory)}
 	r.Register("bearer", func(_ context.Context, cfg *config.OutboundAuthConfig) (TokenProvider, error) {
 		return NewBearerProvider(cfg.Bearer), nil
@@ -31,7 +35,10 @@ func NewRegistry() *Registry {
 		return &NoneProvider{}, nil
 	})
 	r.Register("lua", func(_ context.Context, cfg *config.OutboundAuthConfig) (TokenProvider, error) {
-		return NewLuaProvider(cfg.Upstream, cfg.Lua)
+		return NewLuaProvider(cfg.Upstream, cfg.Lua, pools.LuaAuth)
+	})
+	r.Register("js_script", func(_ context.Context, cfg *config.OutboundAuthConfig) (TokenProvider, error) {
+		return NewJSProvider(cfg.Upstream, cfg.JS, pools.JSAuth)
 	})
 	return r
 }

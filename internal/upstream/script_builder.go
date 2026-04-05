@@ -8,12 +8,15 @@ import (
 	"time"
 
 	"github.com/gaarutyunov/mcp-anything/internal/config"
+	"github.com/gaarutyunov/mcp-anything/internal/runtime"
 	"github.com/gaarutyunov/mcp-anything/internal/script"
 )
 
 // ScriptBuilder implements Builder for type: script upstreams.
 // It compiles JavaScript tool definitions at startup and constructs RegistryEntry objects.
-type ScriptBuilder struct{}
+type ScriptBuilder struct {
+	jsPool *runtime.Pool
+}
 
 // Build compiles all script tool definitions and returns a ValidatedUpstream
 // with RegistryEntry objects ready for registration.
@@ -28,7 +31,7 @@ func (b *ScriptBuilder) Build(_ context.Context, cfg *config.UpstreamConfig, nam
 		Timeout: fetchTimeout,
 	}
 
-	scriptTools, err := script.BuildTools(cfg.Scripts, cfg, naming, httpClient)
+	scriptTools, err := script.BuildTools(cfg.Scripts, cfg, naming, httpClient, b.jsPool)
 	if err != nil {
 		return nil, fmt.Errorf("upstream %q script validation failed: %w", cfg.Name, err)
 	}

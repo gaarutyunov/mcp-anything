@@ -9,11 +9,24 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 )
+
+// DeniedError is returned by a TokenValidator when access is explicitly denied
+// with a specific HTTP status code. Middleware maps it to the appropriate
+// HTTP response instead of the default 401 unauthorized.
+type DeniedError struct {
+	Status  int
+	Message string
+}
+
+func (e *DeniedError) Error() string {
+	return fmt.Sprintf("auth denied (status %d): %s", e.Status, e.Message)
+}
 
 // TokenInfo holds validated identity information extracted from a token.
 type TokenInfo struct {
@@ -96,7 +109,12 @@ func MiddlewareWithSelector(selectValidator ValidatorSelector, registry Registry
 
 			info, err := validator.ValidateToken(r.Context(), token)
 			if err != nil {
-				writeUnauthorized(w, r, "invalid_token")
+				var denied *DeniedError
+				if errors.As(err, &denied) {
+					writeDenied(w, r, denied)
+				} else {
+					writeUnauthorized(w, r, "invalid_token")
+				}
 				return
 			}
 
@@ -144,6 +162,31 @@ func writeUnauthorized(w http.ResponseWriter, r *http.Request, errCode string) {
 	w.Header().Set("WWW-Authenticate", wwwAuth)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusUnauthorized)
+	resp, err := json.Marshal(map[string]string{"error": errCode})
+	if err != nil {
+		_, _ = w.Write([]byte(`{"error":"internal_error"}`))
+		return
+	}
+	_, _ = w.Write(resp)
+}
+
+// writeDenied writes an HTTP response for an explicit denial with a specific status code.
+// If the status is 401, it delegates to writeUnauthorized to preserve WWW-Authenticate semantics.
+func writeDenied(w http.ResponseWriter, r *http.Request, denied *DeniedError) {
+	if denied.Status == 0 || denied.Status == http.StatusUnauthorized {
+		errCode := denied.Message
+		if errCode == "" {
+			errCode = "access_denied"
+		}
+		writeUnauthorized(w, r, errCode)
+		return
+	}
+	errCode := denied.Message
+	if errCode == "" {
+		errCode = "access_denied"
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(denied.Status)
 	resp, err := json.Marshal(map[string]string{"error": errCode})
 	if err != nil {
 		_, _ = w.Write([]byte(`{"error":"internal_error"}`))

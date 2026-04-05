@@ -20,7 +20,6 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	"gopkg.in/yaml.v3"
 
-	outboundauth "github.com/gaarutyunov/mcp-anything/internal/auth/outbound"
 	"github.com/gaarutyunov/mcp-anything/internal/command"
 	"github.com/gaarutyunov/mcp-anything/internal/config"
 	"github.com/gaarutyunov/mcp-anything/internal/content"
@@ -73,12 +72,13 @@ type Registry struct {
 }
 
 // ValidatedUpstream is the result of validating a single upstream configuration.
+// Entries holds the pre-built RegistryEntry objects for all tools in this upstream.
+// SpecYAMLRoot is the post-overlay YAML root used for JSONPath group filter evaluation
+// (nil for non-HTTP upstreams such as type: command).
 type ValidatedUpstream struct {
 	Config       *config.UpstreamConfig
-	Tools        []*openapi.ValidatedTool // populated for type: http upstreams
-	CommandTools []*command.Tool          // populated for type: command upstreams
-	Provider     outboundauth.TokenProvider
-	SpecYAMLRoot *yaml.Node // post-overlay YAML root for JSONPath group filter evaluation
+	Entries      []*RegistryEntry
+	SpecYAMLRoot *yaml.Node
 }
 
 // New builds a Registry from all validated upstreams and group configurations.
@@ -106,69 +106,19 @@ func New(upstreams []*ValidatedUpstream, naming *config.NamingConfig, groups []c
 	}
 
 	for _, vu := range upstreams {
-		var up *Upstream
-		if vu.Config.Type == "command" {
-			// Command upstreams have no HTTP client.
-			up = &Upstream{
-				Name:       vu.Config.Name,
-				ToolPrefix: vu.Config.ToolPrefix,
-			}
-		} else {
-			up = &Upstream{
-				Name:       vu.Config.Name,
-				ToolPrefix: vu.Config.ToolPrefix,
-				BaseURL:    vu.Config.BaseURL,
-				Client:     NewHTTPClient(vu.Config, vu.Provider),
-			}
-		}
-		r.byPrefix[vu.Config.ToolPrefix] = up
 		r.specRootByName[vu.Config.Name] = vu.SpecYAMLRoot
 
-		for _, vt := range vu.Tools {
-			if existing, ok := r.byPrefixedName[vt.PrefixedName]; ok {
+		for _, entry := range vu.Entries {
+			if existing, ok := r.byPrefixedName[entry.PrefixedName]; ok {
 				return nil, fmt.Errorf("tool name conflict %q between upstreams %q and %q",
-					vt.PrefixedName, existing.Upstream.Name, vu.Config.Name)
+					entry.PrefixedName, existing.Upstream.Name, vu.Config.Name)
 			}
-			authRequired := extractAuthRequired(vt.Operation)
-			if !authRequired {
-				slog.Info("public operation (auth not required)", "tool", vt.PrefixedName)
-			}
-			entry := &RegistryEntry{
-				PrefixedName:   vt.PrefixedName,
-				OriginalName:   vt.OriginalName,
-				Upstream:       up,
-				MCPTool:        vt.MCPTool,
-				Transforms:     vt.Transforms,
-				ResponseFormat: extractResponseFormat(vt.Operation),
-				AuthRequired:   authRequired,
-				Method:         vt.Method,
-				PathTemplate:   vt.PathTemplate,
-				Validator:      vt.Validator,
-				ValidationCfg:  vu.Config.Validation,
-				OperationNode:  vt.OperationNode,
-			}
-			r.byPrefixedName[vt.PrefixedName] = entry
+			r.byPrefixedName[entry.PrefixedName] = entry
 			r.byUpstreamName[vu.Config.Name] = append(r.byUpstreamName[vu.Config.Name], entry)
-			r.toolList = append(r.toolList, vt.MCPTool)
-		}
-
-		for _, ct := range vu.CommandTools {
-			if existing, ok := r.byPrefixedName[ct.PrefixedName]; ok {
-				return nil, fmt.Errorf("tool name conflict %q between upstreams %q and %q",
-					ct.PrefixedName, existing.Upstream.Name, vu.Config.Name)
+			if entry.Upstream != nil {
+				r.byPrefix[entry.Upstream.ToolPrefix] = entry.Upstream
 			}
-			entry := &RegistryEntry{
-				PrefixedName: ct.PrefixedName,
-				OriginalName: ct.OriginalName,
-				Upstream:     up,
-				MCPTool:      ct.MCPTool,
-				Transforms:   ct.Transforms,
-				AuthRequired: true, // default: command tools require auth
-				CommandDef:   ct.Def,
-			}
-			r.byPrefixedName[ct.PrefixedName] = entry
-			r.byUpstreamName[vu.Config.Name] = append(r.byUpstreamName[vu.Config.Name], entry)
-			r.toolList = append(r.toolList, ct.MCPTool)
+			r.toolList = append(r.toolList, entry.MCPTool)
 		}
 	}
 
@@ -211,24 +161,15 @@ func New(upstreams []*ValidatedUpstream, naming *config.NamingConfig, groups []c
 				}
 			}
 
-			for _, vt := range vu.Tools {
-				entry := r.byPrefixedName[vt.PrefixedName]
-				if entry == nil {
-					continue
-				}
-				if jp != nil {
-					// Include only if the operation's YAML node was selected by the filter.
+			for _, entry := range vu.Entries {
+				if jp != nil && entry.CommandDef == nil {
+					// HTTP tools: apply the JSONPath filter.
+					// Command tools (CommandDef != nil) are always included regardless of filter.
 					if entry.OperationNode == nil || !matchedNodes[entry.OperationNode] {
 						continue
 					}
 				}
-				gd.toolSet[vt.PrefixedName] = true
-			}
-
-			// Command tools have no OperationNode and are always included
-			// in their upstream's groups regardless of any JSONPath filter.
-			for _, ct := range vu.CommandTools {
-				gd.toolSet[ct.PrefixedName] = true
+				gd.toolSet[entry.PrefixedName] = true
 			}
 		}
 
@@ -346,19 +287,12 @@ func (r *Registry) handleToolCall(ctx context.Context, entry *RegistryEntry, arg
 }
 
 // handleCommandCall executes a command-backed tool.
+// Latency is recorded by the outer DispatchForGroup instrumentation in manager.go;
+// recording it here would double-count command tools.
 func (r *Registry) handleCommandCall(ctx context.Context, entry *RegistryEntry, args map[string]any) (*sdkmcp.CallToolResult, error) {
 	toolAttrs := metric.WithAttributes(attribute.String("mcp.tool.name", entry.PrefixedName))
 
-	start := time.Now()
 	stdout, stderr, err := entry.CommandDef.Execute(ctx, args)
-	if telemetry.ToolCallDuration != nil {
-		telemetry.ToolCallDuration.Record(ctx, time.Since(start).Seconds(),
-			metric.WithAttributes(
-				attribute.String("mcp.tool.name", entry.PrefixedName),
-				attribute.String("mcp.method", "tools/call"),
-			),
-		)
-	}
 
 	if err != nil {
 		if telemetry.ToolCallErrors != nil {

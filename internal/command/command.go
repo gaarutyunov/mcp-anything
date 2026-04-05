@@ -332,15 +332,16 @@ type limitWriter struct {
 }
 
 func (lw *limitWriter) Write(p []byte) (int, error) {
+	origLen := len(p)
 	if lw.remaining <= 0 {
-		return len(p), nil // silently discard
+		return origLen, nil // silently discard
 	}
-	n := int64(len(p))
+	n := int64(origLen)
 	if n > lw.remaining {
 		p = p[:lw.remaining]
 	}
 	written, err := lw.w.Write(p)
 	lw.remaining -= int64(written)
-	// Report the full length to the caller so exec.Cmd does not error.
-	return len(p), err
+	// Report the original length to the caller so exec.Cmd does not see a short write.
+	return origLen, err
 }

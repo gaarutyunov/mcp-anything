@@ -54,7 +54,7 @@ upstreams:
           required: [message]
       - tool_name: always_fail
         description: "A command that always exits non-zero"
-        command: "/usr/bin/false"
+        command: "/bin/false"
         input_schema:
           type: object
           properties: {}

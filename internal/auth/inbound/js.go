@@ -16,6 +16,7 @@ import (
 	"github.com/grafana/sobek"
 
 	"github.com/gaarutyunov/mcp-anything/internal/config"
+	"github.com/gaarutyunov/mcp-anything/internal/runtime"
 	"github.com/gaarutyunov/mcp-anything/internal/script"
 )
 
@@ -28,17 +29,21 @@ const defaultJSInboundFetchTimeout = 30 * time.Second
 //	{ allowed: bool, status?: number, error?: string, subject?: string, extra_headers?: object }
 //
 // A fresh sobek.Runtime is created per call (Sobek is not goroutine-safe).
-// The pre-compiled program is reused across calls.
+// The pre-compiled program is reused across calls. The shared pool bounds
+// the maximum number of concurrent JS runtimes to prevent OOM under load.
 type JSValidator struct {
 	program    *sobek.Program
 	timeout    time.Duration
 	env        map[string]string
 	cache      *jsInboundCache
 	httpClient *http.Client
+	pool       *runtime.Pool
 }
 
 // NewJSValidator creates a JSValidator by reading and pre-compiling the JS script.
-func NewJSValidator(cfg config.JSAuthConfig) (*JSValidator, error) {
+// pool bounds the number of concurrent JS runtimes; it is shared with the outbound
+// JS auth provider to enforce a single global limit for all auth scripts.
+func NewJSValidator(cfg config.JSAuthConfig, pool *runtime.Pool) (*JSValidator, error) {
 	src, err := os.ReadFile(cfg.ScriptPath)
 	if err != nil {
 		return nil, fmt.Errorf("reading js auth script %q: %w", cfg.ScriptPath, err)
@@ -57,11 +62,18 @@ func NewJSValidator(cfg config.JSAuthConfig) (*JSValidator, error) {
 		env:        cfg.Env,
 		cache:      newJSInboundCache(),
 		httpClient: &http.Client{Timeout: defaultJSInboundFetchTimeout},
+		pool:       pool,
 	}, nil
 }
 
 // ValidateToken runs the JS script with the token and returns identity info on success.
 func (v *JSValidator) ValidateToken(ctx context.Context, token string) (*TokenInfo, error) {
+	release, err := v.pool.Acquire(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("js auth: %w", err)
+	}
+	defer release()
+
 	rt := sobek.New()
 
 	// scriptCtx bounds ctx.fetch HTTP calls to the script deadline.

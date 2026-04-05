@@ -8,12 +8,15 @@ import (
 	outboundauth "github.com/gaarutyunov/mcp-anything/internal/auth/outbound"
 	"github.com/gaarutyunov/mcp-anything/internal/config"
 	"github.com/gaarutyunov/mcp-anything/internal/openapi"
+	"github.com/gaarutyunov/mcp-anything/internal/runtime"
 )
 
 // HTTPBuilder implements Builder for type: http (or "") upstreams.
 // It fetches and validates the OpenAPI spec and constructs RegistryEntry objects
 // for all exported operations.
-type HTTPBuilder struct{}
+type HTTPBuilder struct {
+	pools *runtime.Registry
+}
 
 // Build validates the OpenAPI spec and returns a ValidatedUpstream with RegistryEntry
 // objects ready for registration.
@@ -28,7 +31,7 @@ func (b *HTTPBuilder) Build(ctx context.Context, cfg *config.UpstreamConfig, nam
 
 	outboundCfg := cfg.OutboundAuth
 	outboundCfg.Upstream = cfg.Name
-	provider, err := outboundauth.NewRegistry().New(ctx, &outboundCfg)
+	provider, err := outboundauth.NewRegistry(b.pools).New(ctx, &outboundCfg)
 	if err != nil {
 		return nil, fmt.Errorf("build outbound auth for upstream %q: %w", cfg.Name, err)
 	}

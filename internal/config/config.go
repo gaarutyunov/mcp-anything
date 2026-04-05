@@ -11,6 +11,32 @@ type ProxyConfig struct {
 	Upstreams   []UpstreamConfig  `koanf:"upstreams"`
 	InboundAuth InboundAuthConfig `koanf:"inbound_auth"`
 	Groups      []GroupConfig     `koanf:"groups"`
+	Runtime     RuntimeConfig     `koanf:"runtime"`
+}
+
+// RuntimeConfig controls the bounded pools for concurrent script runtime instances.
+// Limiting runtime concurrency prevents OOM conditions and denial-of-service attacks
+// caused by excessive memory growth under high load.
+type RuntimeConfig struct {
+	JS  JSRuntimeConfig  `koanf:"js"`
+	Lua LuaRuntimeConfig `koanf:"lua"`
+}
+
+// JSRuntimeConfig configures Sobek JavaScript runtime pool sizes.
+type JSRuntimeConfig struct {
+	// MaxAuthVMs is the maximum number of concurrent JS runtimes used for auth scripts
+	// (inbound + outbound combined). Default: 10.
+	MaxAuthVMs int `koanf:"max_auth_vms"`
+	// MaxScriptVMs is the maximum number of concurrent JS runtimes used for tool scripts.
+	// Default: 20.
+	MaxScriptVMs int `koanf:"max_script_vms"`
+}
+
+// LuaRuntimeConfig configures gopher-lua runtime pool sizes.
+type LuaRuntimeConfig struct {
+	// MaxAuthVMs is the maximum number of concurrent Lua runtimes used for auth scripts
+	// (inbound + outbound combined). Default: 10.
+	MaxAuthVMs int `koanf:"max_auth_vms"`
 }
 
 // GroupConfig configures a named group of upstreams exposed at a single MCP endpoint.

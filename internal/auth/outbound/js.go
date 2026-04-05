@@ -16,6 +16,7 @@ import (
 	"github.com/grafana/sobek"
 
 	"github.com/gaarutyunov/mcp-anything/internal/config"
+	"github.com/gaarutyunov/mcp-anything/internal/runtime"
 	"github.com/gaarutyunov/mcp-anything/internal/script"
 )
 
@@ -34,8 +35,8 @@ const jsOutboundNoCacheExpiry = int64(1)
 //
 // A fresh sobek.Runtime is created per script invocation (Sobek is not goroutine-safe).
 // The pre-compiled program is reused. Results are cached at the Go level to avoid
-// re-invoking the script on every request. Scripts may also use ctx.cache.get/set
-// for additional caching that persists across invocations.
+// re-invoking the script on every request. The shared pool bounds the maximum number
+// of concurrent JS runtimes to prevent OOM under load.
 type JSProvider struct {
 	upstreamName string
 	program      *sobek.Program
@@ -44,6 +45,7 @@ type JSProvider struct {
 	cache        *jsOutboundCache
 	scriptCache  *jsOutboundScriptCache // persists across callScript invocations
 	httpClient   *http.Client
+	pool         *runtime.Pool
 }
 
 type jsOutboundCache struct {
@@ -54,7 +56,9 @@ type jsOutboundCache struct {
 }
 
 // NewJSProvider creates a JSProvider by reading and pre-compiling the JS script.
-func NewJSProvider(upstreamName string, cfg config.JSOutboundConfig) (*JSProvider, error) {
+// pool bounds the number of concurrent JS runtimes; it is shared with the inbound
+// JS auth validator to enforce a single global limit for all auth scripts.
+func NewJSProvider(upstreamName string, cfg config.JSOutboundConfig, pool *runtime.Pool) (*JSProvider, error) {
 	src, err := os.ReadFile(cfg.ScriptPath)
 	if err != nil {
 		return nil, fmt.Errorf("reading js outbound script %q: %w", cfg.ScriptPath, err)
@@ -75,6 +79,7 @@ func NewJSProvider(upstreamName string, cfg config.JSOutboundConfig) (*JSProvide
 		cache:        &jsOutboundCache{},
 		scriptCache:  newJSOutboundScriptCache(),
 		httpClient:   &http.Client{Timeout: defaultJSOutboundFetchTimeout},
+		pool:         pool,
 	}, nil
 }
 
@@ -136,6 +141,12 @@ func (p *JSProvider) ensureToken(ctx context.Context) error {
 
 // callScript invokes the JS script and returns (token, expiry, rawHeaders, error).
 func (p *JSProvider) callScript(ctx context.Context) (token string, expiry int64, rawHeaders map[string]string, err error) {
+	release, acquireErr := p.pool.Acquire(ctx)
+	if acquireErr != nil {
+		return "", 0, nil, fmt.Errorf("js outbound auth: %w", acquireErr)
+	}
+	defer release()
+
 	rt := sobek.New()
 
 	// scriptCtx bounds ctx.fetch HTTP calls to the script deadline.

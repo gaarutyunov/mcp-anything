@@ -19,6 +19,7 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/gaarutyunov/mcp-anything/internal/config"
+	"github.com/gaarutyunov/mcp-anything/internal/runtime"
 	"github.com/gaarutyunov/mcp-anything/internal/transform"
 )
 
@@ -41,6 +42,10 @@ type Def struct {
 
 	// HTTPClient is used by ctx.fetch(). Must have a timeout set.
 	HTTPClient *http.Client
+
+	// Pool bounds the number of concurrent JS runtimes for this script upstream.
+	// Acquire blocks if all slots are in use, preventing OOM under high concurrency.
+	Pool *runtime.Pool
 }
 
 // Execute runs the JavaScript script with the provided MCP tool arguments.
@@ -51,6 +56,12 @@ type Def struct {
 // Returns the JSON-serialised script return value and any error.
 // JavaScript exceptions are returned as errors.
 func (d *Def) Execute(ctx context.Context, args map[string]any) ([]byte, error) {
+	release, err := d.Pool.Acquire(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("script: %w", err)
+	}
+	defer release()
+
 	rt := sobek.New()
 
 	// Interrupt the runtime after the timeout deadline, from a separate goroutine.
@@ -241,7 +252,9 @@ type Tool struct {
 // parseable script) and returns an error if any entry is invalid.
 // httpClient is used by ctx.fetch() in the script execution; if nil, a default
 // client with a 30s timeout is used.
-func BuildTools(cfgs []config.ScriptConfig, upstreamCfg *config.UpstreamConfig, namingCfg *config.NamingConfig, httpClient *http.Client) ([]*Tool, error) {
+// pool bounds the number of concurrent JS runtimes; all tools in the upstream
+// share the same pool so the limit applies per upstream, not per tool.
+func BuildTools(cfgs []config.ScriptConfig, upstreamCfg *config.UpstreamConfig, namingCfg *config.NamingConfig, httpClient *http.Client, pool *runtime.Pool) ([]*Tool, error) {
 	sep := namingCfg.Separator
 	prefix := upstreamCfg.ToolPrefix
 
@@ -293,6 +306,7 @@ func BuildTools(cfgs []config.ScriptConfig, upstreamCfg *config.UpstreamConfig, 
 			Timeout:    cfg.Timeout,
 			Env:        cfg.Env,
 			HTTPClient: client,
+			Pool:       pool,
 		}
 
 		// Compile identity transforms (args are passed directly to the JS function).

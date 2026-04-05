@@ -16,6 +16,7 @@ import (
 	"github.com/gaarutyunov/mcp-anything/internal/auth/inbound"
 	"github.com/gaarutyunov/mcp-anything/internal/config"
 	mcppkg "github.com/gaarutyunov/mcp-anything/internal/mcp"
+	"github.com/gaarutyunov/mcp-anything/internal/runtime"
 	"github.com/gaarutyunov/mcp-anything/internal/server"
 	"github.com/gaarutyunov/mcp-anything/internal/telemetry"
 	upstreampkg "github.com/gaarutyunov/mcp-anything/internal/upstream"
@@ -38,15 +39,13 @@ func main() {
 		cfgPath = "/etc/mcp-anything/config.yaml"
 	}
 
-	// Create the Manager — MCP servers and registry are populated by the first Rebuild.
-	manager := mcppkg.NewManager()
-
-	// Load initial config to get telemetry settings for SDK init.
-	// The full load happens below via NewLoader; we just need the telemetry section here.
+	// Load initial config to extract telemetry and runtime pool settings.
+	// The full load and validation happens below via NewLoader.
 	earlyTelemetryCfg := &telemetry.Config{
 		ServiceName:    "mcp-anything",
 		ServiceVersion: "unknown",
 	}
+	var runtimeCfg config.RuntimeConfig
 	if earlyCfg, loadErr := config.Load(cfgPath); loadErr == nil {
 		earlyTelemetryCfg = &telemetry.Config{
 			ServiceName:    earlyCfg.Telemetry.ServiceName,
@@ -54,7 +53,24 @@ func main() {
 			OTLPEndpoint:   earlyCfg.Telemetry.OTLPEndpoint,
 			Insecure:       earlyCfg.Telemetry.Insecure,
 		}
+		runtimeCfg = earlyCfg.Runtime
 	}
+
+	// Create the global runtime pool registry. This bounds the number of concurrent
+	// JS and Lua script runtimes to prevent OOM under high concurrency.
+	runtimePools, poolErr := runtime.NewRegistry(runtimeCfg)
+	if poolErr != nil {
+		slog.Error("invalid runtime pool config", "error", poolErr)
+		os.Exit(1)
+	}
+	slog.Info("runtime pools configured",
+		"js_auth_vms", runtimePools.JSAuth.Cap(),
+		"js_script_vms", runtimePools.JSScript.Cap(),
+		"lua_auth_vms", runtimePools.LuaAuth.Cap(),
+	)
+
+	// Create the Manager — MCP servers and registry are populated by the first Rebuild.
+	manager := mcppkg.NewManager(runtimePools)
 
 	// Initialise OpenTelemetry SDK.
 	shutdown, telErr := telemetry.Init(ctx, earlyTelemetryCfg)
@@ -83,7 +99,7 @@ func main() {
 	// Build inbound auth middleware if configured.
 	var authMiddleware func(http.Handler) http.Handler
 	if cfg.InboundAuth.Strategy != "" && cfg.InboundAuth.Strategy != "none" {
-		inboundRegistry := inbound.NewValidatorRegistry()
+		inboundRegistry := inbound.NewValidatorRegistry(runtimePools)
 		globalValidator, globalHeader, buildErr := inboundRegistry.New(ctx, &cfg.InboundAuth)
 		if buildErr != nil {
 			slog.Error("build inbound auth validator", "error", buildErr)
@@ -151,7 +167,7 @@ func main() {
 		if !isURLSource(upCfg.OpenAPI.Source) {
 			continue
 		}
-		refresher, refErr := upstreampkg.NewRefresher(ctx, upCfg, &cfg.Naming, manager)
+		refresher, refErr := upstreampkg.NewRefresher(ctx, upCfg, &cfg.Naming, manager, runtimePools)
 		if refErr != nil {
 			slog.Error("creating refresher", "upstream", upCfg.Name, "error", refErr)
 			os.Exit(1)

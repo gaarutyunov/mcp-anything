@@ -18,6 +18,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/gaarutyunov/mcp-anything/internal/config"
+	"github.com/gaarutyunov/mcp-anything/internal/runtime"
 	"github.com/gaarutyunov/mcp-anything/internal/telemetry"
 	upstreampkg "github.com/gaarutyunov/mcp-anything/internal/upstream"
 )
@@ -46,11 +47,13 @@ type Manager struct {
 }
 
 // NewManager creates a Manager with no active servers.
-func NewManager() *Manager {
+// pools is used to bound the number of concurrent script runtime instances
+// across all upstream builders and auth factories.
+func NewManager(pools *runtime.Registry) *Manager {
 	return &Manager{
 		servers:        make(map[string]*sdkmcp.Server),
 		upstreamByName: make(map[string]*upstreamState),
-		builders:       upstreampkg.NewBuilderRegistry(),
+		builders:       upstreampkg.NewBuilderRegistry(pools),
 	}
 }
 

@@ -5,6 +5,7 @@ package integration_test
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -29,8 +30,8 @@ func useSharedKeycloak(ctx context.Context, t *testing.T, networkID, networkName
 	}
 
 	containerID := globalKC.container.GetContainerID()
-	if err := kcNetworkConnect(ctx, networkID, containerID); err != nil {
-		t.Logf("useSharedKeycloak: connect to network %q failed (%v); falling back to fresh Keycloak", networkName, err)
+	if err := kcNetworkConnectWithRetry(ctx, t, networkID, networkName, containerID); err != nil {
+		t.Logf("useSharedKeycloak: connect to network %q failed after retries (%v); falling back to fresh Keycloak", networkName, err)
 		return startKeycloak(ctx, t, networkName)
 	}
 	t.Cleanup(func() {
@@ -51,6 +52,37 @@ func useSharedKeycloak(ctx context.Context, t *testing.T, networkID, networkName
 		InternalURL: "http://keycloak:8080",
 		Realm:       realm,
 	}
+}
+
+// kcNetworkConnectWithRetry attaches containerID to networkID, retrying up to 3
+// times with 500 ms back-off to handle transient Docker API failures. It also
+// treats "already exists" as a success so idempotent re-connects don't fall back
+// to an expensive per-test Keycloak startup.
+func kcNetworkConnectWithRetry(ctx context.Context, t *testing.T, networkID, networkName, containerID string) error {
+	t.Helper()
+	const maxAttempts = 3
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		err := kcNetworkConnect(ctx, networkID, containerID)
+		if err == nil {
+			return nil
+		}
+		// "already exists" means the container is already on this network — success.
+		if strings.Contains(err.Error(), "already exists") {
+			return nil
+		}
+		slog.Warn("kcNetworkConnect attempt failed",
+			"attempt", attempt,
+			"max_attempts", maxAttempts,
+			"network", networkName,
+			"error", err,
+		)
+		lastErr = err
+		if attempt < maxAttempts {
+			time.Sleep(500 * time.Millisecond)
+		}
+	}
+	return lastErr
 }
 
 // kcNetworkConnect attaches containerID to networkID with the DNS alias "keycloak".

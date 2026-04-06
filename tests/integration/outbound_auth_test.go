@@ -340,7 +340,7 @@ func TestOAuth2ClientCredentials(t *testing.T) {
 	})
 
 	// Start Keycloak for OAuth2 client credentials flow.
-	kc := startKeycloak(ctx, t, net.Name)
+	kc := useSharedKeycloak(ctx, t, net.ID, net.Name)
 
 	// Configure Keycloak: create a client with service accounts enabled.
 	adminToken := kcAdminToken(t, kc.ExternalURL)
@@ -493,7 +493,7 @@ func TestInboundTokenNotForwardedToUpstream(t *testing.T) {
 	})
 
 	// Start Keycloak for inbound JWT validation.
-	kc := startKeycloak(ctx, t, net.Name)
+	kc := useSharedKeycloak(ctx, t, net.ID, net.Name)
 
 	// Create a client for generating inbound MCP client tokens.
 	adminToken := kcAdminToken(t, kc.ExternalURL)

@@ -96,14 +96,60 @@ type APIKeyAuthConfig struct {
 	KeysEnv string `koanf:"keys_env"` // env var containing comma-separated valid keys
 }
 
+// ServerTLSConfig configures inbound TLS termination for the MCP server.
+type ServerTLSConfig struct {
+	CertPath     string `koanf:"cert_path"`
+	KeyPath      string `koanf:"key_path"`
+	MinVersion   string `koanf:"min_version"`    // "1.0" | "1.1" | "1.2" | "1.3"; default: "1.2"
+	ClientAuth   string `koanf:"client_auth"`    // "none" | "request" | "require_and_verify"
+	ClientCAPath string `koanf:"client_ca_path"` // CA cert for verifying MCP client certs (mTLS)
+}
+
+// TLSConfig configures TLS for an outbound upstream connection.
+type TLSConfig struct {
+	InsecureSkipVerify bool   `koanf:"insecure_skip_verify"` // WARNING: disables certificate verification
+	MinVersion         string `koanf:"min_version"`          // "1.0" | "1.1" | "1.2" | "1.3"; default: "1.2"
+	MaxVersion         string `koanf:"max_version"`          // "1.0" | "1.1" | "1.2" | "1.3"
+	RootCAPath         string `koanf:"root_ca_path"`         // PEM file with additional trusted CA certs
+	ClientCertPath     string `koanf:"client_cert_path"`     // PEM file with client cert for mTLS
+	ClientKeyPath      string `koanf:"client_key_path"`      // PEM file with client private key for mTLS
+	ServerName         string `koanf:"server_name"`          // SNI override
+	SessionCacheSize   int    `koanf:"session_cache_size"`   // LRU TLS session cache; default: 64
+}
+
+// TransportConfig configures the HTTP transport (connection pooling, dialing, TLS) per upstream.
+type TransportConfig struct {
+	// Connection pooling
+	MaxIdleConns        int           `koanf:"max_idle_conns"`          // default: 100
+	MaxIdleConnsPerHost int           `koanf:"max_idle_conns_per_host"` // default: 10
+	IdleConnTimeout     time.Duration `koanf:"idle_conn_timeout"`       // default: 90s
+
+	// Dialing
+	DialTimeout   time.Duration `koanf:"dial_timeout"`   // default: 30s
+	DialKeepalive time.Duration `koanf:"dial_keepalive"` // default: 30s
+
+	// Response
+	ResponseHeaderTimeout time.Duration `koanf:"response_header_timeout"` // default: 0 (no separate timeout)
+
+	// HTTP/2
+	ForceHTTP2 bool `koanf:"force_http2"` // default: false
+
+	// Proxy
+	ProxyURL string `koanf:"proxy_url"` // http://, https://, socks5://, socks5h://
+
+	// TLS
+	TLS TLSConfig `koanf:"tls"`
+}
+
 // ServerConfig holds HTTP server settings.
 type ServerConfig struct {
-	Port                     int           `koanf:"port"`
-	ReadTimeout              time.Duration `koanf:"read_timeout"`
-	WriteTimeout             time.Duration `koanf:"write_timeout"`
-	ShutdownTimeout          time.Duration `koanf:"shutdown_timeout"`
-	MaxRequestBody           string        `koanf:"max_request_body"`
-	StartupValidationTimeout time.Duration `koanf:"startup_validation_timeout"`
+	Port                     int             `koanf:"port"`
+	ReadTimeout              time.Duration   `koanf:"read_timeout"`
+	WriteTimeout             time.Duration   `koanf:"write_timeout"`
+	ShutdownTimeout          time.Duration   `koanf:"shutdown_timeout"`
+	MaxRequestBody           string          `koanf:"max_request_body"`
+	StartupValidationTimeout time.Duration   `koanf:"startup_validation_timeout"`
+	TLS                      ServerTLSConfig `koanf:"tls"`
 }
 
 // TelemetryConfig holds observability settings.
@@ -149,8 +195,9 @@ type UpstreamConfig struct {
 	Type                     string              `koanf:"type"`     // "http" (default) | "command"
 	BaseURL                  string              `koanf:"base_url"` // used by type: http only
 	Timeout                  time.Duration       `koanf:"timeout"`
-	TLSSkipVerify            bool                `koanf:"tls_skip_verify"`
+	TLSSkipVerify            bool                `koanf:"tls_skip_verify"` // Deprecated: use transport.tls.insecure_skip_verify
 	Headers                  map[string]string   `koanf:"headers"`
+	Transport                TransportConfig     `koanf:"transport"`
 	OpenAPI                  OpenAPISourceConfig `koanf:"openapi"`
 	Overlay                  *OverlayConfig      `koanf:"overlay"`
 	StartupValidationTimeout time.Duration       `koanf:"startup_validation_timeout"`

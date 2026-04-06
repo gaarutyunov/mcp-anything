@@ -1,7 +1,7 @@
 package upstream
 
 import (
-	"crypto/tls"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -9,6 +9,7 @@ import (
 	"github.com/gaarutyunov/mcp-anything/internal/auth/outbound"
 	"github.com/gaarutyunov/mcp-anything/internal/config"
 	"github.com/gaarutyunov/mcp-anything/internal/telemetry"
+	"github.com/gaarutyunov/mcp-anything/internal/transport"
 )
 
 // headerRoundTripper injects static headers into every outbound request.
@@ -49,23 +50,25 @@ func (t *tokenInfoHeaderTransport) RoundTrip(req *http.Request) (*http.Response,
 }
 
 // NewHTTPClient builds an *http.Client for an upstream.
-// It honours cfg.Timeout, cfg.TLSSkipVerify, and injects cfg.Headers via a
-// custom RoundTripper so every request carries the configured static headers.
+// It uses cfg.Transport for connection pooling, TLS, and dialing settings.
+// The legacy cfg.TLSSkipVerify field is honoured for backward compatibility.
+// Static headers from cfg.Headers are injected via a custom RoundTripper.
 // The provider wraps the transport to inject outbound authentication on every request.
-func NewHTTPClient(cfg *config.UpstreamConfig, provider outbound.TokenProvider) *http.Client {
-	transport, ok := http.DefaultTransport.(*http.Transport)
-	if !ok {
-		transport = &http.Transport{}
-	}
-	transport = transport.Clone()
-
+func NewHTTPClient(cfg *config.UpstreamConfig, provider outbound.TokenProvider) (*http.Client, error) {
+	transportCfg := cfg.Transport
+	// Legacy tls_skip_verify field: propagate to transport TLS config for backward compat.
 	if cfg.TLSSkipVerify {
-		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec
+		transportCfg.TLS.InsecureSkipVerify = true
 	}
 
-	var rt http.RoundTripper = transport
+	t, err := transport.NewBuilder().Build(transportCfg)
+	if err != nil {
+		return nil, fmt.Errorf("building transport: %w", err)
+	}
+
+	var rt http.RoundTripper = t
 	if len(cfg.Headers) > 0 {
-		rt = &headerRoundTripper{headers: cfg.Headers, wrapped: transport}
+		rt = &headerRoundTripper{headers: cfg.Headers, wrapped: t}
 	}
 
 	rt = &outbound.AuthTransport{Base: rt, Provider: provider}
@@ -79,5 +82,5 @@ func NewHTTPClient(cfg *config.UpstreamConfig, provider outbound.TokenProvider) 
 	return &http.Client{
 		Timeout:   cfg.Timeout,
 		Transport: rt,
-	}
+	}, nil
 }

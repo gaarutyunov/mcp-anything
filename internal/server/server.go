@@ -3,6 +3,7 @@ package server
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log/slog"
 	"net"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/gaarutyunov/mcp-anything/internal/config"
 	"github.com/gaarutyunov/mcp-anything/internal/telemetry"
+	internaltls "github.com/gaarutyunov/mcp-anything/internal/transport"
 )
 
 // ReadinessChecker can report whether the proxy is ready to serve.
@@ -87,12 +89,29 @@ func New(cfg *config.ProxyConfig, mcpHandlers map[string]http.Handler, wellKnown
 
 // Start begins serving HTTP requests and blocks until ctx is cancelled.
 // It performs a graceful shutdown after the context is done.
+// If server.tls.cert_path is configured, it listens with TLS.
 func (s *Server) Start(ctx context.Context) error {
 	errCh := make(chan error, 1)
 
 	go func() {
 		slog.Info("server listening", "addr", s.httpServer.Addr)
-		if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		var err error
+		if s.cfg.Server.TLS.CertPath != "" {
+			tlsCfg, buildErr := internaltls.BuildServerTLSConfig(s.cfg.Server.TLS)
+			if buildErr != nil {
+				errCh <- fmt.Errorf("server TLS config: %w", buildErr)
+				return
+			}
+			ln, listenErr := tls.Listen("tcp", s.httpServer.Addr, tlsCfg)
+			if listenErr != nil {
+				errCh <- fmt.Errorf("TLS listen: %w", listenErr)
+				return
+			}
+			err = s.httpServer.Serve(ln)
+		} else {
+			err = s.httpServer.ListenAndServe()
+		}
+		if err != nil && err != http.ErrServerClosed {
 			errCh <- err
 		} else {
 			errCh <- nil

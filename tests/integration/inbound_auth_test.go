@@ -489,7 +489,7 @@ func TestJWTAuthAllowsValidToken(t *testing.T) {
 	registerStub(t, wmURL, `{"request":{"method":"GET","url":"/pets"},"response":{"status":200,"body":"{\"pets\":[]}","headers":{"Content-Type":"application/json"}}}`)
 
 	// Start Keycloak and configure a client.
-	kc := startKeycloak(ctx, t, net.Name)
+	kc := useSharedKeycloak(ctx, t, net.ID, net.Name)
 	adminToken := kcAdminToken(t, kc.ExternalURL)
 	clientUUID := kcCreateClient(t, kc.ExternalURL, adminToken, kc.Realm, "mcp-anything")
 	kcAddAudienceMapper(t, kc.ExternalURL, adminToken, kc.Realm, clientUUID, "mcp-anything")
@@ -564,7 +564,7 @@ func TestJWTAuthRejects401OnInvalidToken(t *testing.T) {
 	wmURL := fmt.Sprintf("http://%s:%s", wmHost, wmPort.Port())
 	registerStub(t, wmURL, `{"request":{"method":"GET","url":"/pets"},"response":{"status":200,"body":"{}","headers":{"Content-Type":"application/json"}}}`)
 
-	kc := startKeycloak(ctx, t, net.Name)
+	kc := useSharedKeycloak(ctx, t, net.ID, net.Name)
 	adminToken := kcAdminToken(t, kc.ExternalURL)
 	kcCreateClient(t, kc.ExternalURL, adminToken, kc.Realm, "mcp-anything")
 
@@ -631,7 +631,7 @@ func TestJWTAuthRejectsMissingToken(t *testing.T) {
 	wmURL := fmt.Sprintf("http://%s:%s", wmHost, wmPort.Port())
 	registerStub(t, wmURL, `{"request":{"method":"GET","url":"/pets"},"response":{"status":200,"body":"{}","headers":{"Content-Type":"application/json"}}}`)
 
-	kc := startKeycloak(ctx, t, net.Name)
+	kc := useSharedKeycloak(ctx, t, net.ID, net.Name)
 	adminToken := kcAdminToken(t, kc.ExternalURL)
 	kcCreateClient(t, kc.ExternalURL, adminToken, kc.Realm, "mcp-anything")
 
@@ -694,7 +694,7 @@ func TestIntrospectionAuthAllowsActiveToken(t *testing.T) {
 	wmURL := fmt.Sprintf("http://%s:%s", wmHost, wmPort.Port())
 	registerStub(t, wmURL, `{"request":{"method":"GET","url":"/pets"},"response":{"status":200,"body":"{\"pets\":[]}","headers":{"Content-Type":"application/json"}}}`)
 
-	kc := startKeycloak(ctx, t, net.Name)
+	kc := useSharedKeycloak(ctx, t, net.ID, net.Name)
 	adminToken := kcAdminToken(t, kc.ExternalURL)
 
 	// Create the introspection resource server client.
@@ -847,7 +847,7 @@ func TestPerOperationAuthBypass(t *testing.T) {
 	registerStub(t, wmURL, `{"request":{"method":"GET","url":"/health"},"response":{"status":200,"body":"{\"ok\":true}","headers":{"Content-Type":"application/json"}}}`)
 	registerStub(t, wmURL, `{"request":{"method":"GET","url":"/pets"},"response":{"status":200,"body":"{\"pets\":[]}","headers":{"Content-Type":"application/json"}}}`)
 
-	kc := startKeycloak(ctx, t, net.Name)
+	kc := useSharedKeycloak(ctx, t, net.ID, net.Name)
 	adminToken := kcAdminToken(t, kc.ExternalURL)
 	kcCreateClient(t, kc.ExternalURL, adminToken, kc.Realm, "mcp-anything")
 

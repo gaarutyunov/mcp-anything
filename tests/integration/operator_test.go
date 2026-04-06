@@ -40,6 +40,76 @@ const (
 	pollInterval         = 500 * time.Millisecond
 )
 
+// sharedK3sCluster holds the single k3s instance shared across all operator tests.
+type sharedK3sCluster struct {
+	container      *k3s.K3sContainer
+	kubeConfigYAML []byte
+}
+
+// globalK3s is set by TestMain and shared across all operator integration tests.
+// It is nil if k3s failed to start, in which case operator tests are skipped.
+var globalK3s *sharedK3sCluster
+
+// startSharedK3s starts a single k3s cluster with the mcp-anything CRDs pre-loaded.
+// It is called once from TestMain and its result stored in globalK3s.
+func startSharedK3s(ctx context.Context) (*sharedK3sCluster, error) {
+	crdsDir, err := os.MkdirTemp("", "mcp-crds-*")
+	if err != nil {
+		return nil, fmt.Errorf("create temp dir: %w", err)
+	}
+	defer os.RemoveAll(crdsDir)
+
+	repoRoot := "../.."
+	for _, pair := range []struct{ src, dst string }{
+		{"deploy/helm/mcp-anything/crds/mcpproxy.yaml", "mcpproxy.yaml"},
+		{"deploy/helm/mcp-anything/crds/mcpupstream.yaml", "mcpupstream.yaml"},
+	} {
+		data, err := os.ReadFile(filepath.Join(repoRoot, pair.src))
+		if err != nil {
+			return nil, fmt.Errorf("reading %s: %w", pair.src, err)
+		}
+		if err := os.WriteFile(filepath.Join(crdsDir, pair.dst), data, 0o600); err != nil {
+			return nil, fmt.Errorf("writing %s: %w", pair.dst, err)
+		}
+	}
+
+	k3sCtr, err := k3s.Run(ctx, k3sImage,
+		k3s.WithManifest(filepath.Join(crdsDir, "mcpproxy.yaml")),
+		k3s.WithManifest(filepath.Join(crdsDir, "mcpupstream.yaml")),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("starting k3s container: %w", err)
+	}
+
+	kubeConfigYAML, err := k3sCtr.GetKubeConfig(ctx)
+	if err != nil {
+		_ = testcontainers.TerminateContainer(k3sCtr)
+		return nil, fmt.Errorf("getting kubeconfig: %w", err)
+	}
+
+	// Build a client and wait for CRDs to be established before returning.
+	scheme := buildOperatorScheme()
+	restCfg, err := clientcmd.RESTConfigFromKubeConfig(kubeConfigYAML)
+	if err != nil {
+		_ = testcontainers.TerminateContainer(k3sCtr)
+		return nil, fmt.Errorf("building REST config: %w", err)
+	}
+	c, err := client.New(restCfg, client.Options{Scheme: scheme})
+	if err != nil {
+		_ = testcontainers.TerminateContainer(k3sCtr)
+		return nil, fmt.Errorf("creating k8s client: %w", err)
+	}
+
+	crdCtx, crdCancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer crdCancel()
+	if err := waitForCRDs(crdCtx, c); err != nil {
+		_ = testcontainers.TerminateContainer(k3sCtr)
+		return nil, fmt.Errorf("waiting for CRDs: %w", err)
+	}
+
+	return &sharedK3sCluster{container: k3sCtr, kubeConfigYAML: kubeConfigYAML}, nil
+}
+
 // buildOperatorScheme returns a runtime.Scheme with all types the operator needs registered.
 func buildOperatorScheme() *runtime.Scheme {
 	s := runtime.NewScheme()
@@ -51,58 +121,8 @@ func buildOperatorScheme() *runtime.Scheme {
 	return s
 }
 
-// startK3sWithCRDs starts a k3s container with the mcp-anything CRDs pre-loaded.
-// It returns the k3s container and the raw kubeconfig bytes.
-func startK3sWithCRDs(ctx context.Context, t *testing.T) (*k3s.K3sContainer, []byte) {
-	t.Helper()
-
-	// Write CRD manifests to temp files so k3s can mount them on startup.
-	crdsDir := t.TempDir()
-	proxyCRDPath := filepath.Join(crdsDir, "mcpproxy.yaml")
-	upstreamCRDPath := filepath.Join(crdsDir, "mcpupstream.yaml")
-
-	repoRoot := "../.."
-	proxySrc, err := os.ReadFile(filepath.Join(repoRoot, "deploy/helm/mcp-anything/crds/mcpproxy.yaml"))
-	if err != nil {
-		t.Fatalf("reading mcpproxy CRD: %v", err)
-	}
-	upstreamSrc, err := os.ReadFile(filepath.Join(repoRoot, "deploy/helm/mcp-anything/crds/mcpupstream.yaml"))
-	if err != nil {
-		t.Fatalf("reading mcpupstream CRD: %v", err)
-	}
-
-	if err := os.WriteFile(proxyCRDPath, proxySrc, 0o600); err != nil {
-		t.Fatalf("writing proxy CRD: %v", err)
-	}
-	if err := os.WriteFile(upstreamCRDPath, upstreamSrc, 0o600); err != nil {
-		t.Fatalf("writing upstream CRD: %v", err)
-	}
-
-	k3sCtr, err := k3s.Run(ctx, k3sImage,
-		k3s.WithManifest(proxyCRDPath),
-		k3s.WithManifest(upstreamCRDPath),
-	)
-	if err != nil {
-		t.Fatalf("starting k3s container: %v", err)
-	}
-	t.Cleanup(func() {
-		stopCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		if err := testcontainers.TerminateContainer(k3sCtr); err != nil {
-			t.Logf("terminate k3s: %v", stopCtx.Err())
-		}
-	})
-
-	kubeConfigYAML, err := k3sCtr.GetKubeConfig(ctx)
-	if err != nil {
-		t.Fatalf("getting kubeconfig: %v", err)
-	}
-	return k3sCtr, kubeConfigYAML
-}
-
 // waitForCRDs waits until the mcp-anything CRDs are established in the cluster.
-func waitForCRDs(ctx context.Context, t *testing.T, c client.Client) {
-	t.Helper()
+func waitForCRDs(ctx context.Context, c client.Client) error {
 	crdNames := []string{
 		"mcpproxies.mcp-anything.ai",
 		"mcpupstreams.mcp-anything.ai",
@@ -123,9 +143,10 @@ func waitForCRDs(ctx context.Context, t *testing.T, c client.Client) {
 			}
 			return false, nil
 		}); err != nil {
-			t.Fatalf("waiting for CRD %s: %v", name, err)
+			return fmt.Errorf("waiting for CRD %s: %w", name, err)
 		}
 	}
+	return nil
 }
 
 // startOperator starts the MCPProxy and MCPUpstream controllers in-process and
@@ -190,16 +211,18 @@ func startOperator(ctx context.Context, t *testing.T, kubeConfigYAML []byte, sch
 }
 
 // TestOperatorCreatesMCPProxyResources is an E2E test that:
-//  1. Starts a real k3s cluster via testcontainers.
-//  2. Applies the MCPProxy and MCPUpstream CRDs (loaded by k3s at boot).
-//  3. Runs the operator controllers in-process.
-//  4. Creates an MCPUpstream with an autoDiscover OpenAPI source and an
+//  1. Reuses the shared k3s cluster (started by TestMain).
+//  2. Runs the operator controllers in-process.
+//  3. Creates an MCPUpstream with an autoDiscover OpenAPI source and an
 //     MCPProxy that selects it.
-//  5. Asserts that the operator creates the expected ConfigMap, Deployment,
+//  4. Asserts that the operator creates the expected ConfigMap, Deployment,
 //     and Service.
 func TestOperatorCreatesMCPProxyResources(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping E2E test in short mode")
+	}
+	if globalK3s == nil {
+		t.Skip("shared k3s cluster unavailable")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
@@ -207,9 +230,7 @@ func TestOperatorCreatesMCPProxyResources(t *testing.T) {
 
 	scheme := buildOperatorScheme()
 
-	_, kubeConfigYAML := startK3sWithCRDs(ctx, t)
-
-	restCfg, err := clientcmd.RESTConfigFromKubeConfig(kubeConfigYAML)
+	restCfg, err := clientcmd.RESTConfigFromKubeConfig(globalK3s.kubeConfigYAML)
 	if err != nil {
 		t.Fatalf("building REST config: %v", err)
 	}
@@ -218,11 +239,8 @@ func TestOperatorCreatesMCPProxyResources(t *testing.T) {
 		t.Fatalf("creating k8s client: %v", err)
 	}
 
-	// Wait for CRDs to be established (k3s loads them from manifests).
-	waitForCRDs(ctx, t, k8sClient)
-
 	// Start operator controllers.
-	stopOperator := startOperator(ctx, t, kubeConfigYAML, scheme)
+	stopOperator := startOperator(ctx, t, globalK3s.kubeConfigYAML, scheme)
 	defer stopOperator()
 
 	// Create the test namespace.
@@ -356,15 +374,16 @@ func TestOperatorLabelSelectorFiltersUpstreams(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping E2E test in short mode")
 	}
+	if globalK3s == nil {
+		t.Skip("shared k3s cluster unavailable")
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
 	scheme := buildOperatorScheme()
 
-	_, kubeConfigYAML := startK3sWithCRDs(ctx, t)
-
-	restCfg, err := clientcmd.RESTConfigFromKubeConfig(kubeConfigYAML)
+	restCfg, err := clientcmd.RESTConfigFromKubeConfig(globalK3s.kubeConfigYAML)
 	if err != nil {
 		t.Fatalf("building REST config: %v", err)
 	}
@@ -373,8 +392,7 @@ func TestOperatorLabelSelectorFiltersUpstreams(t *testing.T) {
 		t.Fatalf("creating k8s client: %v", err)
 	}
 
-	waitForCRDs(ctx, t, k8sClient)
-	stopOperator := startOperator(ctx, t, kubeConfigYAML, scheme)
+	stopOperator := startOperator(ctx, t, globalK3s.kubeConfigYAML, scheme)
 	defer stopOperator()
 
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "selector-e2e"}}
@@ -447,15 +465,16 @@ func TestOperatorCRDValidation(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping E2E test in short mode")
 	}
+	if globalK3s == nil {
+		t.Skip("shared k3s cluster unavailable")
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
 	scheme := buildOperatorScheme()
 
-	_, kubeConfigYAML := startK3sWithCRDs(ctx, t)
-
-	restCfg, err := clientcmd.RESTConfigFromKubeConfig(kubeConfigYAML)
+	restCfg, err := clientcmd.RESTConfigFromKubeConfig(globalK3s.kubeConfigYAML)
 	if err != nil {
 		t.Fatalf("building REST config: %v", err)
 	}
@@ -463,8 +482,6 @@ func TestOperatorCRDValidation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("creating k8s client: %v", err)
 	}
-
-	waitForCRDs(ctx, t, k8sClient)
 
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "validation-e2e"}}
 	if err := k8sClient.Create(ctx, ns); err != nil && !apierrors.IsAlreadyExists(err) {

@@ -25,9 +25,10 @@ type sharedKeycloakContainer struct {
 	externalURL string // http://host:PORT — accessible from the test machine
 }
 
-// TestMain starts a shared Keycloak before running all integration tests and
-// terminates it once all tests have completed. Tests that require Keycloak call
-// useSharedKeycloak, which connects this container to the test's bridge network.
+// TestMain starts shared containers before running all integration tests and
+// terminates them once all tests have completed.
+//   - Keycloak: shared by JWT/OAuth2 tests; each test connects it to its bridge network.
+//   - k3s: shared by operator E2E tests; each test uses its own namespace.
 func TestMain(m *testing.M) {
 	ctx := context.Background()
 
@@ -38,6 +39,13 @@ func TestMain(m *testing.M) {
 		globalKC = kc
 	}
 
+	k3sCluster, err := startSharedK3s(ctx)
+	if err != nil {
+		slog.Warn("shared k3s cluster unavailable; operator tests will be skipped", "error", err)
+	} else {
+		globalK3s = k3sCluster
+	}
+
 	code := m.Run()
 
 	if globalKC != nil {
@@ -45,6 +53,12 @@ func TestMain(m *testing.M) {
 		defer cancel()
 		if termErr := globalKC.container.Terminate(termCtx); termErr != nil {
 			slog.Warn("terminate shared Keycloak", "error", termErr)
+		}
+	}
+
+	if globalK3s != nil {
+		if termErr := testcontainers.TerminateContainer(globalK3s.container); termErr != nil {
+			slog.Warn("terminate shared k3s", "error", termErr)
 		}
 	}
 

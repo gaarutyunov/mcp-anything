@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -29,21 +30,41 @@ type sharedKeycloakContainer struct {
 // terminates them once all tests have completed.
 //   - Keycloak: shared by JWT/OAuth2 tests; each test connects it to its bridge network.
 //   - k3s: shared by operator E2E tests; each test uses its own namespace.
+//
+// Both containers are started concurrently to minimise total startup time within
+// the CI timeout budget.
 func TestMain(m *testing.M) {
 	ctx := context.Background()
 
-	kc, err := startSharedKeycloak(ctx)
-	if err != nil {
-		slog.Warn("shared Keycloak unavailable; JWT/OAuth2 tests will start their own instances", "error", err)
+	var (
+		wg         sync.WaitGroup
+		kcErr      error
+		k3sErr     error
+		kcResult   *sharedKeycloakContainer
+		k3sResult  *sharedK3sCluster
+	)
+
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		kcResult, kcErr = startSharedKeycloak(ctx)
+	}()
+	go func() {
+		defer wg.Done()
+		k3sResult, k3sErr = startSharedK3s(ctx)
+	}()
+	wg.Wait()
+
+	if kcErr != nil {
+		slog.Warn("shared Keycloak unavailable; JWT/OAuth2 tests will start their own instances", "error", kcErr)
 	} else {
-		globalKC = kc
+		globalKC = kcResult
 	}
 
-	k3sCluster, err := startSharedK3s(ctx)
-	if err != nil {
-		slog.Warn("shared k3s cluster unavailable; operator tests will be skipped", "error", err)
+	if k3sErr != nil {
+		slog.Warn("shared k3s cluster unavailable; operator tests will be skipped", "error", k3sErr)
 	} else {
-		globalK3s = k3sCluster
+		globalK3s = k3sResult
 	}
 
 	code := m.Run()
@@ -57,7 +78,9 @@ func TestMain(m *testing.M) {
 	}
 
 	if globalK3s != nil {
-		if termErr := testcontainers.TerminateContainer(globalK3s.container); termErr != nil {
+		termCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if termErr := globalK3s.container.Terminate(termCtx); termErr != nil {
 			slog.Warn("terminate shared k3s", "error", termErr)
 		}
 	}

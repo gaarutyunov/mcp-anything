@@ -26,6 +26,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/yaml"
 
+	"github.com/go-logr/logr"
 	testcontainers "github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/k3s"
 
@@ -153,6 +154,9 @@ func waitForCRDs(ctx context.Context, c client.Client) error {
 // returns a cancel function that stops the manager.
 func startOperator(ctx context.Context, t *testing.T, kubeConfigYAML []byte, scheme *runtime.Scheme) context.CancelFunc {
 	t.Helper()
+
+	// Suppress controller-runtime's "log.SetLogger was never called" warning.
+	ctrl.SetLogger(logr.Discard())
 
 	restCfg, err := clientcmd.RESTConfigFromKubeConfig(kubeConfigYAML)
 	if err != nil {

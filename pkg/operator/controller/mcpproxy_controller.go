@@ -5,10 +5,12 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -17,8 +19,10 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/gaarutyunov/mcp-anything/pkg/crd/v1alpha1"
@@ -155,9 +159,12 @@ func (r *MCPProxyReconciler) reconcileConfigMap(ctx context.Context, proxy *v1al
 		return fmt.Errorf("fetching config configmap: %w", err)
 	}
 
-	cm.Data = map[string]string{
-		"config.yaml": string(configData),
+	newData := map[string]string{"config.yaml": string(configData)}
+	if reflect.DeepEqual(cm.Data, newData) {
+		slog.Debug("config ConfigMap unchanged, skipping update", "name", name)
+		return nil
 	}
+	cm.Data = newData
 	if updateErr := r.Update(ctx, cm); updateErr != nil {
 		return fmt.Errorf("updating config configmap: %w", updateErr)
 	}
@@ -244,6 +251,10 @@ func (r *MCPProxyReconciler) upsertConfigMap(ctx context.Context, proxy *v1alpha
 		return fmt.Errorf("fetching configmap %s: %w", name, err)
 	}
 
+	if cm.Data != nil && cm.Data[key] == value {
+		slog.Debug("ConfigMap key unchanged, skipping update", "name", name, "key", key)
+		return nil
+	}
 	if cm.Data == nil {
 		cm.Data = make(map[string]string)
 	}
@@ -270,6 +281,10 @@ func (r *MCPProxyReconciler) reconcileDeployment(ctx context.Context, proxy *v1a
 		return fmt.Errorf("fetching deployment: %w", err)
 	}
 
+	if equality.Semantic.DeepEqual(existing.Spec, desired.Spec) {
+		slog.Debug("Deployment spec unchanged, skipping update", "name", proxy.Name)
+		return nil
+	}
 	existing.Spec = desired.Spec
 	if updateErr := r.Update(ctx, existing); updateErr != nil {
 		return fmt.Errorf("updating deployment: %w", updateErr)
@@ -430,6 +445,11 @@ func (r *MCPProxyReconciler) reconcileService(ctx context.Context, proxy *v1alph
 		return fmt.Errorf("fetching service: %w", err)
 	}
 
+	if equality.Semantic.DeepEqual(existing.Spec.Ports, desired.Spec.Ports) &&
+		reflect.DeepEqual(existing.Spec.Selector, desired.Spec.Selector) {
+		slog.Debug("Service spec unchanged, skipping update", "name", proxy.Name)
+		return nil
+	}
 	existing.Spec.Ports = desired.Spec.Ports
 	existing.Spec.Selector = desired.Spec.Selector
 	if updateErr := r.Update(ctx, existing); updateErr != nil {
@@ -476,6 +496,17 @@ func (r *MCPProxyReconciler) buildService(proxy *v1alpha1.MCPProxy) *corev1.Serv
 
 // updateStatus writes updated status fields back to the API server.
 func (r *MCPProxyReconciler) updateStatus(ctx context.Context, proxy *v1alpha1.MCPProxy, upstreams []v1alpha1.MCPUpstream) error {
+	msg := fmt.Sprintf("proxy configured with %d upstream(s)", len(upstreams))
+	currentCond := apimeta.FindStatusCondition(proxy.Status.Conditions, conditionTypeReconciled)
+	if proxy.Status.UpstreamCount == len(upstreams) &&
+		proxy.Status.ObservedGeneration == proxy.Generation &&
+		currentCond != nil &&
+		currentCond.Status == metav1.ConditionTrue &&
+		currentCond.Message == msg {
+		slog.Debug("MCPProxy status unchanged, skipping update", "name", proxy.Name)
+		return nil
+	}
+
 	proxy.Status.UpstreamCount = len(upstreams)
 	proxy.Status.ObservedGeneration = proxy.Generation
 
@@ -483,7 +514,7 @@ func (r *MCPProxyReconciler) updateStatus(ctx context.Context, proxy *v1alpha1.M
 		Type:               conditionTypeReconciled,
 		Status:             metav1.ConditionTrue,
 		Reason:             "Reconciled",
-		Message:            fmt.Sprintf("proxy configured with %d upstream(s)", len(upstreams)),
+		Message:            msg,
 		ObservedGeneration: proxy.Generation,
 	})
 
@@ -519,11 +550,14 @@ func (r *MCPProxyReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	})
 
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&v1alpha1.MCPProxy{}).
+		For(&v1alpha1.MCPProxy{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.ConfigMap{}).
 		Owns(&corev1.Service{}).
-		Watches(&v1alpha1.MCPUpstream{}, handler.EnqueueRequestsFromMapFunc(mapUpstreamToProxy)).
+		Watches(&v1alpha1.MCPUpstream{},
+			handler.EnqueueRequestsFromMapFunc(mapUpstreamToProxy),
+			builder.WithPredicates(predicate.GenerationChangedPredicate{}),
+		).
 		Complete(r)
 }
 

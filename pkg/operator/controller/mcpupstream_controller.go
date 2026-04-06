@@ -12,7 +12,9 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/gaarutyunov/mcp-anything/pkg/crd/v1alpha1"
@@ -43,13 +45,24 @@ func (r *MCPUpstreamReconciler) Reconcile(ctx context.Context, req reconcile.Req
 		return reconcile.Result{}, fmt.Errorf("finding assigned proxy: %w", err)
 	}
 
+	// Skip status update if nothing changed.
+	msg := fmt.Sprintf("upstream assigned to proxy %q", assignedProxy)
+	currentCond := apimeta.FindStatusCondition(upstream.Status.Conditions, conditionTypeReconciled)
+	if upstream.Status.AssignedProxy == assignedProxy &&
+		currentCond != nil &&
+		currentCond.Status == metav1.ConditionTrue &&
+		currentCond.Message == msg {
+		log.Info("MCPUpstream reconciled (no change)", "assigned_proxy", assignedProxy)
+		return reconcile.Result{RequeueAfter: periodicSyncInterval}, nil
+	}
+
 	// Update status with the assigned proxy name.
 	upstream.Status.AssignedProxy = assignedProxy
 	apimeta.SetStatusCondition(&upstream.Status.Conditions, metav1.Condition{
 		Type:               conditionTypeReconciled,
 		Status:             metav1.ConditionTrue,
 		Reason:             "Reconciled",
-		Message:            fmt.Sprintf("upstream assigned to proxy %q", assignedProxy),
+		Message:            msg,
 		ObservedGeneration: upstream.Generation,
 	})
 
@@ -98,6 +111,6 @@ func (r *MCPUpstreamReconciler) findAssignedProxy(ctx context.Context, upstream 
 // SetupWithManager registers the MCPUpstream reconciler with a controller-runtime Manager.
 func (r *MCPUpstreamReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&v1alpha1.MCPUpstream{}).
+		For(&v1alpha1.MCPUpstream{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Complete(r)
 }

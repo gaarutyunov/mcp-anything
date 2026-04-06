@@ -1,0 +1,179 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: mcpproxies.mcp-anything.ai
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.0
+spec:
+  group: mcp-anything.ai
+  names:
+    kind: MCPProxy
+    listKind: MCPProxyList
+    plural: mcpproxies
+    singular: mcpproxy
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: MCPProxy is the Schema for the mcpproxies API.
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              type: object
+              description: MCPProxySpec defines the desired state of MCPProxy.
+              properties:
+                upstreamSelector:
+                  type: object
+                  description: UpstreamSelector selects MCPUpstream resources by label.
+                  properties:
+                    matchLabels:
+                      type: object
+                      additionalProperties:
+                        type: string
+                    matchExpressions:
+                      type: array
+                      items:
+                        type: object
+                        required: [key, operator]
+                        properties:
+                          key:
+                            type: string
+                          operator:
+                            type: string
+                          values:
+                            type: array
+                            items:
+                              type: string
+                namespaceSelector:
+                  type: object
+                  description: NamespaceSelector restricts which namespaces are searched.
+                  properties:
+                    matchNames:
+                      type: array
+                      items:
+                        type: string
+                replicas:
+                  type: integer
+                  format: int32
+                  minimum: 1
+                  description: Replicas is the number of proxy pod replicas.
+                image:
+                  type: string
+                  description: Image is the proxy container image.
+                resources:
+                  type: object
+                  description: Resources defines CPU/memory requirements.
+                  properties:
+                    limits:
+                      type: object
+                      additionalProperties:
+                        type: string
+                    requests:
+                      type: object
+                      additionalProperties:
+                        type: string
+                server:
+                  type: object
+                  description: Server configures the MCP server endpoint.
+                  properties:
+                    port:
+                      type: integer
+                      format: int32
+                      minimum: 1
+                      maximum: 65535
+                    transport:
+                      type: array
+                      items:
+                        type: string
+                    tls:
+                      type: object
+                      required: [secretName]
+                      properties:
+                        secretName:
+                          type: string
+                naming:
+                  type: object
+                  description: Naming configures tool name generation.
+                  properties:
+                    separator:
+                      type: string
+                    maxLength:
+                      type: integer
+                    conflictResolution:
+                      type: string
+                      enum: [error, truncate, hash]
+                inboundAuth:
+                  type: object
+                  description: InboundAuth configures inbound MCP client authentication.
+                  required: [strategy]
+                  properties:
+                    strategy:
+                      type: string
+                      enum: [jwt, none]
+                    jwt:
+                      type: object
+                      required: [jwksUrl]
+                      properties:
+                        jwksUrl:
+                          type: string
+                telemetry:
+                  type: object
+                  description: Telemetry configures observability settings.
+                  required: [enabled]
+                  properties:
+                    enabled:
+                      type: boolean
+                    otlpEndpoint:
+                      type: string
+            status:
+              type: object
+              description: MCPProxyStatus defines the observed state of MCPProxy.
+              properties:
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    required: [lastTransitionTime, message, reason, status, type]
+                    properties:
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      message:
+                        type: string
+                      observedGeneration:
+                        type: integer
+                        format: int64
+                      reason:
+                        type: string
+                      status:
+                        type: string
+                      type:
+                        type: string
+                upstreamCount:
+                  type: integer
+                toolCount:
+                  type: integer
+                observedGeneration:
+                  type: integer
+                  format: int64
+      additionalPrinterColumns:
+        - name: Upstreams
+          type: integer
+          jsonPath: .status.upstreamCount
+        - name: Tools
+          type: integer
+          jsonPath: .status.toolCount
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp

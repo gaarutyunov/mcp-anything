@@ -1,0 +1,49 @@
+apiVersion: mcp-anything.ai/v1alpha1
+kind: MCPProxy
+metadata:
+  name: main-proxy
+  namespace: mcp-system
+spec:
+  # Select MCPUpstream resources across team namespaces.
+  upstreamSelector:
+    matchLabels:
+      mcp-anything.ai/proxy: main-proxy
+  namespaceSelector:
+    matchNames:
+      - team-a
+      - team-b
+
+  # Proxy deployment settings.
+  replicas: 2
+  image: ghcr.io/gaarutyunov/mcp-anything:latest
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+  # MCP server configuration.
+  server:
+    port: 8080
+    transport:
+      - streamable-http
+      - sse
+
+  # Tool naming.
+  naming:
+    separator: "__"
+    maxLength: 64
+    conflictResolution: error
+
+  # Inbound JWT authentication.
+  inboundAuth:
+    strategy: jwt
+    jwt:
+      jwksUrl: "https://auth.example.com/.well-known/jwks.json"
+
+  # OpenTelemetry telemetry export.
+  telemetry:
+    enabled: true
+    otlpEndpoint: "otel-collector.monitoring:4317"

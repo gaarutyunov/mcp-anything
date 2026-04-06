@@ -5,8 +5,10 @@ package integration_test
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -24,7 +26,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlconfig "sigs.k8s.io/controller-runtime/pkg/config"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
-	"sigs.k8s.io/yaml"
 
 	"github.com/go-logr/logr"
 	testcontainers "github.com/testcontainers/testcontainers-go"
@@ -35,10 +36,10 @@ import (
 )
 
 const (
-	k3sImage             = "rancher/k3s:v1.31.4-k3s1"
-	operatorStartTimeout = 30 * time.Second
-	reconcileTimeout     = 60 * time.Second
-	pollInterval         = 500 * time.Millisecond
+	k3sImage            = "rancher/k3s:v1.31.4-k3s1"
+	reconcileTimeout    = 60 * time.Second
+	pollInterval        = 500 * time.Millisecond
+	progressLogInterval = 5 * time.Second
 )
 
 // sharedK3sCluster holds the single k3s instance shared across all operator tests.
@@ -54,6 +55,10 @@ var globalK3s *sharedK3sCluster
 // startSharedK3s starts a single k3s cluster with the mcp-anything CRDs pre-loaded.
 // It is called once from TestMain and its result stored in globalK3s.
 func startSharedK3s(ctx context.Context) (*sharedK3sCluster, error) {
+	total := time.Now()
+
+	// --- Arrange: prepare CRD manifests ---
+	slog.Info("k3s: preparing CRD manifests")
 	crdsDir, err := os.MkdirTemp("", "mcp-crds-*")
 	if err != nil {
 		return nil, fmt.Errorf("create temp dir: %w", err)
@@ -74,6 +79,9 @@ func startSharedK3s(ctx context.Context) (*sharedK3sCluster, error) {
 		}
 	}
 
+	// --- Act: start k3s container ---
+	containerStart := time.Now()
+	slog.Info("k3s: starting container", "image", k3sImage)
 	k3sCtr, err := k3s.Run(ctx, k3sImage,
 		k3s.WithManifest(filepath.Join(crdsDir, "mcpproxy.yaml")),
 		k3s.WithManifest(filepath.Join(crdsDir, "mcpupstream.yaml")),
@@ -81,14 +89,19 @@ func startSharedK3s(ctx context.Context) (*sharedK3sCluster, error) {
 	if err != nil {
 		return nil, fmt.Errorf("starting k3s container: %w", err)
 	}
+	slog.Info("k3s: container started", "elapsed", time.Since(containerStart).Round(time.Millisecond))
 
+	// --- Act: obtain kubeconfig ---
+	configStart := time.Now()
+	slog.Info("k3s: fetching kubeconfig")
 	kubeConfigYAML, err := k3sCtr.GetKubeConfig(ctx)
 	if err != nil {
 		_ = testcontainers.TerminateContainer(k3sCtr)
 		return nil, fmt.Errorf("getting kubeconfig: %w", err)
 	}
+	slog.Info("k3s: kubeconfig obtained", "elapsed", time.Since(configStart).Round(time.Millisecond))
 
-	// Build a client and wait for CRDs to be established before returning.
+	// --- Act: build client and wait for CRDs ---
 	scheme := buildOperatorScheme()
 	restCfg, err := clientcmd.RESTConfigFromKubeConfig(kubeConfigYAML)
 	if err != nil {
@@ -101,34 +114,50 @@ func startSharedK3s(ctx context.Context) (*sharedK3sCluster, error) {
 		return nil, fmt.Errorf("creating k8s client: %w", err)
 	}
 
+	crdStart := time.Now()
+	slog.Info("k3s: waiting for CRDs to be established")
 	crdCtx, crdCancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer crdCancel()
 	if err := waitForCRDs(crdCtx, c); err != nil {
 		_ = testcontainers.TerminateContainer(k3sCtr)
 		return nil, fmt.Errorf("waiting for CRDs: %w", err)
 	}
+	slog.Info("k3s: CRDs established",
+		"crd_wait", time.Since(crdStart).Round(time.Millisecond),
+		"total", time.Since(total).Round(time.Millisecond),
+	)
 
 	return &sharedK3sCluster{container: k3sCtr, kubeConfigYAML: kubeConfigYAML}, nil
 }
 
 // buildOperatorScheme returns a runtime.Scheme with all types the operator needs registered.
+// Panics if any registration fails — this is a programming error, not a runtime error.
 func buildOperatorScheme() *runtime.Scheme {
 	s := runtime.NewScheme()
-	_ = clientgoscheme.AddToScheme(s)
-	_ = corev1.AddToScheme(s)
-	_ = appsv1.AddToScheme(s)
-	_ = apiextensionsv1.AddToScheme(s)
-	_ = v1alpha1.AddToScheme(s)
+	for _, addFunc := range []func(*runtime.Scheme) error{
+		clientgoscheme.AddToScheme,
+		corev1.AddToScheme,
+		appsv1.AddToScheme,
+		apiextensionsv1.AddToScheme,
+		v1alpha1.AddToScheme,
+	} {
+		if err := addFunc(s); err != nil {
+			panic(fmt.Sprintf("failed to register scheme: %v", err))
+		}
+	}
 	return s
 }
 
-// waitForCRDs waits until the mcp-anything CRDs are established in the cluster.
+// waitForCRDs waits until the mcp-anything CRDs are established in the cluster,
+// logging progress for each CRD.
 func waitForCRDs(ctx context.Context, c client.Client) error {
 	crdNames := []string{
 		"mcpproxies.mcp-anything.ai",
 		"mcpupstreams.mcp-anything.ai",
 	}
 	for _, name := range crdNames {
+		start := time.Now()
+		slog.Info("k3s: waiting for CRD", "crd", name)
 		if err := wait.PollUntilContextTimeout(ctx, pollInterval, 60*time.Second, true, func(ctx context.Context) (bool, error) {
 			crd := &apiextensionsv1.CustomResourceDefinition{}
 			if err := c.Get(ctx, types.NamespacedName{Name: name}, crd); err != nil {
@@ -144,20 +173,23 @@ func waitForCRDs(ctx context.Context, c client.Client) error {
 			}
 			return false, nil
 		}); err != nil {
-			return fmt.Errorf("waiting for CRD %s: %w", name, err)
+			return fmt.Errorf("waiting for CRD %s (elapsed=%s): %w", name, time.Since(start).Round(time.Millisecond), err)
 		}
+		slog.Info("k3s: CRD established", "crd", name, "elapsed", time.Since(start).Round(time.Millisecond))
 	}
 	return nil
 }
 
 // startOperator starts the MCPProxy and MCPUpstream controllers in-process and
-// returns a cancel function that stops the manager.
+// returns a cancel function that stops the manager and waits for the goroutine to exit.
 func startOperator(ctx context.Context, t *testing.T, kubeConfigYAML []byte, scheme *runtime.Scheme) context.CancelFunc {
 	t.Helper()
 
 	// Suppress controller-runtime's "log.SetLogger was never called" warning.
 	ctrl.SetLogger(logr.Discard())
 
+	start := time.Now()
+	t.Log("operator: building REST config")
 	restCfg, err := clientcmd.RESTConfigFromKubeConfig(kubeConfigYAML)
 	if err != nil {
 		t.Fatalf("building REST config: %v", err)
@@ -166,6 +198,7 @@ func startOperator(ctx context.Context, t *testing.T, kubeConfigYAML []byte, sch
 	mgrCtx, mgrCancel := context.WithCancel(ctx)
 
 	skipNameValidation := true
+	t.Log("operator: creating manager")
 	mgr, err := ctrl.NewManager(restCfg, ctrl.Options{
 		Scheme: scheme,
 		Metrics: server.Options{
@@ -182,7 +215,9 @@ func startOperator(ctx context.Context, t *testing.T, kubeConfigYAML []byte, sch
 		mgrCancel()
 		t.Fatalf("creating manager: %v", err)
 	}
+	t.Logf("operator: manager created [%.2fs]", time.Since(start).Seconds())
 
+	t.Log("operator: registering MCPProxy controller")
 	if err := (&controller.MCPProxyReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
@@ -191,6 +226,7 @@ func startOperator(ctx context.Context, t *testing.T, kubeConfigYAML []byte, sch
 		t.Fatalf("setting up MCPProxy controller: %v", err)
 	}
 
+	t.Log("operator: registering MCPUpstream controller")
 	if err := (&controller.MCPUpstreamReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
@@ -199,28 +235,39 @@ func startOperator(ctx context.Context, t *testing.T, kubeConfigYAML []byte, sch
 		t.Fatalf("setting up MCPUpstream controller: %v", err)
 	}
 
+	// done is closed when the manager goroutine exits; used by the cleanup func
+	// to ensure the goroutine does not outlive the test and call t.Logf after it ends.
+	done := make(chan struct{})
 	go func() {
-		if err := mgr.Start(mgrCtx); err != nil {
-			t.Logf("manager exited: %v", err)
+		defer close(done)
+		if err := mgr.Start(mgrCtx); err != nil && mgrCtx.Err() == nil {
+			// Log only if the exit was not caused by our cancellation.
+			slog.Error("operator manager exited unexpectedly", "error", err)
 		}
 	}()
 
-	// Wait until the manager's cache is synced.
+	t.Log("operator: waiting for cache sync")
+	cacheStart := time.Now()
 	if !mgr.GetCache().WaitForCacheSync(mgrCtx) {
 		mgrCancel()
-		t.Fatal("cache did not sync")
+		<-done
+		t.Fatal("operator: cache did not sync")
 	}
+	t.Logf("operator: ready — setup=%.2fs cache_sync=%.2fs total=%.2fs",
+		cacheStart.Sub(start).Seconds(),
+		time.Since(cacheStart).Seconds(),
+		time.Since(start).Seconds(),
+	)
 
-	return mgrCancel
+	return func() {
+		mgrCancel()
+		<-done
+	}
 }
 
-// TestOperatorCreatesMCPProxyResources is an E2E test that:
-//  1. Reuses the shared k3s cluster (started by TestMain).
-//  2. Runs the operator controllers in-process.
-//  3. Creates an MCPUpstream with an autoDiscover OpenAPI source and an
-//     MCPProxy that selects it.
-//  4. Asserts that the operator creates the expected ConfigMap, Deployment,
-//     and Service.
+// TestOperatorCreatesMCPProxyResources is an E2E test that verifies the operator
+// creates the expected Kubernetes resources (ConfigMap, Deployment, Service) and
+// updates MCPProxy status when an MCPUpstream is associated with an MCPProxy.
 func TestOperatorCreatesMCPProxyResources(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping E2E test in short mode")
@@ -229,11 +276,14 @@ func TestOperatorCreatesMCPProxyResources(t *testing.T) {
 		t.Skip("shared k3s cluster unavailable")
 	}
 
+	// ── Arrange ──────────────────────────────────────────────────────────────
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
 	scheme := buildOperatorScheme()
 
+	t.Log("arrange: building k8s client")
 	restCfg, err := clientcmd.RESTConfigFromKubeConfig(globalK3s.kubeConfigYAML)
 	if err != nil {
 		t.Fatalf("building REST config: %v", err)
@@ -243,17 +293,19 @@ func TestOperatorCreatesMCPProxyResources(t *testing.T) {
 		t.Fatalf("creating k8s client: %v", err)
 	}
 
-	// Start operator controllers.
+	t.Log("arrange: starting operator")
 	stopOperator := startOperator(ctx, t, globalK3s.kubeConfigYAML, scheme)
 	defer stopOperator()
 
-	// Create the test namespace.
+	t.Log("arrange: creating namespace operator-e2e")
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "operator-e2e"}}
 	if err := k8sClient.Create(ctx, ns); err != nil && !apierrors.IsAlreadyExists(err) {
 		t.Fatalf("creating namespace: %v", err)
 	}
 
-	// Create an MCPUpstream with autoDiscover pointing to a hypothetical service.
+	// ── Act ──────────────────────────────────────────────────────────────────
+
+	t.Log("act: creating MCPUpstream test-upstream")
 	upstream := &v1alpha1.MCPUpstream{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-upstream",
@@ -276,7 +328,7 @@ func TestOperatorCreatesMCPProxyResources(t *testing.T) {
 		t.Fatalf("creating MCPUpstream: %v", err)
 	}
 
-	// Create an MCPProxy that selects the upstream.
+	t.Log("act: creating MCPProxy test-proxy")
 	proxy := &v1alpha1.MCPProxy{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-proxy",
@@ -300,12 +352,13 @@ func TestOperatorCreatesMCPProxyResources(t *testing.T) {
 		t.Fatalf("creating MCPProxy: %v", err)
 	}
 
+	// ── Assert ────────────────────────────────────────────────────────────────
+
 	proxyKey := types.NamespacedName{Name: "test-proxy", Namespace: "operator-e2e"}
 
-	// Assert: the operator must create a ConfigMap named test-proxy-config.
 	t.Run("ConfigMapCreated", func(t *testing.T) {
 		cm := &corev1.ConfigMap{}
-		if err := pollUntil(ctx, reconcileTimeout, pollInterval, func() error {
+		if err := pollWithProgress(ctx, t, "ConfigMap test-proxy-config", reconcileTimeout, pollInterval, func() error {
 			return k8sClient.Get(ctx, types.NamespacedName{
 				Name:      "test-proxy-config",
 				Namespace: "operator-e2e",
@@ -320,16 +373,14 @@ func TestOperatorCreatesMCPProxyResources(t *testing.T) {
 		if len(data) == 0 {
 			t.Fatal("config.yaml is empty")
 		}
-		// Verify the generated YAML contains the upstream base URL.
-		if !containsString(data, "http://test-api.operator-e2e.svc.cluster.local:8080") {
+		if !strings.Contains(data, "http://test-api.operator-e2e.svc.cluster.local:8080") {
 			t.Errorf("generated config does not contain expected base URL; got:\n%s", data)
 		}
 	})
 
-	// Assert: the operator must create a Deployment named test-proxy.
 	t.Run("DeploymentCreated", func(t *testing.T) {
 		dep := &appsv1.Deployment{}
-		if err := pollUntil(ctx, reconcileTimeout, pollInterval, func() error {
+		if err := pollWithProgress(ctx, t, "Deployment test-proxy", reconcileTimeout, pollInterval, func() error {
 			return k8sClient.Get(ctx, proxyKey, dep)
 		}); err != nil {
 			t.Fatalf("Deployment not created: %v", err)
@@ -339,10 +390,9 @@ func TestOperatorCreatesMCPProxyResources(t *testing.T) {
 		}
 	})
 
-	// Assert: the operator must create a Service named test-proxy.
 	t.Run("ServiceCreated", func(t *testing.T) {
 		svc := &corev1.Service{}
-		if err := pollUntil(ctx, reconcileTimeout, pollInterval, func() error {
+		if err := pollWithProgress(ctx, t, "Service test-proxy", reconcileTimeout, pollInterval, func() error {
 			return k8sClient.Get(ctx, proxyKey, svc)
 		}); err != nil {
 			t.Fatalf("Service not created: %v", err)
@@ -355,9 +405,8 @@ func TestOperatorCreatesMCPProxyResources(t *testing.T) {
 		}
 	})
 
-	// Assert: MCPProxy status is updated with upstreamCount.
 	t.Run("MCPProxyStatusUpdated", func(t *testing.T) {
-		if err := pollUntil(ctx, reconcileTimeout, pollInterval, func() error {
+		if err := pollWithProgress(ctx, t, "MCPProxy status upstreamCount=1", reconcileTimeout, pollInterval, func() error {
 			p := &v1alpha1.MCPProxy{}
 			if err := k8sClient.Get(ctx, proxyKey, p); err != nil {
 				return err
@@ -373,7 +422,7 @@ func TestOperatorCreatesMCPProxyResources(t *testing.T) {
 }
 
 // TestOperatorLabelSelectorFiltersUpstreams verifies that the label selector on
-// MCPProxy correctly filters MCPUpstream resources.
+// MCPProxy correctly includes matching upstreams and excludes non-matching ones.
 func TestOperatorLabelSelectorFiltersUpstreams(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping E2E test in short mode")
@@ -382,11 +431,14 @@ func TestOperatorLabelSelectorFiltersUpstreams(t *testing.T) {
 		t.Skip("shared k3s cluster unavailable")
 	}
 
+	// ── Arrange ──────────────────────────────────────────────────────────────
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
 	scheme := buildOperatorScheme()
 
+	t.Log("arrange: building k8s client")
 	restCfg, err := clientcmd.RESTConfigFromKubeConfig(globalK3s.kubeConfigYAML)
 	if err != nil {
 		t.Fatalf("building REST config: %v", err)
@@ -396,17 +448,20 @@ func TestOperatorLabelSelectorFiltersUpstreams(t *testing.T) {
 		t.Fatalf("creating k8s client: %v", err)
 	}
 
+	t.Log("arrange: starting operator")
 	stopOperator := startOperator(ctx, t, globalK3s.kubeConfigYAML, scheme)
 	defer stopOperator()
 
+	t.Log("arrange: creating namespace selector-e2e")
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "selector-e2e"}}
 	if err := k8sClient.Create(ctx, ns); err != nil && !apierrors.IsAlreadyExists(err) {
 		t.Fatalf("creating namespace: %v", err)
 	}
 
-	// upstream-a: matches proxy-a selector
+	// upstream-a matches proxy-a; upstream-b matches proxy-b (not selected by proxy-a).
+	t.Log("arrange: creating MCPUpstream upstream-a (label=proxy-a)")
 	upstreamA := newTestUpstream("upstream-a", "selector-e2e", "proxy-a", "http://api-a:8080")
-	// upstream-b: matches proxy-b selector (should NOT be selected by proxy-a)
+	t.Log("arrange: creating MCPUpstream upstream-b (label=proxy-b)")
 	upstreamB := newTestUpstream("upstream-b", "selector-e2e", "proxy-b", "http://api-b:8080")
 
 	for _, u := range []*v1alpha1.MCPUpstream{upstreamA, upstreamB} {
@@ -415,6 +470,9 @@ func TestOperatorLabelSelectorFiltersUpstreams(t *testing.T) {
 		}
 	}
 
+	// ── Act ──────────────────────────────────────────────────────────────────
+
+	t.Log("act: creating MCPProxy proxy-a with selector matching proxy-a label")
 	proxy := &v1alpha1.MCPProxy{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "proxy-a",
@@ -432,8 +490,10 @@ func TestOperatorLabelSelectorFiltersUpstreams(t *testing.T) {
 		t.Fatalf("creating MCPProxy: %v", err)
 	}
 
-	// Wait for the proxy config to be generated with exactly 1 upstream.
-	if err := pollUntil(ctx, reconcileTimeout, pollInterval, func() error {
+	// ── Assert ────────────────────────────────────────────────────────────────
+
+	t.Log("assert: waiting for MCPProxy to report upstreamCount=1")
+	if err := pollWithProgress(ctx, t, "MCPProxy proxy-a upstreamCount=1", reconcileTimeout, pollInterval, func() error {
 		p := &v1alpha1.MCPProxy{}
 		if err := k8sClient.Get(ctx, types.NamespacedName{Name: "proxy-a", Namespace: "selector-e2e"}, p); err != nil {
 			return err
@@ -446,7 +506,7 @@ func TestOperatorLabelSelectorFiltersUpstreams(t *testing.T) {
 		t.Fatalf("upstream selector filtering failed: %v", err)
 	}
 
-	// Verify that config does NOT contain upstream-b's URL.
+	t.Log("assert: verifying config contains upstream-a URL and excludes upstream-b URL")
 	cm := &corev1.ConfigMap{}
 	if err := k8sClient.Get(ctx, types.NamespacedName{
 		Name:      "proxy-a-config",
@@ -456,15 +516,16 @@ func TestOperatorLabelSelectorFiltersUpstreams(t *testing.T) {
 	}
 
 	cfgData := cm.Data["config.yaml"]
-	if containsString(cfgData, "http://api-b:8080") {
-		t.Error("config should not contain upstream-b URL but it does")
+	if strings.Contains(cfgData, "http://api-b:8080") {
+		t.Error("config must not contain upstream-b URL (selector should exclude it)")
 	}
-	if !containsString(cfgData, "http://api-a:8080") {
-		t.Error("config should contain upstream-a URL but it does not")
+	if !strings.Contains(cfgData, "http://api-a:8080") {
+		t.Errorf("config must contain upstream-a URL; got:\n%s", cfgData)
 	}
 }
 
-// TestOperatorCRDValidation verifies that the CRD OpenAPI schema rejects invalid specs.
+// TestOperatorCRDValidation verifies that the CRD OpenAPI schema rejects invalid specs
+// at the Kubernetes API layer, before any controller logic runs.
 func TestOperatorCRDValidation(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping E2E test in short mode")
@@ -473,11 +534,14 @@ func TestOperatorCRDValidation(t *testing.T) {
 		t.Skip("shared k3s cluster unavailable")
 	}
 
+	// ── Arrange ──────────────────────────────────────────────────────────────
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
 	scheme := buildOperatorScheme()
 
+	t.Log("arrange: building k8s client")
 	restCfg, err := clientcmd.RESTConfigFromKubeConfig(globalK3s.kubeConfigYAML)
 	if err != nil {
 		t.Fatalf("building REST config: %v", err)
@@ -487,12 +551,15 @@ func TestOperatorCRDValidation(t *testing.T) {
 		t.Fatalf("creating k8s client: %v", err)
 	}
 
+	t.Log("arrange: creating namespace validation-e2e")
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "validation-e2e"}}
 	if err := k8sClient.Create(ctx, ns); err != nil && !apierrors.IsAlreadyExists(err) {
 		t.Fatalf("creating namespace: %v", err)
 	}
 
-	// MCPProxy with replicas=0 (minimum is 1 in the CRD schema).
+	// ── Act ──────────────────────────────────────────────────────────────────
+
+	t.Log("act: attempting to create MCPProxy with replicas=0 (invalid per CRD schema)")
 	zero := int32(0)
 	invalidProxy := &v1alpha1.MCPProxy{
 		ObjectMeta: metav1.ObjectMeta{
@@ -503,14 +570,20 @@ func TestOperatorCRDValidation(t *testing.T) {
 			Replicas: &zero,
 		},
 	}
-	err = k8sClient.Create(ctx, invalidProxy)
-	if err == nil {
-		t.Error("expected error for MCPProxy with replicas=0, got nil")
+
+	// ── Assert ────────────────────────────────────────────────────────────────
+
+	createErr := k8sClient.Create(ctx, invalidProxy)
+	if createErr == nil {
+		t.Error("expected validation error for MCPProxy with replicas=0, got nil")
+	} else {
+		t.Logf("assert: correctly rejected — %v", createErr)
 	}
 }
 
 // --- helpers ---
 
+// newTestUpstream creates an MCPUpstream fixture with an autoDiscover OpenAPI source.
 func newTestUpstream(name, namespace, proxyLabel, baseURL string) *v1alpha1.MCPUpstream {
 	return &v1alpha1.MCPUpstream{
 		ObjectMeta: metav1.ObjectMeta{
@@ -528,33 +601,32 @@ func newTestUpstream(name, namespace, proxyLabel, baseURL string) *v1alpha1.MCPU
 	}
 }
 
-// pollUntil retries fn until it returns nil or the deadline is exceeded.
-func pollUntil(ctx context.Context, timeout, interval time.Duration, fn func() error) error {
+// pollWithProgress retries fn until it returns nil, the timeout expires, or ctx is cancelled.
+// It emits a progress log every progressLogInterval so slow operations are visible and
+// distinguishable from hangs in test output.
+func pollWithProgress(ctx context.Context, t *testing.T, label string, timeout, interval time.Duration, fn func() error) error {
+	t.Helper()
+	start := time.Now()
 	deadline := time.Now().Add(timeout)
+	nextLog := time.Now().Add(progressLogInterval)
 	var lastErr error
+
+	t.Logf("[0.00s] %s: polling (timeout=%s)", label, timeout)
+
 	for time.Now().Before(deadline) {
 		if err := ctx.Err(); err != nil {
-			return err
+			return fmt.Errorf("%s: context cancelled after %.2fs: %w", label, time.Since(start).Seconds(), err)
 		}
 		lastErr = fn()
 		if lastErr == nil {
+			t.Logf("[%.2fs] %s: done", time.Since(start).Seconds(), label)
 			return nil
+		}
+		if time.Now().After(nextLog) {
+			t.Logf("[%.2fs] %s: still waiting — %v", time.Since(start).Seconds(), label, lastErr)
+			nextLog = time.Now().Add(progressLogInterval)
 		}
 		time.Sleep(interval)
 	}
-	return fmt.Errorf("timed out after %s: %w", timeout, lastErr)
+	return fmt.Errorf("%s: timed out after %.2fs: %w", label, time.Since(start).Seconds(), lastErr)
 }
-
-func containsString(s, substr string) bool {
-	return len(s) > 0 && len(substr) > 0 && (func() bool {
-		for i := 0; i <= len(s)-len(substr); i++ {
-			if s[i:i+len(substr)] == substr {
-				return true
-			}
-		}
-		return false
-	})()
-}
-
-// Ensure yaml import is used (for kubeconfig parsing in helpers).
-var _ = yaml.Marshal

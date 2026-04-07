@@ -1,0 +1,63 @@
+apiVersion: mcp-anything.ai/v1alpha1
+kind: MCPUpstream
+metadata:
+  name: petstore-mcp
+  namespace: team-a
+  labels:
+    mcp-anything.ai/proxy: main-proxy  # Matches MCPProxy upstreamSelector
+spec:
+  toolPrefix: pets
+
+  # Reference an in-cluster Kubernetes Service.
+  # Base URL is constructed as: http://petstore-api.team-a.svc.cluster.local:8080
+  serviceRef:
+    name: petstore-api
+    port: 8080
+
+  # OpenAPI spec from a ConfigMap in the same namespace.
+  openapi:
+    configMapRef:
+      name: petstore-spec
+      key: openapi.yaml
+
+  # Optional OpenAPI Overlay for tool customisation.
+  overlay:
+    configMapRef:
+      name: petstore-overlay
+      key: overlay.yaml
+
+  # Outbound OAuth2 client credentials flow.
+  outboundAuth:
+    strategy: oauth2_client_credentials
+    oauth2:
+      tokenURL: "https://auth.example.com/token"
+      secretRef:
+        name: petstore-oauth2-creds  # Secret with client_id and client_secret
+
+  # HTTP transport tuning.
+  transport:
+    maxIdleConns: 50
+
+  # Request/response validation.
+  validation:
+    validateRequest: true
+    validateResponse: false
+---
+# Example with an external API (no serviceRef).
+apiVersion: mcp-anything.ai/v1alpha1
+kind: MCPUpstream
+metadata:
+  name: external-api-mcp
+  namespace: team-b
+  labels:
+    mcp-anything.ai/proxy: main-proxy
+spec:
+  toolPrefix: external
+
+  # Direct base URL for an external API.
+  baseURL: "https://api.external.com/v2"
+
+  # Auto-discover OpenAPI spec from the service itself.
+  openapi:
+    autoDiscover:
+      path: /openapi.json

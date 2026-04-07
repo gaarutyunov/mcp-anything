@@ -59,6 +59,11 @@ func (in *MCPProxySpec) DeepCopyInto(out *MCPProxySpec) {
 		*out = new(ProxyTelemetrySpec)
 		**out = **in
 	}
+	if in.ServiceDiscovery != nil {
+		in, out := &in.ServiceDiscovery, &out.ServiceDiscovery
+		*out = new(ServiceDiscoverySpec)
+		(*in).DeepCopyInto(*out)
+	}
 }
 
 // DeepCopy creates a deep copy of MCPProxySpec.
@@ -563,6 +568,53 @@ func (in *MCPUpstreamValidationSpec) DeepCopy() *MCPUpstreamValidationSpec {
 		return nil
 	}
 	out := new(MCPUpstreamValidationSpec)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto copies all properties of ServiceDiscoverySpec into another object.
+func (in *ServiceDiscoverySpec) DeepCopyInto(out *ServiceDiscoverySpec) {
+	*out = *in
+	if in.NamespaceSelector != nil {
+		in, out := &in.NamespaceSelector, &out.NamespaceSelector
+		*out = new(ServiceDiscoveryNamespaceSelector)
+		(*in).DeepCopyInto(*out)
+	}
+}
+
+// DeepCopy creates a deep copy of ServiceDiscoverySpec.
+func (in *ServiceDiscoverySpec) DeepCopy() *ServiceDiscoverySpec {
+	if in == nil {
+		return nil
+	}
+	out := new(ServiceDiscoverySpec)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto copies all properties of ServiceDiscoveryNamespaceSelector into another object.
+func (in *ServiceDiscoveryNamespaceSelector) DeepCopyInto(out *ServiceDiscoveryNamespaceSelector) {
+	*out = *in
+	if in.MatchNames != nil {
+		in, out := &in.MatchNames, &out.MatchNames
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+	if in.MatchLabels != nil {
+		in, out := &in.MatchLabels, &out.MatchLabels
+		*out = make(map[string]string, len(*in))
+		for key, val := range *in {
+			(*out)[key] = val
+		}
+	}
+}
+
+// DeepCopy creates a deep copy of ServiceDiscoveryNamespaceSelector.
+func (in *ServiceDiscoveryNamespaceSelector) DeepCopy() *ServiceDiscoveryNamespaceSelector {
+	if in == nil {
+		return nil
+	}
+	out := new(ServiceDiscoveryNamespaceSelector)
 	in.DeepCopyInto(out)
 	return out
 }

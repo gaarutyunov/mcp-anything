@@ -29,6 +29,10 @@ type MCPProxySpec struct {
 	// +optional
 	NamespaceSelector NamespaceSelectorSpec `json:"namespaceSelector,omitempty"`
 
+	// ServiceDiscovery configures annotation-based upstream discovery from Kubernetes Services.
+	// +optional
+	ServiceDiscovery *ServiceDiscoverySpec `json:"serviceDiscovery,omitempty"`
+
 	// Replicas is the number of proxy pod replicas. Defaults to 1.
 	// +optional
 	Replicas *int32 `json:"replicas,omitempty"`
@@ -63,6 +67,29 @@ type NamespaceSelectorSpec struct {
 	// MatchNames is a list of namespace names to search for MCPUpstream resources.
 	// +optional
 	MatchNames []string `json:"matchNames,omitempty"`
+}
+
+// ServiceDiscoverySpec configures annotation-based upstream discovery from Services.
+type ServiceDiscoverySpec struct {
+	// Enabled enables scanning for Services annotated with mcp-anything.ai/enabled=true.
+	// +optional
+	Enabled bool `json:"enabled,omitempty"`
+
+	// NamespaceSelector restricts which namespaces are scanned for annotated Services.
+	// If not set, the same namespaces as NamespaceSelector are used (defaulting to the proxy's namespace).
+	// +optional
+	NamespaceSelector *ServiceDiscoveryNamespaceSelector `json:"namespaceSelector,omitempty"`
+}
+
+// ServiceDiscoveryNamespaceSelector restricts which namespaces are scanned for annotated Services.
+type ServiceDiscoveryNamespaceSelector struct {
+	// MatchNames is a list of specific namespace names to scan.
+	// +optional
+	MatchNames []string `json:"matchNames,omitempty"`
+
+	// MatchLabels scans all namespaces whose labels match these key-value pairs.
+	// +optional
+	MatchLabels map[string]string `json:"matchLabels,omitempty"`
 }
 
 // ProxyServerSpec configures the MCP HTTP server.
@@ -135,6 +162,9 @@ type MCPProxyStatus struct {
 
 	// UpstreamCount is the number of MCPUpstream resources currently selected.
 	UpstreamCount int `json:"upstreamCount,omitempty"`
+
+	// AnnotatedServiceCount is the number of annotated Services currently discovered.
+	AnnotatedServiceCount int `json:"annotatedServiceCount,omitempty"`
 
 	// ToolCount is the total number of MCP tools exposed.
 	ToolCount int `json:"toolCount,omitempty"`

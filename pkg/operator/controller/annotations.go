@@ -73,7 +73,7 @@ func serviceToMCPUpstream(svc *corev1.Service) (*v1alpha1.MCPUpstream, error) {
 
 	port, err := resolveServicePort(svc)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("resolving port for service %s/%s: %w", svc.Namespace, svc.Name, err)
 	}
 
 	basePath := ann[AnnotationBasePath]
@@ -91,6 +91,23 @@ func serviceToMCPUpstream(svc *corev1.Service) (*v1alpha1.MCPUpstream, error) {
 	}
 
 	// OpenAPI source — exactly one of the three annotations must be set.
+	openAPISourceCount := 0
+	if ann[AnnotationOpenAPIURL] != "" {
+		openAPISourceCount++
+	}
+	if ann[AnnotationOpenAPIConfigMap] != "" {
+		openAPISourceCount++
+	}
+	if ann[AnnotationOpenAPIPath] != "" {
+		openAPISourceCount++
+	}
+	if openAPISourceCount != 1 {
+		return nil, fmt.Errorf(
+			"expected exactly one OpenAPI source annotation (%s, %s, %s), got %d",
+			AnnotationOpenAPIURL, AnnotationOpenAPIConfigMap, AnnotationOpenAPIPath, openAPISourceCount,
+		)
+	}
+
 	switch {
 	case ann[AnnotationOpenAPIURL] != "":
 		up.Spec.OpenAPI = v1alpha1.MCPUpstreamOpenAPISpec{
@@ -129,9 +146,15 @@ func serviceToMCPUpstream(svc *corev1.Service) (*v1alpha1.MCPUpstream, error) {
 
 	// Optional: outbound auth.
 	if strategy := ann[AnnotationAuthStrategy]; strategy != "" && strategy != "none" {
-		up.Spec.OutboundAuth = &v1alpha1.MCPUpstreamOutboundAuthSpec{
+		authSpec := &v1alpha1.MCPUpstreamOutboundAuthSpec{
 			Strategy: strategy,
 		}
+		if secretName := ann[AnnotationAuthSecret]; secretName != "" {
+			authSpec.Bearer = &v1alpha1.BearerSpec{
+				SecretRef: &v1alpha1.SecretRef{Name: secretName},
+			}
+		}
+		up.Spec.OutboundAuth = authSpec
 	}
 
 	return up, nil

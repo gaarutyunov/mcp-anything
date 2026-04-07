@@ -285,9 +285,20 @@ type MCPUpstreamOutboundAuthSpec struct {
 	// Strategy is the outbound auth strategy: bearer|oauth2_client_credentials|none.
 	Strategy string `json:"strategy"`
 
+	// Bearer configures bearer token authentication.
+	// +optional
+	Bearer *BearerSpec `json:"bearer,omitempty"`
+
 	// OAuth2 configures OAuth2 client credentials flow.
 	// +optional
 	OAuth2 *OAuth2Spec `json:"oauth2,omitempty"`
+}
+
+// BearerSpec holds config for bearer token authentication.
+type BearerSpec struct {
+	// SecretRef references a Secret containing the bearer token (key: "token").
+	// +optional
+	SecretRef *SecretRef `json:"secretRef,omitempty"`
 }
 
 // OAuth2Spec configures OAuth2 client credentials.

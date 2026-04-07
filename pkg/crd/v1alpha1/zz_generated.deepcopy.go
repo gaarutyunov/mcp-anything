@@ -467,9 +467,34 @@ func (in *MCPUpstreamOverlaySpec) DeepCopy() *MCPUpstreamOverlaySpec {
 	return out
 }
 
+// DeepCopyInto copies all properties of BearerSpec into another object.
+func (in *BearerSpec) DeepCopyInto(out *BearerSpec) {
+	*out = *in
+	if in.SecretRef != nil {
+		in, out := &in.SecretRef, &out.SecretRef
+		*out = new(SecretRef)
+		**out = **in
+	}
+}
+
+// DeepCopy creates a deep copy of BearerSpec.
+func (in *BearerSpec) DeepCopy() *BearerSpec {
+	if in == nil {
+		return nil
+	}
+	out := new(BearerSpec)
+	in.DeepCopyInto(out)
+	return out
+}
+
 // DeepCopyInto copies all properties of MCPUpstreamOutboundAuthSpec into another object.
 func (in *MCPUpstreamOutboundAuthSpec) DeepCopyInto(out *MCPUpstreamOutboundAuthSpec) {
 	*out = *in
+	if in.Bearer != nil {
+		in, out := &in.Bearer, &out.Bearer
+		*out = new(BearerSpec)
+		(*in).DeepCopyInto(*out)
+	}
 	if in.OAuth2 != nil {
 		in, out := &in.OAuth2, &out.OAuth2
 		*out = new(OAuth2Spec)

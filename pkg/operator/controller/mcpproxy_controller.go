@@ -600,7 +600,10 @@ func (r *MCPProxyReconciler) listAnnotatedServices(ctx context.Context, proxy *v
 		return nil, nil
 	}
 
-	namespaces := serviceDiscoveryNamespaces(proxy)
+	namespaces, err := r.serviceDiscoveryNamespaces(ctx, proxy)
+	if err != nil {
+		return nil, fmt.Errorf("resolving service discovery namespaces: %w", err)
+	}
 
 	var synthetic []v1alpha1.MCPUpstream
 	for _, ns := range namespaces {
@@ -629,29 +632,60 @@ func (r *MCPProxyReconciler) listAnnotatedServices(ctx context.Context, proxy *v
 }
 
 // serviceDiscoveryNamespaces returns the list of namespaces to scan for annotated Services.
-func serviceDiscoveryNamespaces(proxy *v1alpha1.MCPProxy) []string {
+// It resolves explicit MatchNames and label-selected namespaces, deduplicating results.
+func (r *MCPProxyReconciler) serviceDiscoveryNamespaces(ctx context.Context, proxy *v1alpha1.MCPProxy) ([]string, error) {
 	if proxy.Spec.ServiceDiscovery == nil || proxy.Spec.ServiceDiscovery.NamespaceSelector == nil {
 		// Fall back to the upstream namespace selector.
 		if len(proxy.Spec.NamespaceSelector.MatchNames) > 0 {
-			return proxy.Spec.NamespaceSelector.MatchNames
+			return proxy.Spec.NamespaceSelector.MatchNames, nil
 		}
-		return []string{proxy.Namespace}
+		return []string{proxy.Namespace}, nil
 	}
-	if len(proxy.Spec.ServiceDiscovery.NamespaceSelector.MatchNames) > 0 {
-		return proxy.Spec.ServiceDiscovery.NamespaceSelector.MatchNames
+
+	sel := proxy.Spec.ServiceDiscovery.NamespaceSelector
+	seen := make(map[string]struct{})
+	var namespaces []string
+
+	add := func(ns string) {
+		if _, ok := seen[ns]; !ok {
+			seen[ns] = struct{}{}
+			namespaces = append(namespaces, ns)
+		}
 	}
-	return []string{proxy.Namespace}
+
+	for _, name := range sel.MatchNames {
+		add(name)
+	}
+
+	if len(sel.MatchLabels) > 0 {
+		nsList := &corev1.NamespaceList{}
+		if err := r.List(ctx, nsList, client.MatchingLabels(sel.MatchLabels)); err != nil {
+			return nil, fmt.Errorf("listing namespaces by label: %w", err)
+		}
+		for i := range nsList.Items {
+			add(nsList.Items[i].Name)
+		}
+	}
+
+	if len(namespaces) == 0 {
+		return []string{proxy.Namespace}, nil
+	}
+	return namespaces, nil
 }
 
 // serviceMatchesProxy returns true if the Service should be picked up by the given proxy.
-// A Service matches if it has no mcp-anything.ai/proxy annotation (picked up by any proxy)
-// OR if the annotation value equals the proxy name.
+// A Service matches if it has no mcp-anything.ai/proxy annotation (picked up by any proxy),
+// or if the annotation is a bare name matching proxy.Name in the same namespace,
+// or if the annotation is "namespace/name" matching the proxy fully.
 func serviceMatchesProxy(svc *corev1.Service, proxy *v1alpha1.MCPProxy) bool {
 	proxyAnnotation, hasProxyAnnotation := svc.Annotations[AnnotationProxy]
 	if !hasProxyAnnotation {
 		return true
 	}
-	return proxyAnnotation == proxy.Name
+	if ns, name, ok := strings.Cut(proxyAnnotation, "/"); ok {
+		return ns == proxy.Namespace && name == proxy.Name
+	}
+	return svc.Namespace == proxy.Namespace && proxyAnnotation == proxy.Name
 }
 
 // detectPrefixConflicts returns a list of human-readable conflict descriptions for any
@@ -702,7 +736,11 @@ func (r *MCPProxyReconciler) proxiesForAnnotatedService(ctx context.Context, svc
 		if proxy.Spec.ServiceDiscovery == nil || !proxy.Spec.ServiceDiscovery.Enabled {
 			continue
 		}
-		namespaces := serviceDiscoveryNamespaces(proxy)
+		namespaces, err := r.serviceDiscoveryNamespaces(ctx, proxy)
+		if err != nil {
+			slog.Warn("resolving service discovery namespaces", "proxy", proxy.Namespace+"/"+proxy.Name, "error", err)
+			continue
+		}
 		for _, ns := range namespaces {
 			if ns != svc.Namespace {
 				continue

@@ -79,13 +79,9 @@ jobs:
         uses: atomicjar/testcontainers-cloud-setup-action@v1
         with:
           token: ${{ secrets.TC_CLOUD_TOKEN }}
+          wait: 'true'
 
       - name: Integration tests
-        uses: nick-fields/retry@v3
-        with:
-          timeout_minutes: 10
-          max_attempts: 3
-          retry_wait_seconds: 10
-          command: go test -race -tags integration -count=1 -timeout 300s ./tests/integration/...
+        run: make integration
         env:
           PROXY_IMAGE: ${{ env.PROXY_IMAGE }}

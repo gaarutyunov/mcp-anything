@@ -14,8 +14,8 @@ import (
 	"github.com/getkin/kin-openapi/routers"
 	"gopkg.in/yaml.v3"
 
-	"github.com/gaarutyunov/mcp-anything/internal/config"
-	"github.com/gaarutyunov/mcp-anything/internal/transform"
+	"github.com/gaarutyunov/mcp-anything/pkg/config"
+	"github.com/gaarutyunov/mcp-anything/pkg/transform"
 )
 
 // Validator holds a pre-built kin-openapi router for a single upstream spec.

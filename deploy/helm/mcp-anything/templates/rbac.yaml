@@ -30,6 +30,11 @@ rules:
   - apiGroups: [""]
     resources: [configmaps, services]
     verbs: [get, list, watch, create, update, patch, delete]
+{{- if $clusterScoped }}
+  - apiGroups: [""]
+    resources: [namespaces]
+    verbs: [get, list, watch]
+{{- end }}
   - apiGroups: [apps]
     resources: [deployments]
     verbs: [get, list, watch, create, update, patch, delete]

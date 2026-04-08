@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"reflect"
+	"strings"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -30,17 +31,18 @@ import (
 )
 
 const (
-	defaultProxyImage       = "ghcr.io/gaarutyunov/mcp-anything:latest"
-	defaultProxyPort        = int32(8080)
-	configMountPath         = "/etc/mcp-anything/config.yaml"
-	specsMountPath          = "/etc/mcp-anything/specs"
-	overlaysMountPath       = "/etc/mcp-anything/overlays"
-	configVolumeName        = "proxy-config"
-	specsVolumeName         = "upstream-specs"
-	overlaysVolumeName      = "upstream-overlays"
-	conditionTypeReady      = "Ready"
-	conditionTypeReconciled = "Reconciled"
-	periodicSyncInterval    = 5 * time.Minute
+	defaultProxyImage           = "ghcr.io/gaarutyunov/mcp-anything:latest"
+	defaultProxyPort            = int32(8080)
+	configMountPath             = "/etc/mcp-anything/config.yaml"
+	specsMountPath              = "/etc/mcp-anything/specs"
+	overlaysMountPath           = "/etc/mcp-anything/overlays"
+	configVolumeName            = "proxy-config"
+	specsVolumeName             = "upstream-specs"
+	overlaysVolumeName          = "upstream-overlays"
+	conditionTypeReady          = "Ready"
+	conditionTypeReconciled     = "Reconciled"
+	conditionTypePrefixConflict = "PrefixConflict"
+	periodicSyncInterval        = 5 * time.Minute
 )
 
 // MCPProxyReconciler reconciles MCPProxy resources.
@@ -62,14 +64,29 @@ func (r *MCPProxyReconciler) Reconcile(ctx context.Context, req reconcile.Reques
 		return reconcile.Result{}, fmt.Errorf("fetching MCPProxy: %w", err)
 	}
 
-	// Collect upstreams from configured namespaces.
-	upstreams, err := r.listUpstreams(ctx, proxy)
+	// Collect MCPUpstream CRD resources from configured namespaces.
+	crdUpstreams, err := r.listUpstreams(ctx, proxy)
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("listing upstreams: %w", err)
 	}
 
+	// Collect synthetic upstreams from annotated Services.
+	svcUpstreams, err := r.listAnnotatedServices(ctx, proxy)
+	if err != nil {
+		return reconcile.Result{}, fmt.Errorf("listing annotated services: %w", err)
+	}
+
+	// Detect prefix conflicts — reported in status but do not halt reconciliation.
+	conflicts := detectPrefixConflicts(crdUpstreams, svcUpstreams)
+	if len(conflicts) > 0 {
+		log.Warn("prefix conflicts detected", "conflicts", conflicts)
+	}
+
+	// Merge CRD and annotation-based upstreams.
+	allUpstreams := append(crdUpstreams, svcUpstreams...)
+
 	// Generate config YAML.
-	configData, err := configgen.Generate(ctx, proxy, upstreams)
+	configData, err := configgen.Generate(ctx, proxy, allUpstreams)
 	if err != nil {
 		if setErr := r.setCondition(ctx, proxy, conditionTypeReconciled, metav1.ConditionFalse, "ConfigGenFailed", err.Error()); setErr != nil {
 			log.Error("setting condition", "error", setErr)
@@ -83,12 +100,12 @@ func (r *MCPProxyReconciler) Reconcile(ctx context.Context, req reconcile.Reques
 	}
 
 	// Reconcile per-upstream spec/overlay ConfigMaps.
-	if err := r.reconcileUpstreamConfigMaps(ctx, proxy, upstreams); err != nil {
+	if err := r.reconcileUpstreamConfigMaps(ctx, proxy, allUpstreams); err != nil {
 		return reconcile.Result{}, fmt.Errorf("reconciling upstream configmaps: %w", err)
 	}
 
 	// Reconcile Deployment.
-	if err := r.reconcileDeployment(ctx, proxy, upstreams); err != nil {
+	if err := r.reconcileDeployment(ctx, proxy, allUpstreams); err != nil {
 		return reconcile.Result{}, fmt.Errorf("reconciling deployment: %w", err)
 	}
 
@@ -97,12 +114,15 @@ func (r *MCPProxyReconciler) Reconcile(ctx context.Context, req reconcile.Reques
 		return reconcile.Result{}, fmt.Errorf("reconciling service: %w", err)
 	}
 
-	// Update status.
-	if err := r.updateStatus(ctx, proxy, upstreams); err != nil {
+	// Update status (including prefix conflict condition) in a single API call.
+	if err := r.updateStatus(ctx, proxy, crdUpstreams, svcUpstreams, conflicts); err != nil {
 		return reconcile.Result{}, fmt.Errorf("updating status: %w", err)
 	}
 
-	log.Info("MCPProxy reconciled", "upstream_count", len(upstreams))
+	log.Info("MCPProxy reconciled",
+		"crd_upstream_count", len(crdUpstreams),
+		"annotated_service_count", len(svcUpstreams),
+	)
 	return reconcile.Result{RequeueAfter: periodicSyncInterval}, nil
 }
 
@@ -494,29 +514,63 @@ func (r *MCPProxyReconciler) buildService(proxy *v1alpha1.MCPProxy) *corev1.Serv
 	return svc
 }
 
-// updateStatus writes updated status fields back to the API server.
-func (r *MCPProxyReconciler) updateStatus(ctx context.Context, proxy *v1alpha1.MCPProxy, upstreams []v1alpha1.MCPUpstream) error {
-	msg := fmt.Sprintf("proxy configured with %d upstream(s)", len(upstreams))
-	currentCond := apimeta.FindStatusCondition(proxy.Status.Conditions, conditionTypeReconciled)
-	if proxy.Status.UpstreamCount == len(upstreams) &&
+// updateStatus writes all status fields and conditions back to the API server in one call,
+// avoiding "object has been modified" conflicts from multiple Status().Update() calls.
+func (r *MCPProxyReconciler) updateStatus(ctx context.Context, proxy *v1alpha1.MCPProxy, crdUpstreams, svcUpstreams []v1alpha1.MCPUpstream, conflicts []string) error {
+	totalCount := len(crdUpstreams) + len(svcUpstreams)
+	reconciledMsg := fmt.Sprintf("proxy configured with %d upstream(s) (%d CRD, %d annotated service)",
+		totalCount, len(crdUpstreams), len(svcUpstreams))
+
+	// Build the desired conflict condition.
+	var conflictCond metav1.Condition
+	if len(conflicts) > 0 {
+		conflictCond = metav1.Condition{
+			Type:               conditionTypePrefixConflict,
+			Status:             metav1.ConditionTrue,
+			Reason:             "PrefixConflict",
+			Message:            fmt.Sprintf("prefix conflicts: %s", strings.Join(conflicts, "; ")),
+			ObservedGeneration: proxy.Generation,
+		}
+	} else {
+		conflictCond = metav1.Condition{
+			Type:               conditionTypePrefixConflict,
+			Status:             metav1.ConditionFalse,
+			Reason:             "NoPrefixConflict",
+			Message:            "no prefix conflicts",
+			ObservedGeneration: proxy.Generation,
+		}
+	}
+
+	currentReconciled := apimeta.FindStatusCondition(proxy.Status.Conditions, conditionTypeReconciled)
+	currentConflict := apimeta.FindStatusCondition(proxy.Status.Conditions, conditionTypePrefixConflict)
+
+	unchanged := proxy.Status.UpstreamCount == len(crdUpstreams) &&
+		proxy.Status.AnnotatedServiceCount == len(svcUpstreams) &&
 		proxy.Status.ObservedGeneration == proxy.Generation &&
-		currentCond != nil &&
-		currentCond.Status == metav1.ConditionTrue &&
-		currentCond.Message == msg {
+		currentReconciled != nil &&
+		currentReconciled.Status == metav1.ConditionTrue &&
+		currentReconciled.Message == reconciledMsg &&
+		currentConflict != nil &&
+		currentConflict.Status == conflictCond.Status &&
+		currentConflict.Message == conflictCond.Message
+
+	if unchanged {
 		slog.Debug("MCPProxy status unchanged, skipping update", "name", proxy.Name)
 		return nil
 	}
 
-	proxy.Status.UpstreamCount = len(upstreams)
+	proxy.Status.UpstreamCount = len(crdUpstreams)
+	proxy.Status.AnnotatedServiceCount = len(svcUpstreams)
 	proxy.Status.ObservedGeneration = proxy.Generation
 
 	apimeta.SetStatusCondition(&proxy.Status.Conditions, metav1.Condition{
 		Type:               conditionTypeReconciled,
 		Status:             metav1.ConditionTrue,
 		Reason:             "Reconciled",
-		Message:            msg,
+		Message:            reconciledMsg,
 		ObservedGeneration: proxy.Generation,
 	})
+	apimeta.SetStatusCondition(&proxy.Status.Conditions, conflictCond)
 
 	if err := r.Status().Update(ctx, proxy); err != nil {
 		return fmt.Errorf("updating MCPProxy status: %w", err)
@@ -538,6 +592,174 @@ func (r *MCPProxyReconciler) setCondition(ctx context.Context, proxy *v1alpha1.M
 	return nil
 }
 
+// listAnnotatedServices returns synthetic MCPUpstream objects built from Services
+// that carry the mcp-anything.ai/enabled=true annotation and are matched by the
+// proxy's serviceDiscovery configuration.
+func (r *MCPProxyReconciler) listAnnotatedServices(ctx context.Context, proxy *v1alpha1.MCPProxy) ([]v1alpha1.MCPUpstream, error) {
+	if proxy.Spec.ServiceDiscovery == nil || !proxy.Spec.ServiceDiscovery.Enabled {
+		return nil, nil
+	}
+
+	namespaces, err := r.serviceDiscoveryNamespaces(ctx, proxy)
+	if err != nil {
+		return nil, fmt.Errorf("resolving service discovery namespaces: %w", err)
+	}
+
+	var synthetic []v1alpha1.MCPUpstream
+	for _, ns := range namespaces {
+		svcList := &corev1.ServiceList{}
+		if err := r.List(ctx, svcList, client.InNamespace(ns)); err != nil {
+			return nil, fmt.Errorf("listing services in namespace %s: %w", ns, err)
+		}
+		for i := range svcList.Items {
+			svc := &svcList.Items[i]
+			if svc.Annotations[AnnotationEnabled] != "true" {
+				continue
+			}
+			if !serviceMatchesProxy(svc, proxy) {
+				continue
+			}
+			up, err := serviceToMCPUpstream(svc)
+			if err != nil {
+				slog.Warn("skipping annotated service",
+					"service", svc.Namespace+"/"+svc.Name, "error", err)
+				continue
+			}
+			synthetic = append(synthetic, *up)
+		}
+	}
+	return synthetic, nil
+}
+
+// serviceDiscoveryNamespaces returns the list of namespaces to scan for annotated Services.
+// It resolves explicit MatchNames and label-selected namespaces, deduplicating results.
+func (r *MCPProxyReconciler) serviceDiscoveryNamespaces(ctx context.Context, proxy *v1alpha1.MCPProxy) ([]string, error) {
+	if proxy.Spec.ServiceDiscovery == nil || proxy.Spec.ServiceDiscovery.NamespaceSelector == nil {
+		// Fall back to the upstream namespace selector.
+		if len(proxy.Spec.NamespaceSelector.MatchNames) > 0 {
+			return proxy.Spec.NamespaceSelector.MatchNames, nil
+		}
+		return []string{proxy.Namespace}, nil
+	}
+
+	sel := proxy.Spec.ServiceDiscovery.NamespaceSelector
+	seen := make(map[string]struct{})
+	var namespaces []string
+
+	add := func(ns string) {
+		if _, ok := seen[ns]; !ok {
+			seen[ns] = struct{}{}
+			namespaces = append(namespaces, ns)
+		}
+	}
+
+	for _, name := range sel.MatchNames {
+		add(name)
+	}
+
+	if len(sel.MatchLabels) > 0 {
+		nsList := &corev1.NamespaceList{}
+		if err := r.List(ctx, nsList, client.MatchingLabels(sel.MatchLabels)); err != nil {
+			return nil, fmt.Errorf("listing namespaces by label: %w", err)
+		}
+		for i := range nsList.Items {
+			add(nsList.Items[i].Name)
+		}
+	}
+
+	if len(namespaces) == 0 {
+		return []string{proxy.Namespace}, nil
+	}
+	return namespaces, nil
+}
+
+// serviceMatchesProxy returns true if the Service should be picked up by the given proxy.
+// A Service matches if it has no mcp-anything.ai/proxy annotation (picked up by any proxy),
+// or if the annotation is a bare name matching proxy.Name in the same namespace,
+// or if the annotation is "namespace/name" matching the proxy fully.
+func serviceMatchesProxy(svc *corev1.Service, proxy *v1alpha1.MCPProxy) bool {
+	proxyAnnotation, hasProxyAnnotation := svc.Annotations[AnnotationProxy]
+	if !hasProxyAnnotation {
+		return true
+	}
+	if ns, name, ok := strings.Cut(proxyAnnotation, "/"); ok {
+		return ns == proxy.Namespace && name == proxy.Name
+	}
+	return svc.Namespace == proxy.Namespace && proxyAnnotation == proxy.Name
+}
+
+// detectPrefixConflicts returns a list of human-readable conflict descriptions for any
+// tool prefix that is claimed by more than one upstream (across CRD and annotated sources).
+func detectPrefixConflicts(crdUpstreams, svcUpstreams []v1alpha1.MCPUpstream) []string {
+	type sourceInfo struct {
+		id     string
+		source string
+	}
+	seen := make(map[string]sourceInfo)
+	var conflicts []string
+
+	record := func(up *v1alpha1.MCPUpstream, source string) {
+		if up.Spec.ToolPrefix == "" {
+			return
+		}
+		key := up.Spec.ToolPrefix
+		id := up.Namespace + "/" + up.Name
+		if existing, ok := seen[key]; ok {
+			conflicts = append(conflicts, fmt.Sprintf("prefix %q: %s (%s) vs %s (%s)",
+				key, existing.id, existing.source, id, source))
+		} else {
+			seen[key] = sourceInfo{id: id, source: source}
+		}
+	}
+
+	for i := range crdUpstreams {
+		record(&crdUpstreams[i], "crd")
+	}
+	for i := range svcUpstreams {
+		record(&svcUpstreams[i], "service")
+	}
+	return conflicts
+}
+
+// proxiesForAnnotatedService returns reconcile.Requests for all MCPProxy instances that
+// should discover the given annotated Service.
+func (r *MCPProxyReconciler) proxiesForAnnotatedService(ctx context.Context, svc *corev1.Service) []reconcile.Request {
+	proxyList := &v1alpha1.MCPProxyList{}
+	if err := r.List(ctx, proxyList); err != nil {
+		slog.Error("listing MCPProxy for service trigger", "error", err)
+		return nil
+	}
+
+	var requests []reconcile.Request
+	for i := range proxyList.Items {
+		proxy := &proxyList.Items[i]
+		if proxy.Spec.ServiceDiscovery == nil || !proxy.Spec.ServiceDiscovery.Enabled {
+			continue
+		}
+		namespaces, err := r.serviceDiscoveryNamespaces(ctx, proxy)
+		if err != nil {
+			slog.Warn("resolving service discovery namespaces", "proxy", proxy.Namespace+"/"+proxy.Name, "error", err)
+			continue
+		}
+		for _, ns := range namespaces {
+			if ns != svc.Namespace {
+				continue
+			}
+			if !serviceMatchesProxy(svc, proxy) {
+				break
+			}
+			requests = append(requests, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      proxy.Name,
+					Namespace: proxy.Namespace,
+				},
+			})
+			break
+		}
+	}
+	return requests
+}
+
 // SetupWithManager registers the reconciler with a controller-runtime Manager.
 func (r *MCPProxyReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// When an MCPUpstream changes, enqueue its owning proxies.
@@ -549,6 +771,18 @@ func (r *MCPProxyReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		return r.proxiesForUpstream(ctx, upstream)
 	})
 
+	// When an annotated Service changes, enqueue the proxies that should discover it.
+	mapServiceToProxy := handler.MapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
+		svc, ok := obj.(*corev1.Service)
+		if !ok {
+			return nil
+		}
+		if svc.Annotations[AnnotationEnabled] != "true" {
+			return nil
+		}
+		return r.proxiesForAnnotatedService(ctx, svc)
+	})
+
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&v1alpha1.MCPProxy{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Owns(&appsv1.Deployment{}).
@@ -557,6 +791,9 @@ func (r *MCPProxyReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&v1alpha1.MCPUpstream{},
 			handler.EnqueueRequestsFromMapFunc(mapUpstreamToProxy),
 			builder.WithPredicates(predicate.GenerationChangedPredicate{}),
+		).
+		Watches(&corev1.Service{},
+			handler.EnqueueRequestsFromMapFunc(mapServiceToProxy),
 		).
 		Complete(r)
 }

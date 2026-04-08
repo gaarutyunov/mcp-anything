@@ -63,6 +63,25 @@ spec:
                       type: array
                       items:
                         type: string
+                serviceDiscovery:
+                  type: object
+                  description: ServiceDiscovery configures annotation-based upstream discovery from Services.
+                  properties:
+                    enabled:
+                      type: boolean
+                      description: Enabled enables scanning for annotated Services.
+                    namespaceSelector:
+                      type: object
+                      description: NamespaceSelector restricts which namespaces are scanned for annotated Services.
+                      properties:
+                        matchNames:
+                          type: array
+                          items:
+                            type: string
+                        matchLabels:
+                          type: object
+                          additionalProperties:
+                            type: string
                 replicas:
                   type: integer
                   format: int32
@@ -161,6 +180,8 @@ spec:
                       type:
                         type: string
                 upstreamCount:
+                  type: integer
+                annotatedServiceCount:
                   type: integer
                 toolCount:
                   type: integer

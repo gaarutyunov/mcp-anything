@@ -16,6 +16,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -582,6 +583,296 @@ func TestOperatorCRDValidation(t *testing.T) {
 }
 
 // --- helpers ---
+
+// TestAnnotationBasedServiceDiscovery verifies that the operator discovers Services annotated
+// with mcp-anything.ai/enabled=true and merges them with CRD-defined MCPUpstream resources
+// into a single proxy config.
+func TestAnnotationBasedServiceDiscovery(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping E2E test in short mode")
+	}
+	if globalK3s == nil {
+		t.Skip("shared k3s cluster unavailable")
+	}
+
+	// ── Arrange ──────────────────────────────────────────────────────────────
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	scheme := buildOperatorScheme()
+
+	t.Log("arrange: building k8s client")
+	restCfg, err := clientcmd.RESTConfigFromKubeConfig(globalK3s.kubeConfigYAML)
+	if err != nil {
+		t.Fatalf("building REST config: %v", err)
+	}
+	k8sClient, err := client.New(restCfg, client.Options{Scheme: scheme})
+	if err != nil {
+		t.Fatalf("creating k8s client: %v", err)
+	}
+
+	t.Log("arrange: starting operator")
+	stopOperator := startOperator(ctx, t, globalK3s.kubeConfigYAML, scheme)
+	defer stopOperator()
+
+	t.Log("arrange: creating namespace annotation-e2e")
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "annotation-e2e"}}
+	if err := k8sClient.Create(ctx, ns); err != nil && !apierrors.IsAlreadyExists(err) {
+		t.Fatalf("creating namespace: %v", err)
+	}
+
+	// ── Act ──────────────────────────────────────────────────────────────────
+
+	t.Log("act: creating MCPProxy with serviceDiscovery.enabled=true")
+	proxy := &v1alpha1.MCPProxy{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "annot-proxy",
+			Namespace: "annotation-e2e",
+		},
+		Spec: v1alpha1.MCPProxySpec{
+			ServiceDiscovery: &v1alpha1.ServiceDiscoverySpec{
+				Enabled: true,
+				NamespaceSelector: &v1alpha1.ServiceDiscoveryNamespaceSelector{
+					MatchNames: []string{"annotation-e2e"},
+				},
+			},
+			Server: v1alpha1.ProxyServerSpec{Port: 8080},
+			Naming: v1alpha1.ProxyNamingSpec{Separator: "__"},
+		},
+	}
+	if err := k8sClient.Create(ctx, proxy); err != nil {
+		t.Fatalf("creating MCPProxy: %v", err)
+	}
+
+	t.Log("act: creating annotated Service petstore-api")
+	svc := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "petstore-api",
+			Namespace: "annotation-e2e",
+			Annotations: map[string]string{
+				"mcp-anything.ai/enabled":      "true",
+				"mcp-anything.ai/tool-prefix":  "pets",
+				"mcp-anything.ai/openapi-url":  "http://petstore.example.com/openapi.json",
+				"mcp-anything.ai/proxy":        "annot-proxy",
+			},
+		},
+		Spec: corev1.ServiceSpec{
+			Ports: []corev1.ServicePort{
+				{Port: 8080, Protocol: corev1.ProtocolTCP},
+			},
+			Selector: map[string]string{"app": "petstore-api"},
+		},
+	}
+	if err := k8sClient.Create(ctx, svc); err != nil {
+		t.Fatalf("creating Service: %v", err)
+	}
+
+	// ── Assert ────────────────────────────────────────────────────────────────
+
+	proxyKey := types.NamespacedName{Name: "annot-proxy", Namespace: "annotation-e2e"}
+
+	t.Run("ConfigMapContainsServiceURL", func(t *testing.T) {
+		cm := &corev1.ConfigMap{}
+		if err := pollWithProgress(ctx, t, "ConfigMap annot-proxy-config", reconcileTimeout, pollInterval, func() error {
+			return k8sClient.Get(ctx, types.NamespacedName{
+				Name:      "annot-proxy-config",
+				Namespace: "annotation-e2e",
+			}, cm)
+		}); err != nil {
+			t.Fatalf("config ConfigMap not created: %v", err)
+		}
+
+		cfgData := cm.Data["config.yaml"]
+		if !strings.Contains(cfgData, "petstore-api.annotation-e2e.svc.cluster.local:8080") {
+			t.Errorf("config must contain the service base URL; got:\n%s", cfgData)
+		}
+		if !strings.Contains(cfgData, "http://petstore.example.com/openapi.json") {
+			t.Errorf("config must contain the openapi-url annotation value; got:\n%s", cfgData)
+		}
+		if !strings.Contains(cfgData, "pets") {
+			t.Errorf("config must contain the tool prefix 'pets'; got:\n%s", cfgData)
+		}
+	})
+
+	t.Run("StatusReportsAnnotatedServiceCount", func(t *testing.T) {
+		if err := pollWithProgress(ctx, t, "MCPProxy status annotatedServiceCount=1", reconcileTimeout, pollInterval, func() error {
+			p := &v1alpha1.MCPProxy{}
+			if err := k8sClient.Get(ctx, proxyKey, p); err != nil {
+				return err
+			}
+			if p.Status.AnnotatedServiceCount != 1 {
+				return fmt.Errorf("expected annotatedServiceCount=1, got %d", p.Status.AnnotatedServiceCount)
+			}
+			return nil
+		}); err != nil {
+			t.Fatalf("MCPProxy status not updated: %v", err)
+		}
+	})
+
+	t.Run("PrefixConflictDetected", func(t *testing.T) {
+		// Create a CRD MCPUpstream with the same tool prefix as the annotated Service.
+		conflictUpstream := &v1alpha1.MCPUpstream{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "conflict-upstream",
+				Namespace: "annotation-e2e",
+				Labels:    map[string]string{"mcp-anything.ai/proxy": "annot-proxy"},
+			},
+			Spec: v1alpha1.MCPUpstreamSpec{
+				ToolPrefix: "pets", // same as the annotated Service
+				BaseURL:    "http://conflict-api.annotation-e2e.svc.cluster.local:9090",
+				OpenAPI: v1alpha1.MCPUpstreamOpenAPISpec{
+					URL: "http://conflict-api.example.com/openapi.json",
+				},
+			},
+		}
+
+		// MCPProxy needs upstreamSelector to pick up this CRD upstream.
+		p := &v1alpha1.MCPProxy{}
+		if err := k8sClient.Get(ctx, proxyKey, p); err != nil {
+			t.Fatalf("fetching proxy: %v", err)
+		}
+		p.Spec.UpstreamSelector = metav1.LabelSelector{
+			MatchLabels: map[string]string{"mcp-anything.ai/proxy": "annot-proxy"},
+		}
+		if err := k8sClient.Update(ctx, p); err != nil {
+			t.Fatalf("updating proxy upstream selector: %v", err)
+		}
+
+		if err := k8sClient.Create(ctx, conflictUpstream); err != nil {
+			t.Fatalf("creating conflicting MCPUpstream: %v", err)
+		}
+
+		if err := pollWithProgress(ctx, t, "PrefixConflict condition", reconcileTimeout, pollInterval, func() error {
+			p := &v1alpha1.MCPProxy{}
+			if err := k8sClient.Get(ctx, proxyKey, p); err != nil {
+				return err
+			}
+			cond := apimeta.FindStatusCondition(p.Status.Conditions, "PrefixConflict")
+			if cond == nil {
+				return fmt.Errorf("PrefixConflict condition not set")
+			}
+			if cond.Status != metav1.ConditionTrue {
+				return fmt.Errorf("expected PrefixConflict condition=True, got %s (msg: %s)", cond.Status, cond.Message)
+			}
+			return nil
+		}); err != nil {
+			t.Fatalf("prefix conflict not detected: %v", err)
+		}
+	})
+}
+
+// TestAnnotationBasedCrossNamespaceDiscovery verifies that the operator can discover annotated
+// Services in a different namespace than the MCPProxy.
+func TestAnnotationBasedCrossNamespaceDiscovery(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping E2E test in short mode")
+	}
+	if globalK3s == nil {
+		t.Skip("shared k3s cluster unavailable")
+	}
+
+	// ── Arrange ──────────────────────────────────────────────────────────────
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	scheme := buildOperatorScheme()
+
+	t.Log("arrange: building k8s client")
+	restCfg, err := clientcmd.RESTConfigFromKubeConfig(globalK3s.kubeConfigYAML)
+	if err != nil {
+		t.Fatalf("building REST config: %v", err)
+	}
+	k8sClient, err := client.New(restCfg, client.Options{Scheme: scheme})
+	if err != nil {
+		t.Fatalf("creating k8s client: %v", err)
+	}
+
+	t.Log("arrange: starting operator")
+	stopOperator := startOperator(ctx, t, globalK3s.kubeConfigYAML, scheme)
+	defer stopOperator()
+
+	for _, nsName := range []string{"cross-proxy-ns", "cross-svc-ns"} {
+		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: nsName}}
+		if err := k8sClient.Create(ctx, ns); err != nil && !apierrors.IsAlreadyExists(err) {
+			t.Fatalf("creating namespace %s: %v", nsName, err)
+		}
+	}
+
+	// ── Act ──────────────────────────────────────────────────────────────────
+
+	t.Log("act: creating MCPProxy in cross-proxy-ns watching cross-svc-ns")
+	proxy := &v1alpha1.MCPProxy{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "cross-proxy",
+			Namespace: "cross-proxy-ns",
+		},
+		Spec: v1alpha1.MCPProxySpec{
+			ServiceDiscovery: &v1alpha1.ServiceDiscoverySpec{
+				Enabled: true,
+				NamespaceSelector: &v1alpha1.ServiceDiscoveryNamespaceSelector{
+					MatchNames: []string{"cross-svc-ns"},
+				},
+			},
+			Server: v1alpha1.ProxyServerSpec{Port: 8080},
+			Naming: v1alpha1.ProxyNamingSpec{Separator: "__"},
+		},
+	}
+	if err := k8sClient.Create(ctx, proxy); err != nil {
+		t.Fatalf("creating MCPProxy: %v", err)
+	}
+
+	t.Log("act: creating annotated Service in cross-svc-ns")
+	svc := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "remote-api",
+			Namespace: "cross-svc-ns",
+			Annotations: map[string]string{
+				"mcp-anything.ai/enabled":     "true",
+				"mcp-anything.ai/tool-prefix": "remote",
+				"mcp-anything.ai/openapi-url": "http://remote-api.example.com/openapi.json",
+			},
+		},
+		Spec: corev1.ServiceSpec{
+			Ports: []corev1.ServicePort{
+				{Port: 9090, Protocol: corev1.ProtocolTCP},
+			},
+			Selector: map[string]string{"app": "remote-api"},
+		},
+	}
+	if err := k8sClient.Create(ctx, svc); err != nil {
+		t.Fatalf("creating Service: %v", err)
+	}
+
+	// ── Assert ────────────────────────────────────────────────────────────────
+
+	t.Log("assert: MCPProxy discovers service in cross-svc-ns")
+	if err := pollWithProgress(ctx, t, "MCPProxy status annotatedServiceCount=1", reconcileTimeout, pollInterval, func() error {
+		p := &v1alpha1.MCPProxy{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: "cross-proxy", Namespace: "cross-proxy-ns"}, p); err != nil {
+			return err
+		}
+		if p.Status.AnnotatedServiceCount != 1 {
+			return fmt.Errorf("expected annotatedServiceCount=1, got %d", p.Status.AnnotatedServiceCount)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("cross-namespace discovery failed: %v", err)
+	}
+
+	t.Log("assert: config contains remote service URL")
+	cm := &corev1.ConfigMap{}
+	if err := k8sClient.Get(ctx, types.NamespacedName{
+		Name:      "cross-proxy-config",
+		Namespace: "cross-proxy-ns",
+	}, cm); err != nil {
+		t.Fatalf("fetching config ConfigMap: %v", err)
+	}
+	if !strings.Contains(cm.Data["config.yaml"], "remote-api.cross-svc-ns.svc.cluster.local:9090") {
+		t.Errorf("config must contain cross-namespace service URL; got:\n%s", cm.Data["config.yaml"])
+	}
+}
 
 // newTestUpstream creates an MCPUpstream fixture with an autoDiscover OpenAPI source.
 func newTestUpstream(name, namespace, proxyLabel, baseURL string) *v1alpha1.MCPUpstream {

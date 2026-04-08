@@ -8,7 +8,7 @@ import (
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"gopkg.in/yaml.v3"
 
-	"github.com/gaarutyunov/mcp-anything/internal/config"
+	"github.com/gaarutyunov/mcp-anything/pkg/config"
 )
 
 // ParamInfo holds metadata about a single OpenAPI parameter used for HTTP routing.

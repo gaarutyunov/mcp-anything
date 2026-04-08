@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gaarutyunov/mcp-anything/internal/config"
+	"github.com/gaarutyunov/mcp-anything/pkg/config"
 )
 
 var defaultRules = config.SlugRulesConfig{

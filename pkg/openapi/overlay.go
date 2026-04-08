@@ -11,7 +11,7 @@ import (
 	speakovl "github.com/speakeasy-api/openapi-overlay/pkg/overlay"
 	"gopkg.in/yaml.v3"
 
-	"github.com/gaarutyunov/mcp-anything/internal/config"
+	"github.com/gaarutyunov/mcp-anything/pkg/config"
 )
 
 // ApplyOverlay loads an overlay from the given config and applies it to the spec bytes.

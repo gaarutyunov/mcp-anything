@@ -10,7 +10,7 @@ import (
 
 	"github.com/getkin/kin-openapi/openapi3"
 
-	"github.com/gaarutyunov/mcp-anything/internal/config"
+	"github.com/gaarutyunov/mcp-anything/pkg/config"
 )
 
 // PrefixedTool holds the naming metadata for a generated tool, used for conflict detection.

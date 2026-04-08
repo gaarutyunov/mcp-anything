@@ -3,7 +3,17 @@
 // define configurations programmatically.
 package config
 
-import "time"
+import (
+	"context"
+	"time"
+)
+
+// PoolAcquirer is the minimal interface for a bounded script runtime pool.
+// Implemented by *runtime.Pool. Used by script-based outbound auth strategies
+// to bound the number of concurrent runtime instances.
+type PoolAcquirer interface {
+	Acquire(ctx context.Context) (release func(), err error)
+}
 
 // ProxyConfig is the top-level configuration struct.
 type ProxyConfig struct {
@@ -257,6 +267,10 @@ type OutboundAuthConfig struct {
 	// Upstream is set programmatically (not from config file) to the owning upstream's name.
 	// Used by the lua and js_script strategies to pass the upstream name to scripts.
 	Upstream string `koanf:"-"`
+	// JSAuthPool and LuaAuthPool are set programmatically for script-based strategies.
+	// Not loaded from the config file. Nil is valid when no script strategy is configured.
+	JSAuthPool  PoolAcquirer `koanf:"-"`
+	LuaAuthPool PoolAcquirer `koanf:"-"`
 }
 
 // LuaOutboundConfig configures outbound credential acquisition via a Lua script.

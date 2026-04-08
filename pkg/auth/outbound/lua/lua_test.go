@@ -1,4 +1,4 @@
-package outbound
+package lua
 
 import (
 	"context"
@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gaarutyunov/mcp-anything/internal/config"
-	"github.com/gaarutyunov/mcp-anything/internal/runtime"
+	"github.com/gaarutyunov/mcp-anything/pkg/config"
+	"github.com/gaarutyunov/mcp-anything/pkg/runtime"
 )
 
-func writeLuaOutboundScript(t *testing.T, content string) string {
+func writeLuaScript(t *testing.T, content string) string {
 	t.Helper()
 	f, err := os.CreateTemp(t.TempDir(), "outbound_*.lua")
 	if err != nil {
@@ -24,23 +24,23 @@ func writeLuaOutboundScript(t *testing.T, content string) string {
 	return f.Name()
 }
 
-func newOutboundProvider(t *testing.T, scriptPath string, timeout time.Duration) *LuaProvider {
+func newTestProvider(t *testing.T, scriptPath string, timeout time.Duration) *Provider {
 	t.Helper()
 	pool := runtime.NewPool(runtime.DefaultMaxAuthVMs)
-	p, err := NewLuaProvider("test-upstream", config.LuaOutboundConfig{ScriptPath: scriptPath, Timeout: timeout}, pool)
+	p, err := NewProvider("test-upstream", config.LuaOutboundConfig{ScriptPath: scriptPath, Timeout: timeout}, pool)
 	if err != nil {
-		t.Fatalf("NewLuaProvider: %v", err)
+		t.Fatalf("NewProvider: %v", err)
 	}
 	return p
 }
 
 func TestLuaProviderTokenCached(t *testing.T) {
 	futureExpiry := time.Now().Add(10 * time.Second).Unix()
-	path := writeLuaOutboundScript(t, `
+	path := writeLuaScript(t, `
 local upstream, cached_token, cached_expiry = ...
 return "test-token", `+strconv.FormatInt(futureExpiry, 10)+`, {}, ""
 `)
-	p := newOutboundProvider(t, path, 500*time.Millisecond)
+	p := newTestProvider(t, path, 500*time.Millisecond)
 
 	tok1, err := p.Token(context.Background())
 	if err != nil {
@@ -71,11 +71,11 @@ func TestLuaProviderNoCacheRefreshesOnNextRequest(t *testing.T) {
 	// expiry_unix == 0 from the script means short-lived caching (1 second) to prevent
 	// double-execution within a single RoundTrip() (RawHeaders + Token call pair).
 	// After expiry, the script re-runs on the next request.
-	path := writeLuaOutboundScript(t, `
+	path := writeLuaScript(t, `
 local upstream, cached_token, cached_expiry = ...
 return "dynamic-token", 0, {}, ""
 `)
-	p := newOutboundProvider(t, path, 500*time.Millisecond)
+	p := newTestProvider(t, path, 500*time.Millisecond)
 
 	tok, err := p.Token(context.Background())
 	if err != nil {
@@ -103,11 +103,11 @@ return "dynamic-token", 0, {}, ""
 }
 
 func TestLuaProviderRawHeaders(t *testing.T) {
-	path := writeLuaOutboundScript(t, `
+	path := writeLuaScript(t, `
 local upstream, cached_token, cached_expiry = ...
 return "", 0, {["X-API-Key"] = "key123", ["X-Tenant"] = "acme"}, ""
 `)
-	p := newOutboundProvider(t, path, 500*time.Millisecond)
+	p := newTestProvider(t, path, 500*time.Millisecond)
 
 	// Token should be empty when raw headers are present.
 	tok, err := p.Token(context.Background())
@@ -139,12 +139,12 @@ return "", 0, {["X-API-Key"] = "key123", ["X-Tenant"] = "acme"}, ""
 
 func TestLuaProviderTimeoutEnforced(t *testing.T) {
 	// Script loops forever; context timeout should kill it.
-	path := writeLuaOutboundScript(t, `
+	path := writeLuaScript(t, `
 local upstream, cached_token, cached_expiry = ...
 while true do end
 return "token", 0, {}, ""
 `)
-	p := newOutboundProvider(t, path, 10*time.Millisecond)
+	p := newTestProvider(t, path, 10*time.Millisecond)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()

@@ -20,6 +20,7 @@ import (
 	"github.com/gaarutyunov/mcp-anything/internal/server"
 	"github.com/gaarutyunov/mcp-anything/internal/telemetry"
 	upstreampkg "github.com/gaarutyunov/mcp-anything/internal/upstream"
+	_ "github.com/gaarutyunov/mcp-anything/pkg/auth/outbound/all"
 )
 
 // Set by goreleaser ldflags.

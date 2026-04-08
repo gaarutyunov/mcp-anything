@@ -1,4 +1,6 @@
-package outbound
+// Package lua registers the "lua" outbound auth strategy.
+// Import this package (blank import) to make the strategy available via outbound.New().
+package lua
 
 import (
 	"context"
@@ -11,56 +13,65 @@ import (
 	lua "github.com/yuin/gopher-lua"
 	"github.com/yuin/gopher-lua/parse"
 
-	"github.com/gaarutyunov/mcp-anything/internal/config"
-	"github.com/gaarutyunov/mcp-anything/internal/runtime"
+	"github.com/gaarutyunov/mcp-anything/pkg/auth/outbound"
+	"github.com/gaarutyunov/mcp-anything/pkg/config"
 )
 
-const defaultLuaOutboundTimeout = 500 * time.Millisecond
+const defaultTimeout = 500 * time.Millisecond
 
 // noCacheExpiry is a short-lived expiry (1 second) used when the Lua script returns
 // expiry=0. This prevents double-execution within the same RoundTrip() call (e.g.,
 // RawHeaders() followed by Token()), while still refreshing credentials on subsequent requests.
 const noCacheExpiry = int64(1)
 
-// LuaProvider implements TokenProvider using a Lua script.
+func init() {
+	outbound.Register("lua", func(_ context.Context, cfg *config.OutboundAuthConfig) (outbound.TokenProvider, error) {
+		if cfg.LuaAuthPool == nil {
+			return nil, fmt.Errorf("lua outbound auth requires runtime pools; set OutboundAuthConfig.LuaAuthPool")
+		}
+		return NewProvider(cfg.Upstream, cfg.Lua, cfg.LuaAuthPool)
+	})
+}
+
+// Provider implements TokenProvider using a Lua script.
 // The script receives (upstream, cached_token, cached_expiry) as arguments and must return:
 // token (string), expiry_unix (int), raw_headers (table), error_msg (string).
 // The shared pool bounds the maximum number of concurrent Lua runtimes to prevent OOM.
-type LuaProvider struct {
+type Provider struct {
 	upstreamName string
 	proto        *lua.FunctionProto
-	pool         *runtime.Pool
+	pool         config.PoolAcquirer
 	timeout      time.Duration
-	cache        luaProviderCache
+	cache        providerCache
 }
 
-type luaProviderCache struct {
+type providerCache struct {
 	mu         sync.Mutex
 	token      string
 	expiry     int64 // unix timestamp; 0 = fetch on next call; noCacheExpiry = short-lived
 	rawHeaders map[string]string
 }
 
-// NewLuaProvider creates a LuaProvider by reading and pre-compiling the Lua script.
+// NewProvider creates a Provider by reading and pre-compiling the Lua script.
 // pool bounds the number of concurrent Lua runtimes; it is shared with the inbound
 // Lua auth validator to enforce a single global limit for all auth scripts.
-func NewLuaProvider(upstreamName string, cfg config.LuaOutboundConfig, pool *runtime.Pool) (*LuaProvider, error) {
+func NewProvider(upstreamName string, cfg config.LuaOutboundConfig, pool config.PoolAcquirer) (*Provider, error) {
 	src, err := os.ReadFile(cfg.ScriptPath)
 	if err != nil {
 		return nil, fmt.Errorf("reading lua outbound script %q: %w", cfg.ScriptPath, err)
 	}
 
-	proto, err := compileLuaOutboundSource(string(src), cfg.ScriptPath)
+	proto, err := compileSource(string(src), cfg.ScriptPath)
 	if err != nil {
 		return nil, fmt.Errorf("compiling lua outbound script %q: %w", cfg.ScriptPath, err)
 	}
 
 	timeout := cfg.Timeout
 	if timeout <= 0 {
-		timeout = defaultLuaOutboundTimeout
+		timeout = defaultTimeout
 	}
 
-	return &LuaProvider{
+	return &Provider{
 		upstreamName: upstreamName,
 		proto:        proto,
 		timeout:      timeout,
@@ -70,7 +81,7 @@ func NewLuaProvider(upstreamName string, cfg config.LuaOutboundConfig, pool *run
 
 // Token returns the current token, invoking the Lua script if the cache has expired.
 // Returns empty string if the script provides raw headers instead.
-func (p *LuaProvider) Token(ctx context.Context) (string, error) {
+func (p *Provider) Token(ctx context.Context) (string, error) {
 	if err := p.ensureToken(ctx); err != nil {
 		return "", err
 	}
@@ -83,7 +94,7 @@ func (p *LuaProvider) Token(ctx context.Context) (string, error) {
 }
 
 // RawHeaders returns the raw headers map, invoking the Lua script if the cache has expired.
-func (p *LuaProvider) RawHeaders(ctx context.Context) (map[string]string, error) {
+func (p *Provider) RawHeaders(ctx context.Context) (map[string]string, error) {
 	if err := p.ensureToken(ctx); err != nil {
 		return nil, err
 	}
@@ -101,7 +112,7 @@ func (p *LuaProvider) RawHeaders(ctx context.Context) (map[string]string, error)
 }
 
 // ensureToken refreshes the cached credentials if expired or absent.
-func (p *LuaProvider) ensureToken(ctx context.Context) error {
+func (p *Provider) ensureToken(ctx context.Context) error {
 	p.cache.mu.Lock()
 	defer p.cache.mu.Unlock()
 
@@ -129,14 +140,14 @@ func (p *LuaProvider) ensureToken(ctx context.Context) error {
 }
 
 // callLua invokes the Lua script and returns the four result values.
-func (p *LuaProvider) callLua(ctx context.Context, cachedToken string, cachedExpiry int64) (token string, expiry int64, rawHeaders map[string]string, err error) {
+func (p *Provider) callLua(ctx context.Context, cachedToken string, cachedExpiry int64) (token string, expiry int64, rawHeaders map[string]string, err error) {
 	release, acquireErr := p.pool.Acquire(ctx)
 	if acquireErr != nil {
 		return "", 0, nil, fmt.Errorf("lua outbound auth: %w", acquireErr)
 	}
 	defer release()
 
-	L := newOutboundSandboxedVM()
+	L := newSandboxedVM()
 	defer L.Close()
 
 	tctx, cancel := context.WithTimeout(ctx, p.timeout)
@@ -163,7 +174,7 @@ func (p *LuaProvider) callLua(ctx context.Context, cachedToken string, cachedExp
 	if tp := L.Get(-1).Type(); tp != lua.LTTable && tp != lua.LTNil {
 		return "", 0, nil, fmt.Errorf("lua get_upstream_token: raw_headers (return 3) must be table or nil, got %s", tp)
 	}
-	rawHeaders = luaOutboundTableToMap(L.ToTable(-1))
+	rawHeaders = tableToMap(L.ToTable(-1))
 	L.Pop(1)
 
 	if tp := L.Get(-1).Type(); tp != lua.LTNumber {
@@ -184,10 +195,10 @@ func (p *LuaProvider) callLua(ctx context.Context, cachedToken string, cachedExp
 	return token, expiry, rawHeaders, nil
 }
 
-// newOutboundSandboxedVM creates a new sandboxed LState for outbound use.
+// newSandboxedVM creates a new sandboxed LState for outbound use.
 // dofile and loadfile are explicitly removed from the base library to prevent
 // scripts from reading local files via the base library's file-loading functions.
-func newOutboundSandboxedVM() *lua.LState {
+func newSandboxedVM() *lua.LState {
 	L := lua.NewState(lua.Options{SkipOpenLibs: true, CallStackSize: 64})
 	lua.OpenBase(L)
 	lua.OpenTable(L)
@@ -199,8 +210,8 @@ func newOutboundSandboxedVM() *lua.LState {
 	return L
 }
 
-// compileLuaOutboundSource parses and compiles a Lua source string to bytecode.
-func compileLuaOutboundSource(src, name string) (*lua.FunctionProto, error) {
+// compileSource parses and compiles a Lua source string to bytecode.
+func compileSource(src, name string) (*lua.FunctionProto, error) {
 	chunk, err := parse.Parse(strings.NewReader(src), name)
 	if err != nil {
 		return nil, fmt.Errorf("parsing lua source %q: %w", name, err)
@@ -208,8 +219,8 @@ func compileLuaOutboundSource(src, name string) (*lua.FunctionProto, error) {
 	return lua.Compile(chunk, name)
 }
 
-// luaOutboundTableToMap converts a *lua.LTable to map[string]string.
-func luaOutboundTableToMap(tbl *lua.LTable) map[string]string {
+// tableToMap converts a *lua.LTable to map[string]string.
+func tableToMap(tbl *lua.LTable) map[string]string {
 	m := make(map[string]string)
 	if tbl == nil {
 		return m

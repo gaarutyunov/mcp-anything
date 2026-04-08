@@ -192,7 +192,9 @@ func (r *Refresher) refresh(ctx context.Context) error {
 
 	outboundCfg := r.cfg.OutboundAuth
 	outboundCfg.Upstream = r.cfg.Name
-	provider, err := outboundauth.NewRegistry(r.pools).New(ctx, &outboundCfg)
+	outboundCfg.JSAuthPool = r.pools.JSAuth
+	outboundCfg.LuaAuthPool = r.pools.LuaAuth
+	provider, err := outboundauth.New(ctx, &outboundCfg)
 	if err != nil {
 		return fmt.Errorf("building outbound auth: %w", err)
 	}
@@ -342,7 +344,9 @@ func (r *Refresher) buildSnapshot(ctx context.Context, prev *Snapshot) (*Snapsho
 
 	outboundCfg := r.cfg.OutboundAuth
 	outboundCfg.Upstream = r.cfg.Name
-	provider, err := outboundauth.NewRegistry(r.pools).New(ctx, &outboundCfg)
+	outboundCfg.JSAuthPool = r.pools.JSAuth
+	outboundCfg.LuaAuthPool = r.pools.LuaAuth
+	provider, err := outboundauth.New(ctx, &outboundCfg)
 	if err != nil {
 		return nil, fmt.Errorf("building outbound auth: %w", err)
 	}

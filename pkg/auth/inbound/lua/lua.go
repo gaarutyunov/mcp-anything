@@ -1,4 +1,6 @@
-package inbound
+// Package lua registers the "lua" inbound auth strategy.
+// Import this package (blank import) to make the strategy available via inbound.New().
+package lua
 
 import (
 	"context"
@@ -10,27 +12,37 @@ import (
 	lua "github.com/yuin/gopher-lua"
 	"github.com/yuin/gopher-lua/parse"
 
-	"github.com/gaarutyunov/mcp-anything/internal/config"
-	"github.com/gaarutyunov/mcp-anything/internal/runtime"
+	"github.com/gaarutyunov/mcp-anything/pkg/auth/inbound"
+	"github.com/gaarutyunov/mcp-anything/pkg/config"
 )
 
-const defaultLuaInboundTimeout = 500 * time.Millisecond
+const defaultTimeout = 500 * time.Millisecond
 
-// LuaValidator implements TokenValidator using a sandboxed gopher-lua VM.
+func init() {
+	inbound.Register("lua", func(_ context.Context, cfg *config.InboundAuthConfig) (inbound.TokenValidator, string, error) {
+		if cfg.LuaAuthPool == nil {
+			return nil, "", fmt.Errorf("lua inbound auth requires runtime pools; set InboundAuthConfig.LuaAuthPool")
+		}
+		v, err := NewValidator(cfg.Lua, cfg.LuaAuthPool)
+		return v, "", err
+	})
+}
+
+// Validator implements TokenValidator using a sandboxed gopher-lua VM.
 // The Lua script receives the token as its first argument (via ...) and must return:
 // allowed (bool), status (int), extra_headers (table), error_msg (string).
 // The shared pool bounds the maximum number of concurrent Lua runtimes to prevent OOM.
-type LuaValidator struct {
+type Validator struct {
 	proto   *lua.FunctionProto
-	pool    *runtime.Pool
+	pool    config.PoolAcquirer
 	timeout time.Duration
 }
 
-// NewLuaValidator creates a LuaValidator by reading and pre-compiling the Lua
+// NewValidator creates a Validator by reading and pre-compiling the Lua
 // script at cfg.ScriptPath to bytecode. The bytecode is reused across calls.
 // pool bounds the number of concurrent Lua runtimes; it is shared with the outbound
 // Lua auth provider to enforce a single global limit for all auth scripts.
-func NewLuaValidator(cfg config.LuaAuthConfig, pool *runtime.Pool) (*LuaValidator, error) {
+func NewValidator(cfg config.LuaAuthConfig, pool config.PoolAcquirer) (*Validator, error) {
 	src, err := os.ReadFile(cfg.ScriptPath)
 	if err != nil {
 		return nil, fmt.Errorf("reading lua auth script %q: %w", cfg.ScriptPath, err)
@@ -43,10 +55,10 @@ func NewLuaValidator(cfg config.LuaAuthConfig, pool *runtime.Pool) (*LuaValidato
 
 	timeout := cfg.Timeout
 	if timeout <= 0 {
-		timeout = defaultLuaInboundTimeout
+		timeout = defaultTimeout
 	}
 
-	return &LuaValidator{
+	return &Validator{
 		proto:   proto,
 		timeout: timeout,
 		pool:    pool,
@@ -54,7 +66,7 @@ func NewLuaValidator(cfg config.LuaAuthConfig, pool *runtime.Pool) (*LuaValidato
 }
 
 // ValidateToken calls the Lua script with the token and returns identity info on success.
-func (v *LuaValidator) ValidateToken(ctx context.Context, token string) (*TokenInfo, error) {
+func (v *Validator) ValidateToken(ctx context.Context, token string) (*inbound.TokenInfo, error) {
 	release, err := v.pool.Acquire(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("lua auth: %w", err)
@@ -89,7 +101,7 @@ func (v *LuaValidator) ValidateToken(ctx context.Context, token string) (*TokenI
 		return nil, fmt.Errorf("lua auth denied (status %d): %s", status, errMsg)
 	}
 
-	info := &TokenInfo{Subject: "lua-authenticated", Extra: make(map[string]any)}
+	info := &inbound.TokenInfo{Subject: "lua-authenticated", Extra: make(map[string]any)}
 	for k, val := range extraHeaders {
 		info.Extra["header:"+k] = val
 	}

@@ -2,61 +2,31 @@ package inbound
 
 import (
 	"context"
-	"fmt"
 
-	"github.com/gaarutyunov/mcp-anything/internal/config"
-	"github.com/gaarutyunov/mcp-anything/internal/runtime"
+	pkginbound "github.com/gaarutyunov/mcp-anything/pkg/auth/inbound"
+	_ "github.com/gaarutyunov/mcp-anything/pkg/auth/inbound/all"
+	pkgconfig "github.com/gaarutyunov/mcp-anything/pkg/config"
+	pkgruntime "github.com/gaarutyunov/mcp-anything/pkg/runtime"
 )
 
-// ValidatorFactory creates a TokenValidator from InboundAuthConfig.
-// The second return value is the API key header name (non-empty only for the apikey strategy).
-type ValidatorFactory func(ctx context.Context, cfg *config.InboundAuthConfig) (TokenValidator, string, error)
-
-// ValidatorRegistry maps strategy names to ValidatorFactory functions.
+// ValidatorRegistry is a backward-compatible wrapper around the global IoC registry.
+// Deprecated: Use pkg/auth/inbound.New() directly with JSAuthPool and LuaAuthPool
+// set on InboundAuthConfig.
 type ValidatorRegistry struct {
-	factories map[string]ValidatorFactory
+	pools *pkgruntime.Registry
 }
 
-// NewValidatorRegistry returns a ValidatorRegistry pre-populated with all built-in strategies.
-// pools controls the bounded runtime pools for JS and Lua script validators; both
-// inbound strategies share the same pool as their outbound counterparts so that
-// the configured limit applies globally across all auth script executions.
-func NewValidatorRegistry(pools *runtime.Registry) *ValidatorRegistry {
-	r := &ValidatorRegistry{factories: make(map[string]ValidatorFactory)}
-	r.Register("jwt", func(ctx context.Context, cfg *config.InboundAuthConfig) (TokenValidator, string, error) {
-		v, err := NewJWTValidator(ctx, cfg.JWT)
-		return v, "", err
-	})
-	r.Register("introspection", func(ctx context.Context, cfg *config.InboundAuthConfig) (TokenValidator, string, error) {
-		v, err := NewIntrospectionValidator(ctx, cfg.Introspection)
-		return v, "", err
-	})
-	r.Register("apikey", func(_ context.Context, cfg *config.InboundAuthConfig) (TokenValidator, string, error) {
-		v, err := NewAPIKeyValidator(cfg.APIKey)
-		return v, cfg.APIKey.Header, err
-	})
-	r.Register("lua", func(_ context.Context, cfg *config.InboundAuthConfig) (TokenValidator, string, error) {
-		v, err := NewLuaValidator(cfg.Lua, pools.LuaAuth)
-		return v, "", err
-	})
-	r.Register("js_script", func(_ context.Context, cfg *config.InboundAuthConfig) (TokenValidator, string, error) {
-		v, err := NewJSValidator(cfg.JS, pools.JSAuth)
-		return v, "", err
-	})
-	return r
+// NewValidatorRegistry returns a ValidatorRegistry that injects runtime pools into
+// InboundAuthConfig before delegating to the global pkg/auth/inbound registry.
+func NewValidatorRegistry(pools *pkgruntime.Registry) *ValidatorRegistry {
+	return &ValidatorRegistry{pools: pools}
 }
 
-// Register adds a factory for the given strategy name.
-func (r *ValidatorRegistry) Register(strategy string, factory ValidatorFactory) {
-	r.factories[strategy] = factory
-}
-
-// New builds the appropriate TokenValidator from config.
-// Returns an error for unknown strategies.
-func (r *ValidatorRegistry) New(ctx context.Context, cfg *config.InboundAuthConfig) (TokenValidator, string, error) {
-	f, ok := r.factories[cfg.Strategy]
-	if !ok {
-		return nil, "", fmt.Errorf("unknown inbound auth strategy: %q", cfg.Strategy)
-	}
-	return f(ctx, cfg)
+// New builds the appropriate TokenValidator from config, injecting runtime pools
+// for script-based strategies (lua, js_script).
+func (r *ValidatorRegistry) New(ctx context.Context, cfg *pkgconfig.InboundAuthConfig) (TokenValidator, string, error) {
+	c := *cfg
+	c.JSAuthPool = r.pools.JSAuth
+	c.LuaAuthPool = r.pools.LuaAuth
+	return pkginbound.New(ctx, &c)
 }

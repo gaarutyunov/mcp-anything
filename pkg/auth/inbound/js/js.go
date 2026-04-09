@@ -1,4 +1,6 @@
-package inbound
+// Package js registers the "js_script" inbound auth strategy.
+// Import this package (blank import) to make the strategy available via inbound.New().
+package js
 
 import (
 	"context"
@@ -15,15 +17,24 @@ import (
 
 	"github.com/grafana/sobek"
 
-	"github.com/gaarutyunov/mcp-anything/internal/config"
-	"github.com/gaarutyunov/mcp-anything/internal/runtime"
-	"github.com/gaarutyunov/mcp-anything/internal/script"
+	"github.com/gaarutyunov/mcp-anything/pkg/auth/inbound"
+	"github.com/gaarutyunov/mcp-anything/pkg/config"
 )
 
-const defaultJSInboundTimeout = 500 * time.Millisecond
-const defaultJSInboundFetchTimeout = 30 * time.Second
+const defaultTimeout = 500 * time.Millisecond
+const defaultFetchTimeout = 30 * time.Second
 
-// JSValidator implements TokenValidator using a sandboxed Sobek JS runtime.
+func init() {
+	inbound.Register("js_script", func(_ context.Context, cfg *config.InboundAuthConfig) (inbound.TokenValidator, string, error) {
+		if cfg.JSAuthPool == nil {
+			return nil, "", fmt.Errorf("js_script inbound auth requires runtime pools; set InboundAuthConfig.JSAuthPool")
+		}
+		v, err := NewValidator(cfg.JS, cfg.JSAuthPool)
+		return v, "", err
+	})
+}
+
+// Validator implements TokenValidator using a sandboxed Sobek JS runtime.
 // The JavaScript script receives (token, ctx) and must return an object:
 //
 //	{ allowed: bool, status?: number, error?: string, subject?: string, extra_headers?: object }
@@ -31,43 +42,43 @@ const defaultJSInboundFetchTimeout = 30 * time.Second
 // A fresh sobek.Runtime is created per call (Sobek is not goroutine-safe).
 // The pre-compiled program is reused across calls. The shared pool bounds
 // the maximum number of concurrent JS runtimes to prevent OOM under load.
-type JSValidator struct {
+type Validator struct {
 	program    *sobek.Program
 	timeout    time.Duration
 	env        map[string]string
-	cache      *jsInboundCache
+	cache      *jsCache
 	httpClient *http.Client
-	pool       *runtime.Pool
+	pool       config.PoolAcquirer
 }
 
-// NewJSValidator creates a JSValidator by reading and pre-compiling the JS script.
+// NewValidator creates a Validator by reading and pre-compiling the JS script.
 // pool bounds the number of concurrent JS runtimes; it is shared with the outbound
 // JS auth provider to enforce a single global limit for all auth scripts.
-func NewJSValidator(cfg config.JSAuthConfig, pool *runtime.Pool) (*JSValidator, error) {
+func NewValidator(cfg config.JSAuthConfig, pool config.PoolAcquirer) (*Validator, error) {
 	src, err := os.ReadFile(cfg.ScriptPath)
 	if err != nil {
 		return nil, fmt.Errorf("reading js auth script %q: %w", cfg.ScriptPath, err)
 	}
-	prog, err := script.CompileScript(cfg.ScriptPath, string(src))
+	prog, err := compileScript(cfg.ScriptPath, string(src))
 	if err != nil {
 		return nil, fmt.Errorf("compiling js auth script %q: %w", cfg.ScriptPath, err)
 	}
 	timeout := cfg.Timeout
 	if timeout <= 0 {
-		timeout = defaultJSInboundTimeout
+		timeout = defaultTimeout
 	}
-	return &JSValidator{
+	return &Validator{
 		program:    prog,
 		timeout:    timeout,
 		env:        cfg.Env,
-		cache:      newJSInboundCache(),
-		httpClient: &http.Client{Timeout: defaultJSInboundFetchTimeout},
+		cache:      newJSCache(),
+		httpClient: &http.Client{Timeout: defaultFetchTimeout},
 		pool:       pool,
 	}, nil
 }
 
 // ValidateToken runs the JS script with the token and returns identity info on success.
-func (v *JSValidator) ValidateToken(ctx context.Context, token string) (*TokenInfo, error) {
+func (v *Validator) ValidateToken(ctx context.Context, token string) (*inbound.TokenInfo, error) {
 	release, err := v.pool.Acquire(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("js auth: %w", err)
@@ -107,11 +118,11 @@ func (v *JSValidator) ValidateToken(ctx context.Context, token string) (*TokenIn
 		return nil, fmt.Errorf("js check_auth: %w", err)
 	}
 
-	return parseJSInboundResult(result)
+	return parseJSResult(result)
 }
 
-// parseJSInboundResult extracts TokenInfo from the JS script's return value.
-func parseJSInboundResult(result sobek.Value) (*TokenInfo, error) {
+// parseJSResult extracts TokenInfo from the JS script's return value.
+func parseJSResult(result sobek.Value) (*inbound.TokenInfo, error) {
 	exported := result.Export()
 	resMap, ok := exported.(map[string]any)
 	if !ok {
@@ -133,10 +144,10 @@ func parseJSInboundResult(result sobek.Value) (*TokenInfo, error) {
 		if e, ok := resMap["error"].(string); ok {
 			errMsg = e
 		}
-		return nil, &DeniedError{Status: status, Message: errMsg}
+		return nil, &inbound.DeniedError{Status: status, Message: errMsg}
 	}
 
-	info := &TokenInfo{Subject: "js-authenticated", Extra: make(map[string]any)}
+	info := &inbound.TokenInfo{Subject: "js-authenticated", Extra: make(map[string]any)}
 	if sub, ok := resMap["subject"].(string); ok && sub != "" {
 		info.Subject = sub
 	}
@@ -152,7 +163,7 @@ func parseJSInboundResult(result sobek.Value) (*TokenInfo, error) {
 
 // buildCtxObject constructs the JS ctx object exposed to auth scripts.
 // Provides: ctx.env, ctx.log, ctx.jwt.decode, ctx.cache.get/set, ctx.fetch.
-func (v *JSValidator) buildCtxObject(ctx context.Context, rt *sobek.Runtime) *sobek.Object {
+func (v *Validator) buildCtxObject(ctx context.Context, rt *sobek.Runtime) *sobek.Object {
 	ctxObj := rt.NewObject()
 
 	// ctx.env — read-only environment variables.
@@ -246,7 +257,7 @@ func (v *JSValidator) buildCtxObject(ctx context.Context, rt *sobek.Runtime) *so
 
 	// ctx.fetch(url, opts) — sandboxed HTTP client.
 	if err := ctxObj.Set("fetch", func(call sobek.FunctionCall) sobek.Value {
-		return jsInboundFetch(ctx, rt, v.httpClient, call)
+		return jsFetch(ctx, rt, v.httpClient, call)
 	}); err != nil {
 		slog.Warn("js auth: failed to set ctx.fetch", "error", err)
 	}
@@ -254,8 +265,8 @@ func (v *JSValidator) buildCtxObject(ctx context.Context, rt *sobek.Runtime) *so
 	return ctxObj
 }
 
-// jsInboundFetch implements ctx.fetch(url, opts) for inbound auth scripts.
-func jsInboundFetch(ctx context.Context, rt *sobek.Runtime, client *http.Client, call sobek.FunctionCall) sobek.Value {
+// jsFetch implements ctx.fetch(url, opts) for inbound auth scripts.
+func jsFetch(ctx context.Context, rt *sobek.Runtime, client *http.Client, call sobek.FunctionCall) sobek.Value {
 	if len(call.Arguments) == 0 {
 		panic(rt.NewTypeError("ctx.fetch requires a URL argument"))
 	}
@@ -315,23 +326,23 @@ func jsInboundFetch(ctx context.Context, rt *sobek.Runtime, client *http.Client,
 	return rt.ToValue(string(body))
 }
 
-// jsInboundCache is a thread-safe key-value cache with optional TTL,
-// shared across ValidateToken calls for the same JSValidator instance.
-type jsInboundCache struct {
+// jsCache is a thread-safe key-value cache with optional TTL,
+// shared across ValidateToken calls for the same Validator instance.
+type jsCache struct {
 	mu    sync.Mutex
-	items map[string]jsInboundCacheItem
+	items map[string]jsCacheItem
 }
 
-type jsInboundCacheItem struct {
+type jsCacheItem struct {
 	value     any
 	expiresAt time.Time
 }
 
-func newJSInboundCache() *jsInboundCache {
-	return &jsInboundCache{items: make(map[string]jsInboundCacheItem)}
+func newJSCache() *jsCache {
+	return &jsCache{items: make(map[string]jsCacheItem)}
 }
 
-func (c *jsInboundCache) get(key string) any {
+func (c *jsCache) get(key string) any {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	item, ok := c.items[key]
@@ -345,12 +356,46 @@ func (c *jsInboundCache) get(key string) any {
 	return item.value
 }
 
-func (c *jsInboundCache) set(key string, value any, ttlSeconds float64) {
+func (c *jsCache) set(key string, value any, ttlSeconds float64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	var exp time.Time
 	if ttlSeconds > 0 {
 		exp = time.Now().Add(time.Duration(ttlSeconds * float64(time.Second)))
 	}
-	c.items[key] = jsInboundCacheItem{value: value, expiresAt: exp}
+	c.items[key] = jsCacheItem{value: value, expiresAt: exp}
+}
+
+// compileScript pre-processes and compiles a JavaScript script source into a
+// sobek.Program for reuse across multiple Execute calls.
+//
+// The script is wrapped to support common export patterns:
+//   - ES module style:  export default function(args, ctx) { ... }
+//   - CJS style:        module.exports = function(args, ctx) { ... }
+//
+// After the wrapper runs, the global variable __mcp_default__ holds the callable.
+func compileScript(name, src string) (*sobek.Program, error) {
+	wrapped := wrapScript(src)
+	prog, err := sobek.Compile(name+".js", wrapped, false)
+	if err != nil {
+		return nil, fmt.Errorf("parse error: %w", err)
+	}
+	return prog, nil
+}
+
+// wrapScript transforms the user script source to extract the default export
+// into the __mcp_default__ global variable.
+func wrapScript(src string) string {
+	// Replace ES module "export default" with a __mcp_default__ assignment.
+	processed := strings.ReplaceAll(src, "export default ", "__mcp_default__ = ")
+
+	return `
+var __mcp_default__;
+var exports = {};
+var module = {exports: exports};
+` + processed + `
+if (typeof __mcp_default__ === 'undefined' && typeof module.exports === 'function') {
+    __mcp_default__ = module.exports;
+}
+`
 }

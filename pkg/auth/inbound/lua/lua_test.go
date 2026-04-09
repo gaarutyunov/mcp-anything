@@ -1,4 +1,4 @@
-package inbound
+package lua
 
 import (
 	"context"
@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gaarutyunov/mcp-anything/internal/config"
-	"github.com/gaarutyunov/mcp-anything/internal/runtime"
+	"github.com/gaarutyunov/mcp-anything/pkg/config"
+	"github.com/gaarutyunov/mcp-anything/pkg/runtime"
 )
 
 func writeLuaScript(t *testing.T, content string) string {
@@ -25,18 +25,18 @@ func writeLuaScript(t *testing.T, content string) string {
 	return f.Name()
 }
 
-func newValidator(t *testing.T, script string, timeout time.Duration) *LuaValidator {
+func newValidator(t *testing.T, script string, timeout time.Duration) *Validator {
 	t.Helper()
 	path := writeLuaScript(t, script)
 	pool := runtime.NewPool(runtime.DefaultMaxAuthVMs)
-	v, err := NewLuaValidator(config.LuaAuthConfig{ScriptPath: path, Timeout: timeout}, pool)
+	v, err := NewValidator(config.LuaAuthConfig{ScriptPath: path, Timeout: timeout}, pool)
 	if err != nil {
-		t.Fatalf("NewLuaValidator: %v", err)
+		t.Fatalf("NewValidator: %v", err)
 	}
 	return v
 }
 
-func TestLuaValidatorAllowsValidToken(t *testing.T) {
+func TestValidatorAllowsValidToken(t *testing.T) {
 	v := newValidator(t, `
 local token = ...
 return true, 200, {}, ""
@@ -54,7 +54,7 @@ return true, 200, {}, ""
 	}
 }
 
-func TestLuaValidatorDeniesToken(t *testing.T) {
+func TestValidatorDeniesToken(t *testing.T) {
 	v := newValidator(t, `
 local token = ...
 return false, 401, {}, "forbidden"
@@ -66,7 +66,7 @@ return false, 401, {}, "forbidden"
 	}
 }
 
-func TestLuaValidatorTimeoutEnforced(t *testing.T) {
+func TestValidatorTimeoutEnforced(t *testing.T) {
 	v := newValidator(t, `
 local token = ...
 while true do end
@@ -81,19 +81,19 @@ return true, 200, {}, ""
 	}
 }
 
-func TestLuaValidatorCompileError(t *testing.T) {
+func TestValidatorCompileError(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "bad.lua")
 	if err := os.WriteFile(path, []byte(`this is not valid lua @@##`), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 	pool := runtime.NewPool(runtime.DefaultMaxAuthVMs)
-	_, err := NewLuaValidator(config.LuaAuthConfig{ScriptPath: path, Timeout: 500 * time.Millisecond}, pool)
+	_, err := NewValidator(config.LuaAuthConfig{ScriptPath: path, Timeout: 500 * time.Millisecond}, pool)
 	if err == nil {
 		t.Fatal("expected compile error for invalid Lua")
 	}
 }
 
-func TestLuaValidatorOsSandboxed(t *testing.T) {
+func TestValidatorOsSandboxed(t *testing.T) {
 	// os.getenv should fail because os library is not loaded.
 	v := newValidator(t, `
 local token = ...
@@ -107,7 +107,7 @@ return true, 200, {}, ""
 	}
 }
 
-func TestLuaValidatorIoSandboxed(t *testing.T) {
+func TestValidatorIoSandboxed(t *testing.T) {
 	// io.open should fail because io library is not loaded.
 	v := newValidator(t, `
 local token = ...
@@ -121,7 +121,7 @@ return true, 200, {}, ""
 	}
 }
 
-func TestLuaValidatorExtraHeaders(t *testing.T) {
+func TestValidatorExtraHeaders(t *testing.T) {
 	v := newValidator(t, `
 local token = ...
 return true, 200, {["X-User-ID"] = "user-42", ["X-Role"] = "admin"}, ""
@@ -139,7 +139,7 @@ return true, 200, {["X-User-ID"] = "user-42", ["X-Role"] = "admin"}, ""
 	}
 }
 
-func TestLuaValidatorConcurrentNoDataRace(t *testing.T) {
+func TestValidatorConcurrentNoDataRace(t *testing.T) {
 	v := newValidator(t, `
 local token = ...
 if token == "good" then

@@ -68,6 +68,10 @@ type InboundAuthConfig struct {
 	APIKey        APIKeyAuthConfig    `koanf:"apikey"`
 	Lua           LuaAuthConfig       `koanf:"lua"`
 	JS            JSAuthConfig        `koanf:"js"`
+	// JSAuthPool and LuaAuthPool are set programmatically for script-based strategies.
+	// Not loaded from the config file. Nil is valid when no script strategy is configured.
+	JSAuthPool  PoolAcquirer `koanf:"-"`
+	LuaAuthPool PoolAcquirer `koanf:"-"`
 }
 
 // LuaAuthConfig configures inbound token validation via a Lua script.

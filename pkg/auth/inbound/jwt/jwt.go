@@ -1,4 +1,6 @@
-package inbound
+// Package jwt registers the "jwt" inbound auth strategy.
+// Import this package (blank import) to make the strategy available via inbound.New().
+package jwt
 
 import (
 	"context"
@@ -7,17 +9,25 @@ import (
 
 	"github.com/coreos/go-oidc/v3/oidc"
 
-	"github.com/gaarutyunov/mcp-anything/internal/config"
+	"github.com/gaarutyunov/mcp-anything/pkg/auth/inbound"
+	"github.com/gaarutyunov/mcp-anything/pkg/config"
 )
 
-// JWTValidator validates JWT Bearer tokens using OIDC/JWKS.
-type JWTValidator struct {
+func init() {
+	inbound.Register("jwt", func(ctx context.Context, cfg *config.InboundAuthConfig) (inbound.TokenValidator, string, error) {
+		v, err := NewValidator(ctx, cfg.JWT)
+		return v, "", err
+	})
+}
+
+// Validator validates JWT Bearer tokens using OIDC/JWKS.
+type Validator struct {
 	verifier *oidc.IDTokenVerifier
 }
 
-// NewJWTValidator creates a JWTValidator from the given config.
+// NewValidator creates a Validator from the given config.
 // If cfg.JWKSURL is set, it uses that directly; otherwise it performs OIDC discovery.
-func NewJWTValidator(ctx context.Context, cfg config.JWTAuthConfig) (*JWTValidator, error) {
+func NewValidator(ctx context.Context, cfg config.JWTAuthConfig) (*Validator, error) {
 	oidcConfig := &oidc.Config{ClientID: cfg.Audience}
 
 	var verifier *oidc.IDTokenVerifier
@@ -32,11 +42,11 @@ func NewJWTValidator(ctx context.Context, cfg config.JWTAuthConfig) (*JWTValidat
 		verifier = provider.Verifier(oidcConfig)
 	}
 
-	return &JWTValidator{verifier: verifier}, nil
+	return &Validator{verifier: verifier}, nil
 }
 
 // ValidateToken verifies the JWT signature, expiry, and audience, then returns TokenInfo.
-func (v *JWTValidator) ValidateToken(ctx context.Context, raw string) (*TokenInfo, error) {
+func (v *Validator) ValidateToken(ctx context.Context, raw string) (*inbound.TokenInfo, error) {
 	token, err := v.verifier.Verify(ctx, raw)
 	if err != nil {
 		return nil, fmt.Errorf("verifying JWT: %w", err)
@@ -49,7 +59,7 @@ func (v *JWTValidator) ValidateToken(ctx context.Context, raw string) (*TokenInf
 		return nil, fmt.Errorf("extracting JWT claims: %w", err)
 	}
 
-	return &TokenInfo{
+	return &inbound.TokenInfo{
 		Subject:  token.Subject,
 		Scopes:   strings.Fields(claims.Scope),
 		Audience: token.Audience,

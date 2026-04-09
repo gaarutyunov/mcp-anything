@@ -51,7 +51,6 @@ func (b *ScriptBuilder) Build(_ context.Context, cfg *config.UpstreamConfig, nam
 			MCPTool:      st.MCPTool,
 			Transforms:   st.Transforms,
 			AuthRequired: true,
-			ScriptDef:    st.Def,
 			Executor:     &ScriptExecutor{toolName: st.PrefixedName, scriptDef: st.Def},
 		})
 	}

@@ -36,7 +36,6 @@ func (b *CommandBuilder) Build(_ context.Context, cfg *config.UpstreamConfig, na
 			MCPTool:      ct.MCPTool,
 			Transforms:   ct.Transforms,
 			AuthRequired: true,
-			CommandDef:   ct.Def,
 			Executor:     &CommandExecutor{toolName: ct.PrefixedName, commandDef: ct.Def},
 		})
 	}

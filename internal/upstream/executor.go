@@ -1,12 +1,7 @@
 package upstream
 
-import (
-	"context"
-
-	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
-)
+import pkgupstream "github.com/gaarutyunov/mcp-anything/pkg/upstream"
 
 // ToolExecutor executes a single tool call and returns the MCP result.
-type ToolExecutor interface {
-	Execute(ctx context.Context, args map[string]any) (*sdkmcp.CallToolResult, error)
-}
+// See pkg/upstream.ToolExecutor.
+type ToolExecutor = pkgupstream.ToolExecutor

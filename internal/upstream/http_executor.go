@@ -18,6 +18,7 @@ import (
 	"go.opentelemetry.io/otel/metric"
 
 	"github.com/gaarutyunov/mcp-anything/internal/content"
+	"github.com/gaarutyunov/mcp-anything/internal/openapi"
 	"github.com/gaarutyunov/mcp-anything/internal/telemetry"
 	"github.com/gaarutyunov/mcp-anything/internal/transform"
 )
@@ -33,9 +34,12 @@ func (e *HTTPExecutor) Execute(ctx context.Context, args map[string]any) (*sdkmc
 	entry := e.entry
 	toolAttrs := metric.WithAttributes(attribute.String("mcp.tool.name", entry.PrefixedName))
 
+	// Get the typed transforms (set by the HTTP builder).
+	transforms, _ := entry.Transforms.(*transform.CompiledTransforms)
+
 	// Apply request transform jq → RequestEnvelope.
 	reqStart := time.Now()
-	envelope, err := entry.Transforms.RunRequest(ctx, args)
+	envelope, err := transforms.RunRequest(ctx, args)
 	if telemetry.TransformDuration != nil {
 		telemetry.TransformDuration.Record(ctx, time.Since(reqStart).Seconds(),
 			metric.WithAttributes(
@@ -78,13 +82,16 @@ func (e *HTTPExecutor) Execute(ctx context.Context, args map[string]any) (*sdkmc
 		httpReq.Header.Set("Content-Type", "application/json")
 	}
 
+	// Get the typed validator (set by the HTTP builder; nil for non-HTTP tools).
+	validator, _ := entry.Validator.(*openapi.Validator)
+
 	// Validate the outbound request against the OpenAPI spec (if configured).
 	// When only response validation is enabled, we still build the route metadata
 	// (BuildRequestInput) so that ValidateResponse has the required context.
 	var reqInput *openapi3filter.RequestValidationInput
-	if entry.Validator != nil {
+	if validator != nil {
 		if entry.ValidationCfg.ValidateRequest {
-			ri, valErr := entry.Validator.ValidateRequest(ctx, httpReq)
+			ri, valErr := validator.ValidateRequest(ctx, httpReq)
 			if valErr != nil {
 				return &sdkmcp.CallToolResult{
 					IsError: true,
@@ -95,7 +102,7 @@ func (e *HTTPExecutor) Execute(ctx context.Context, args map[string]any) (*sdkmc
 			}
 			reqInput = ri
 		} else if entry.ValidationCfg.ValidateResponse {
-			ri, routeErr := entry.Validator.BuildRequestInput(httpReq)
+			ri, routeErr := validator.BuildRequestInput(httpReq)
 			if routeErr != nil {
 				slog.Warn("could not resolve route for response validation", "tool", entry.PrefixedName, "error", routeErr)
 			} else {
@@ -142,7 +149,7 @@ func (e *HTTPExecutor) Execute(ctx context.Context, args map[string]any) (*sdkmc
 
 	if inError {
 		errStart := time.Now()
-		result := buildErrorResult(ctx, entry.Transforms, resp.StatusCode, contentType, body)
+		result := buildErrorResult(ctx, transforms, resp.StatusCode, contentType, body)
 		if telemetry.TransformDuration != nil {
 			telemetry.TransformDuration.Record(ctx, time.Since(errStart).Seconds(),
 				metric.WithAttributes(
@@ -158,8 +165,8 @@ func (e *HTTPExecutor) Execute(ctx context.Context, args map[string]any) (*sdkmc
 	}
 
 	// Success path: validate response if configured.
-	if entry.ValidationCfg.ValidateResponse && reqInput != nil && entry.Validator != nil {
-		if valErr := entry.Validator.ValidateResponse(ctx, reqInput, resp, body); valErr != nil {
+	if entry.ValidationCfg.ValidateResponse && reqInput != nil && validator != nil {
+		if valErr := validator.ValidateResponse(ctx, reqInput, resp, body); valErr != nil {
 			if entry.ValidationCfg.ResponseValidationFailure == "fail" {
 				result := &sdkmcp.CallToolResult{
 					IsError: true,
@@ -177,7 +184,7 @@ func (e *HTTPExecutor) Execute(ctx context.Context, args map[string]any) (*sdkmc
 	}
 
 	respStart := time.Now()
-	result := buildSuccessResult(ctx, entry.Transforms, entry.ResponseFormat, contentType, body)
+	result := buildSuccessResult(ctx, transforms, entry.ResponseFormat, contentType, body)
 	if telemetry.TransformDuration != nil {
 		telemetry.TransformDuration.Record(ctx, time.Since(respStart).Seconds(),
 			metric.WithAttributes(

@@ -37,6 +37,7 @@ func (b *CommandBuilder) Build(_ context.Context, cfg *config.UpstreamConfig, na
 			Transforms:   ct.Transforms,
 			AuthRequired: true,
 			CommandDef:   ct.Def,
+			Executor:     &CommandExecutor{toolName: ct.PrefixedName, commandDef: ct.Def},
 		})
 	}
 

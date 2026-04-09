@@ -1,31 +1,20 @@
 package upstream
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
-	"log/slog"
 	"net/http"
-	"net/url"
 	"strings"
-	"time"
 
 	"github.com/getkin/kin-openapi/openapi3"
-	"github.com/getkin/kin-openapi/openapi3filter"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/speakeasy-api/jsonpath/pkg/jsonpath"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/metric"
 	"gopkg.in/yaml.v3"
 
 	"github.com/gaarutyunov/mcp-anything/internal/command"
 	"github.com/gaarutyunov/mcp-anything/internal/config"
-	"github.com/gaarutyunov/mcp-anything/internal/content"
 	"github.com/gaarutyunov/mcp-anything/internal/openapi"
 	"github.com/gaarutyunov/mcp-anything/internal/script"
-	"github.com/gaarutyunov/mcp-anything/internal/telemetry"
 	"github.com/gaarutyunov/mcp-anything/internal/transform"
 )
 
@@ -53,6 +42,7 @@ type RegistryEntry struct {
 	OperationNode  *yaml.Node   // YAML node for JSONPath group filter evaluation (nil for command tools)
 	CommandDef     *command.Def // non-nil for command-backed tools; nil for HTTP/script tools
 	ScriptDef      *script.Def  // non-nil for script-backed tools; nil for HTTP/command tools
+	Executor       ToolExecutor // set by builders; dispatches tool execution
 }
 
 // groupData holds pre-computed membership for a single tool group.
@@ -278,209 +268,9 @@ func (r *Registry) Dispatch(ctx context.Context, name string, args map[string]an
 	return r.handleToolCall(ctx, entry, args)
 }
 
-// handleToolCall executes the full request pipeline for a single tool call.
-// It dispatches to handleCommandCall for command-backed tools, handleScriptCall
-// for script-backed tools, and to the HTTP pipeline for OpenAPI-backed tools.
+// handleToolCall executes the tool call by delegating to the entry's Executor.
 func (r *Registry) handleToolCall(ctx context.Context, entry *RegistryEntry, args map[string]any) (*sdkmcp.CallToolResult, error) {
-	if entry.CommandDef != nil {
-		return r.handleCommandCall(ctx, entry, args)
-	}
-	if entry.ScriptDef != nil {
-		return r.handleScriptCall(ctx, entry, args)
-	}
-	return r.handleHTTPCall(ctx, entry, args)
-}
-
-// handleCommandCall executes a command-backed tool.
-// Latency is recorded by the outer DispatchForGroup instrumentation in manager.go;
-// recording it here would double-count command tools.
-func (r *Registry) handleCommandCall(ctx context.Context, entry *RegistryEntry, args map[string]any) (*sdkmcp.CallToolResult, error) {
-	toolAttrs := metric.WithAttributes(attribute.String("mcp.tool.name", entry.PrefixedName))
-
-	stdout, stderr, err := entry.CommandDef.Execute(ctx, args)
-
-	if err != nil {
-		if telemetry.ToolCallErrors != nil {
-			telemetry.ToolCallErrors.Add(ctx, 1, toolAttrs)
-		}
-		return command.ToErrorResult(stderr, err), nil
-	}
-
-	return command.ToTextResult(stdout), nil
-}
-
-// handleScriptCall executes a JavaScript-backed tool.
-func (r *Registry) handleScriptCall(ctx context.Context, entry *RegistryEntry, args map[string]any) (*sdkmcp.CallToolResult, error) {
-	toolAttrs := metric.WithAttributes(attribute.String("mcp.tool.name", entry.PrefixedName))
-
-	out, err := entry.ScriptDef.Execute(ctx, args)
-	if err != nil {
-		if telemetry.ToolCallErrors != nil {
-			telemetry.ToolCallErrors.Add(ctx, 1, toolAttrs)
-		}
-		return script.ToErrorResult(err), nil
-	}
-	return script.ToTextResult(out), nil
-}
-
-// handleHTTPCall executes the full HTTP request pipeline from SPEC.md §17 for a single tool call.
-func (r *Registry) handleHTTPCall(ctx context.Context, entry *RegistryEntry, args map[string]any) (*sdkmcp.CallToolResult, error) {
-	toolAttrs := metric.WithAttributes(attribute.String("mcp.tool.name", entry.PrefixedName))
-
-	// Apply request transform jq → RequestEnvelope.
-	reqStart := time.Now()
-	envelope, err := entry.Transforms.RunRequest(ctx, args)
-	if telemetry.TransformDuration != nil {
-		telemetry.TransformDuration.Record(ctx, time.Since(reqStart).Seconds(),
-			metric.WithAttributes(
-				attribute.String("mcp.tool.name", entry.PrefixedName),
-				attribute.String("transform.stage", "request"),
-			),
-		)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("request transform: %w", err)
-	}
-
-	// Build upstream URL from the envelope.
-	upstreamURL, err := buildUpstreamURL(entry.Upstream.BaseURL, entry.PathTemplate, envelope)
-	if err != nil {
-		return nil, fmt.Errorf("building upstream URL: %w", err)
-	}
-
-	// Build request body if present.
-	var bodyReader io.Reader
-	if envelope.Body != nil {
-		bodyBytes, marshalErr := json.Marshal(envelope.Body)
-		if marshalErr != nil {
-			return nil, fmt.Errorf("marshalling request body: %w", marshalErr)
-		}
-		bodyReader = bytes.NewReader(bodyBytes)
-	}
-
-	// Create HTTP request.
-	httpReq, err := http.NewRequestWithContext(ctx, entry.Method, upstreamURL, bodyReader)
-	if err != nil {
-		return nil, fmt.Errorf("creating HTTP request: %w", err)
-	}
-
-	// Add envelope headers; static upstream headers are injected by the RoundTripper.
-	for k, v := range envelope.Headers {
-		httpReq.Header.Set(k, v)
-	}
-	if bodyReader != nil {
-		httpReq.Header.Set("Content-Type", "application/json")
-	}
-
-	// Validate the outbound request against the OpenAPI spec (if configured).
-	// When only response validation is enabled, we still build the route metadata
-	// (BuildRequestInput) so that ValidateResponse has the required context.
-	var reqInput *openapi3filter.RequestValidationInput
-	if entry.Validator != nil {
-		if entry.ValidationCfg.ValidateRequest {
-			ri, valErr := entry.Validator.ValidateRequest(ctx, httpReq)
-			if valErr != nil {
-				return &sdkmcp.CallToolResult{
-					IsError: true,
-					Content: []sdkmcp.Content{
-						&sdkmcp.TextContent{Text: fmt.Sprintf("request validation failed: %v", valErr)},
-					},
-				}, nil
-			}
-			reqInput = ri
-		} else if entry.ValidationCfg.ValidateResponse {
-			ri, routeErr := entry.Validator.BuildRequestInput(httpReq)
-			if routeErr != nil {
-				slog.Warn("could not resolve route for response validation", "tool", entry.PrefixedName, "error", routeErr)
-			} else {
-				reqInput = ri
-			}
-		}
-	}
-
-	// Inject outbound auth — no-op for now; TASK-10 fills this in.
-
-	// Execute the upstream HTTP call.
-	resp, err := entry.Upstream.Client.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("executing HTTP request: %w", err)
-	}
-	defer func() {
-		if closeErr := resp.Body.Close(); closeErr != nil {
-			slog.Warn("closing response body", "error", closeErr)
-		}
-	}()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("reading response body: %w", err)
-	}
-
-	inSuccess := statusIn(entry.ValidationCfg.SuccessStatus, resp.StatusCode)
-	inError := statusIn(entry.ValidationCfg.ErrorStatus, resp.StatusCode)
-
-	if !inSuccess && !inError {
-		result := &sdkmcp.CallToolResult{
-			IsError: true,
-			Content: []sdkmcp.Content{
-				&sdkmcp.TextContent{Text: fmt.Sprintf("unexpected HTTP %d", resp.StatusCode)},
-			},
-		}
-		if telemetry.ToolCallErrors != nil {
-			telemetry.ToolCallErrors.Add(ctx, 1, toolAttrs)
-		}
-		return result, nil
-	}
-
-	contentType := resp.Header.Get("Content-Type")
-
-	if inError {
-		errStart := time.Now()
-		result := buildErrorResult(ctx, entry.Transforms, resp.StatusCode, contentType, body)
-		if telemetry.TransformDuration != nil {
-			telemetry.TransformDuration.Record(ctx, time.Since(errStart).Seconds(),
-				metric.WithAttributes(
-					attribute.String("mcp.tool.name", entry.PrefixedName),
-					attribute.String("transform.stage", "error"),
-				),
-			)
-		}
-		if telemetry.ToolCallErrors != nil {
-			telemetry.ToolCallErrors.Add(ctx, 1, toolAttrs)
-		}
-		return result, nil
-	}
-
-	// Success path: validate response if configured.
-	if entry.ValidationCfg.ValidateResponse && reqInput != nil && entry.Validator != nil {
-		if valErr := entry.Validator.ValidateResponse(ctx, reqInput, resp, body); valErr != nil {
-			if entry.ValidationCfg.ResponseValidationFailure == "fail" {
-				result := &sdkmcp.CallToolResult{
-					IsError: true,
-					Content: []sdkmcp.Content{
-						&sdkmcp.TextContent{Text: fmt.Sprintf("response validation failed: %v", valErr)},
-					},
-				}
-				if telemetry.ToolCallErrors != nil {
-					telemetry.ToolCallErrors.Add(ctx, 1, toolAttrs)
-				}
-				return result, nil
-			}
-			slog.Warn("response validation failed", "tool", entry.PrefixedName, "error", valErr)
-		}
-	}
-
-	respStart := time.Now()
-	result := buildSuccessResult(ctx, entry.Transforms, entry.ResponseFormat, contentType, body)
-	if telemetry.TransformDuration != nil {
-		telemetry.TransformDuration.Record(ctx, time.Since(respStart).Seconds(),
-			metric.WithAttributes(
-				attribute.String("mcp.tool.name", entry.PrefixedName),
-				attribute.String("transform.stage", "response"),
-			),
-		)
-	}
-	return result, nil
+	return entry.Executor.Execute(ctx, args)
 }
 
 // newErrorResult creates an IsError CallToolResult with the given message.
@@ -491,61 +281,6 @@ func newErrorResult(msg string) *sdkmcp.CallToolResult {
 			&sdkmcp.TextContent{Text: msg},
 		},
 	}
-}
-
-// buildErrorResult transforms an error response body and returns an error CallToolResult.
-func buildErrorResult(ctx context.Context, transforms *transform.CompiledTransforms, statusCode int, contentType string, body []byte) *sdkmcp.CallToolResult {
-	return content.ToErrorResult(ctx, body, contentType, statusCode, transforms.Error)
-}
-
-// buildSuccessResult converts a success response body to MCP content and returns a CallToolResult.
-func buildSuccessResult(ctx context.Context, transforms *transform.CompiledTransforms, responseFormat, contentType string, body []byte) *sdkmcp.CallToolResult {
-	format := content.Detect(content.Format(responseFormat), contentType)
-	contents, err := content.ToMCPContent(ctx, format, body, contentType, transforms.Response)
-	if err != nil {
-		slog.Warn("response content conversion failed, using raw body", "error", err)
-		return &sdkmcp.CallToolResult{
-			Content: []sdkmcp.Content{
-				&sdkmcp.TextContent{Text: string(body)},
-			},
-		}
-	}
-	return &sdkmcp.CallToolResult{Content: contents}
-}
-
-// buildUpstreamURL constructs the upstream URL using the request envelope.
-func buildUpstreamURL(baseURL, pathTemplate string, envelope *transform.RequestEnvelope) (string, error) {
-	path := pathTemplate
-	for name, val := range envelope.Path {
-		path = strings.ReplaceAll(path, "{"+name+"}", url.PathEscape(val))
-	}
-
-	u, err := url.Parse(baseURL + path)
-	if err != nil {
-		return "", fmt.Errorf("parsing URL: %w", err)
-	}
-
-	if len(envelope.Query) > 0 {
-		q := u.Query()
-		for k, v := range envelope.Query {
-			if v != "" {
-				q.Set(k, v)
-			}
-		}
-		u.RawQuery = q.Encode()
-	}
-
-	return u.String(), nil
-}
-
-// statusIn reports whether status is in the list.
-func statusIn(list []int, status int) bool {
-	for _, s := range list {
-		if s == status {
-			return true
-		}
-	}
-	return false
 }
 
 // extractResponseFormat reads x-mcp-response-format from an operation extension.

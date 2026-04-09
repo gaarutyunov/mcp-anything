@@ -233,6 +233,7 @@ func (r *Refresher) refresh(ctx context.Context) error {
 			ValidationCfg:  r.cfg.Validation,
 			OperationNode:  gt.OperationNode,
 		}
+		entry.Executor = &HTTPExecutor{entry: entry}
 		entries = append(entries, entry)
 	}
 
@@ -385,6 +386,7 @@ func (r *Refresher) buildSnapshot(ctx context.Context, prev *Snapshot) (*Snapsho
 			ValidationCfg:  r.cfg.Validation,
 			OperationNode:  gt.OperationNode,
 		}
+		entry.Executor = &HTTPExecutor{entry: entry}
 		entries = append(entries, entry)
 	}
 

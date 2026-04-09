@@ -56,7 +56,7 @@ func (b *HTTPBuilder) Build(ctx context.Context, cfg *config.UpstreamConfig, nam
 		if !authRequired {
 			slog.Info("public operation (auth not required)", "tool", vt.PrefixedName)
 		}
-		entries = append(entries, &RegistryEntry{
+		entry := &RegistryEntry{
 			PrefixedName:   vt.PrefixedName,
 			OriginalName:   vt.OriginalName,
 			Upstream:       up,
@@ -69,7 +69,9 @@ func (b *HTTPBuilder) Build(ctx context.Context, cfg *config.UpstreamConfig, nam
 			Validator:      vt.Validator,
 			ValidationCfg:  cfg.Validation,
 			OperationNode:  vt.OperationNode,
-		})
+		}
+		entry.Executor = &HTTPExecutor{entry: entry}
+		entries = append(entries, entry)
 	}
 
 	return &ValidatedUpstream{

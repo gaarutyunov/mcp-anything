@@ -13,13 +13,14 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"github.com/gaarutyunov/mcp-anything/internal/auth/inbound"
 	"github.com/gaarutyunov/mcp-anything/internal/config"
 	mcppkg "github.com/gaarutyunov/mcp-anything/internal/mcp"
 	"github.com/gaarutyunov/mcp-anything/internal/runtime"
 	"github.com/gaarutyunov/mcp-anything/internal/server"
 	"github.com/gaarutyunov/mcp-anything/internal/telemetry"
 	upstreampkg "github.com/gaarutyunov/mcp-anything/internal/upstream"
+	inbound "github.com/gaarutyunov/mcp-anything/pkg/auth/inbound"
+	_ "github.com/gaarutyunov/mcp-anything/pkg/auth/inbound/all"
 	_ "github.com/gaarutyunov/mcp-anything/pkg/auth/outbound/all"
 )
 
@@ -100,8 +101,10 @@ func main() {
 	// Build inbound auth middleware if configured.
 	var authMiddleware func(http.Handler) http.Handler
 	if cfg.InboundAuth.Strategy != "" && cfg.InboundAuth.Strategy != "none" {
-		inboundRegistry := inbound.NewValidatorRegistry(runtimePools)
-		globalValidator, globalHeader, buildErr := inboundRegistry.New(ctx, &cfg.InboundAuth)
+		authCfg := cfg.InboundAuth
+		authCfg.JSAuthPool = runtimePools.JSAuth
+		authCfg.LuaAuthPool = runtimePools.LuaAuth
+		globalValidator, globalHeader, buildErr := inbound.New(ctx, &authCfg)
 		if buildErr != nil {
 			slog.Error("build inbound auth validator", "error", buildErr)
 			os.Exit(1)
@@ -119,7 +122,10 @@ func main() {
 			if !up.Enabled || up.InboundAuthOverride == nil {
 				continue
 			}
-			ov, oh, ovErr := inboundRegistry.New(ctx, up.InboundAuthOverride)
+			ovCfg := *up.InboundAuthOverride
+			ovCfg.JSAuthPool = runtimePools.JSAuth
+			ovCfg.LuaAuthPool = runtimePools.LuaAuth
+			ov, oh, ovErr := inbound.New(ctx, &ovCfg)
 			if ovErr != nil {
 				slog.Error("build inbound auth override", "upstream", up.Name, "error", ovErr)
 				os.Exit(1)

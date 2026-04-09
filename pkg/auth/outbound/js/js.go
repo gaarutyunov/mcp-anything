@@ -1,4 +1,6 @@
-package outbound
+// Package js registers the "js_script" outbound auth strategy.
+// Import this package (blank import) to make the strategy available via outbound.New().
+package js
 
 import (
 	"context"
@@ -15,20 +17,28 @@ import (
 
 	"github.com/grafana/sobek"
 
-	"github.com/gaarutyunov/mcp-anything/internal/config"
-	"github.com/gaarutyunov/mcp-anything/internal/runtime"
-	"github.com/gaarutyunov/mcp-anything/internal/script"
+	"github.com/gaarutyunov/mcp-anything/pkg/auth/outbound"
+	"github.com/gaarutyunov/mcp-anything/pkg/config"
 )
 
-const defaultJSOutboundTimeout = 500 * time.Millisecond
-const defaultJSOutboundFetchTimeout = 30 * time.Second
+const defaultTimeout = 500 * time.Millisecond
+const defaultFetchTimeout = 30 * time.Second
 
-// jsOutboundNoCacheExpiry is a short-lived expiry (1 second) used when the JS script
+// noCacheExpiry is a short-lived expiry (1 second) used when the JS script
 // returns no expiry. This prevents double-execution within the same RoundTrip() call,
 // while still refreshing credentials on subsequent requests.
-const jsOutboundNoCacheExpiry = int64(1)
+const noCacheExpiry = int64(1)
 
-// JSProvider implements TokenProvider using a JavaScript (Sobek) script.
+func init() {
+	outbound.Register("js_script", func(_ context.Context, cfg *config.OutboundAuthConfig) (outbound.TokenProvider, error) {
+		if cfg.JSAuthPool == nil {
+			return nil, fmt.Errorf("js_script outbound auth requires runtime pools; set OutboundAuthConfig.JSAuthPool")
+		}
+		return NewProvider(cfg.Upstream, cfg.JS, cfg.JSAuthPool)
+	})
+}
+
+// Provider implements TokenProvider using a JavaScript (Sobek) script.
 // The script receives (upstream, ctx) and must return an object:
 //
 //	{ token?: string, raw_headers?: object, expiry?: number, error?: string }
@@ -37,55 +47,55 @@ const jsOutboundNoCacheExpiry = int64(1)
 // The pre-compiled program is reused. Results are cached at the Go level to avoid
 // re-invoking the script on every request. The shared pool bounds the maximum number
 // of concurrent JS runtimes to prevent OOM under load.
-type JSProvider struct {
+type Provider struct {
 	upstreamName string
 	program      *sobek.Program
 	timeout      time.Duration
 	env          map[string]string
-	cache        *jsOutboundCache
-	scriptCache  *jsOutboundScriptCache // persists across callScript invocations
+	cache        *jsCache
+	scriptCache  *jsScriptCache // persists across callScript invocations
 	httpClient   *http.Client
-	pool         *runtime.Pool
+	pool         config.PoolAcquirer
 }
 
-type jsOutboundCache struct {
+type jsCache struct {
 	mu         sync.Mutex
 	token      string
 	expiry     int64 // unix timestamp; 0 = fetch on next call
 	rawHeaders map[string]string
 }
 
-// NewJSProvider creates a JSProvider by reading and pre-compiling the JS script.
+// NewProvider creates a Provider by reading and pre-compiling the JS script.
 // pool bounds the number of concurrent JS runtimes; it is shared with the inbound
 // JS auth validator to enforce a single global limit for all auth scripts.
-func NewJSProvider(upstreamName string, cfg config.JSOutboundConfig, pool *runtime.Pool) (*JSProvider, error) {
+func NewProvider(upstreamName string, cfg config.JSOutboundConfig, pool config.PoolAcquirer) (*Provider, error) {
 	src, err := os.ReadFile(cfg.ScriptPath)
 	if err != nil {
 		return nil, fmt.Errorf("reading js outbound script %q: %w", cfg.ScriptPath, err)
 	}
-	prog, err := script.CompileScript(cfg.ScriptPath, string(src))
+	prog, err := compileScript(cfg.ScriptPath, string(src))
 	if err != nil {
 		return nil, fmt.Errorf("compiling js outbound script %q: %w", cfg.ScriptPath, err)
 	}
 	timeout := cfg.Timeout
 	if timeout <= 0 {
-		timeout = defaultJSOutboundTimeout
+		timeout = defaultTimeout
 	}
-	return &JSProvider{
+	return &Provider{
 		upstreamName: upstreamName,
 		program:      prog,
 		timeout:      timeout,
 		env:          cfg.Env,
-		cache:        &jsOutboundCache{},
-		scriptCache:  newJSOutboundScriptCache(),
-		httpClient:   &http.Client{Timeout: defaultJSOutboundFetchTimeout},
+		cache:        &jsCache{},
+		scriptCache:  newJSScriptCache(),
+		httpClient:   &http.Client{Timeout: defaultFetchTimeout},
 		pool:         pool,
 	}, nil
 }
 
 // Token returns the current Bearer token, invoking the JS script if the cache has expired.
 // Returns empty string if the script provides raw headers instead.
-func (p *JSProvider) Token(ctx context.Context) (string, error) {
+func (p *Provider) Token(ctx context.Context) (string, error) {
 	if err := p.ensureToken(ctx); err != nil {
 		return "", err
 	}
@@ -98,7 +108,7 @@ func (p *JSProvider) Token(ctx context.Context) (string, error) {
 }
 
 // RawHeaders returns the raw headers map, invoking the JS script if the cache has expired.
-func (p *JSProvider) RawHeaders(ctx context.Context) (map[string]string, error) {
+func (p *Provider) RawHeaders(ctx context.Context) (map[string]string, error) {
 	if err := p.ensureToken(ctx); err != nil {
 		return nil, err
 	}
@@ -115,7 +125,7 @@ func (p *JSProvider) RawHeaders(ctx context.Context) (map[string]string, error) 
 }
 
 // ensureToken refreshes the cached credentials if expired or absent.
-func (p *JSProvider) ensureToken(ctx context.Context) error {
+func (p *Provider) ensureToken(ctx context.Context) error {
 	p.cache.mu.Lock()
 	defer p.cache.mu.Unlock()
 
@@ -131,7 +141,7 @@ func (p *JSProvider) ensureToken(ctx context.Context) error {
 
 	p.cache.token = token
 	if expiry == 0 {
-		p.cache.expiry = now + jsOutboundNoCacheExpiry
+		p.cache.expiry = now + noCacheExpiry
 	} else {
 		p.cache.expiry = expiry
 	}
@@ -140,7 +150,7 @@ func (p *JSProvider) ensureToken(ctx context.Context) error {
 }
 
 // callScript invokes the JS script and returns (token, expiry, rawHeaders, error).
-func (p *JSProvider) callScript(ctx context.Context) (token string, expiry int64, rawHeaders map[string]string, err error) {
+func (p *Provider) callScript(ctx context.Context) (token string, expiry int64, rawHeaders map[string]string, err error) {
 	release, acquireErr := p.pool.Acquire(ctx)
 	if acquireErr != nil {
 		return "", 0, nil, fmt.Errorf("js outbound auth: %w", acquireErr)
@@ -180,11 +190,11 @@ func (p *JSProvider) callScript(ctx context.Context) (token string, expiry int64
 		return "", 0, nil, fmt.Errorf("js get_upstream_token: %w", err)
 	}
 
-	return parseJSOutboundResult(result)
+	return parseResult(result)
 }
 
-// parseJSOutboundResult extracts token, expiry, and rawHeaders from the JS return value.
-func parseJSOutboundResult(result sobek.Value) (token string, expiry int64, rawHeaders map[string]string, err error) {
+// parseResult extracts token, expiry, and rawHeaders from the JS return value.
+func parseResult(result sobek.Value) (token string, expiry int64, rawHeaders map[string]string, err error) {
 	exported := result.Export()
 	resMap, ok := exported.(map[string]any)
 	if !ok {
@@ -226,7 +236,7 @@ func parseJSOutboundResult(result sobek.Value) (token string, expiry int64, rawH
 
 // buildCtxObject constructs the JS ctx object for outbound auth scripts.
 // Provides: ctx.env, ctx.log, ctx.jwt.decode, ctx.cache.get/set, ctx.fetch.
-func (p *JSProvider) buildCtxObject(ctx context.Context, rt *sobek.Runtime, scriptCache *jsOutboundScriptCache) *sobek.Object {
+func (p *Provider) buildCtxObject(ctx context.Context, rt *sobek.Runtime, sc *jsScriptCache) *sobek.Object {
 	ctxObj := rt.NewObject()
 
 	// ctx.env — read-only environment variables.
@@ -285,15 +295,13 @@ func (p *JSProvider) buildCtxObject(ctx context.Context, rt *sobek.Runtime, scri
 	}
 
 	// ctx.cache.get(key) / ctx.cache.set(key, value, ttlSeconds) — shared in-memory cache.
-	// This cache persists across callScript invocations via the JSProvider.cache field.
-	// The scriptCache here is a per-invocation wrapper that safely exports values back to Go.
 	cacheObj := rt.NewObject()
 	if err := cacheObj.Set("get", func(call sobek.FunctionCall) sobek.Value {
 		if len(call.Arguments) == 0 {
 			return sobek.Null()
 		}
 		key := call.Arguments[0].String()
-		val := scriptCache.get(key)
+		val := sc.get(key)
 		if val == nil {
 			return sobek.Null()
 		}
@@ -311,7 +319,7 @@ func (p *JSProvider) buildCtxObject(ctx context.Context, rt *sobek.Runtime, scri
 		if len(call.Arguments) >= 3 {
 			ttl = call.Arguments[2].ToFloat()
 		}
-		scriptCache.set(key, val, ttl)
+		sc.set(key, val, ttl)
 		return sobek.Undefined()
 	}); err != nil {
 		slog.Warn("js outbound auth: failed to set ctx.cache.set", "error", err)
@@ -322,7 +330,7 @@ func (p *JSProvider) buildCtxObject(ctx context.Context, rt *sobek.Runtime, scri
 
 	// ctx.fetch(url, opts) — sandboxed HTTP client.
 	if err := ctxObj.Set("fetch", func(call sobek.FunctionCall) sobek.Value {
-		return jsOutboundFetch(ctx, rt, p.httpClient, call)
+		return jsFetch(ctx, rt, p.httpClient, call)
 	}); err != nil {
 		slog.Warn("js outbound auth: failed to set ctx.fetch", "error", err)
 	}
@@ -330,8 +338,8 @@ func (p *JSProvider) buildCtxObject(ctx context.Context, rt *sobek.Runtime, scri
 	return ctxObj
 }
 
-// jsOutboundFetch implements ctx.fetch(url, opts) for outbound auth scripts.
-func jsOutboundFetch(ctx context.Context, rt *sobek.Runtime, client *http.Client, call sobek.FunctionCall) sobek.Value {
+// jsFetch implements ctx.fetch(url, opts) for outbound auth scripts.
+func jsFetch(ctx context.Context, rt *sobek.Runtime, client *http.Client, call sobek.FunctionCall) sobek.Value {
 	if len(call.Arguments) == 0 {
 		panic(rt.NewTypeError("ctx.fetch requires a URL argument"))
 	}
@@ -391,24 +399,24 @@ func jsOutboundFetch(ctx context.Context, rt *sobek.Runtime, client *http.Client
 	return rt.ToValue(string(body))
 }
 
-// jsOutboundScriptCache is a thread-safe key-value cache with optional TTL.
-// It is shared across callScript invocations within the same JSProvider,
+// jsScriptCache is a thread-safe key-value cache with optional TTL.
+// It is shared across callScript invocations within the same Provider,
 // allowing scripts to cache tokens between invocations via ctx.cache.get/set.
-type jsOutboundScriptCache struct {
+type jsScriptCache struct {
 	mu    sync.Mutex
-	items map[string]jsOutboundScriptCacheItem
+	items map[string]jsScriptCacheItem
 }
 
-type jsOutboundScriptCacheItem struct {
+type jsScriptCacheItem struct {
 	value     any
 	expiresAt time.Time
 }
 
-func newJSOutboundScriptCache() *jsOutboundScriptCache {
-	return &jsOutboundScriptCache{items: make(map[string]jsOutboundScriptCacheItem)}
+func newJSScriptCache() *jsScriptCache {
+	return &jsScriptCache{items: make(map[string]jsScriptCacheItem)}
 }
 
-func (c *jsOutboundScriptCache) get(key string) any {
+func (c *jsScriptCache) get(key string) any {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	item, ok := c.items[key]
@@ -422,12 +430,46 @@ func (c *jsOutboundScriptCache) get(key string) any {
 	return item.value
 }
 
-func (c *jsOutboundScriptCache) set(key string, value any, ttlSeconds float64) {
+func (c *jsScriptCache) set(key string, value any, ttlSeconds float64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	var exp time.Time
 	if ttlSeconds > 0 {
 		exp = time.Now().Add(time.Duration(ttlSeconds * float64(time.Second)))
 	}
-	c.items[key] = jsOutboundScriptCacheItem{value: value, expiresAt: exp}
+	c.items[key] = jsScriptCacheItem{value: value, expiresAt: exp}
+}
+
+// compileScript pre-processes and compiles a JavaScript script source into a
+// sobek.Program for reuse across multiple Execute calls.
+//
+// The script is wrapped to support common export patterns:
+//   - ES module style:  export default function(args, ctx) { ... }
+//   - CJS style:        module.exports = function(args, ctx) { ... }
+//
+// After the wrapper runs, the global variable __mcp_default__ holds the callable.
+func compileScript(name, src string) (*sobek.Program, error) {
+	wrapped := wrapScript(src)
+	prog, err := sobek.Compile(name+".js", wrapped, false)
+	if err != nil {
+		return nil, fmt.Errorf("parse error: %w", err)
+	}
+	return prog, nil
+}
+
+// wrapScript transforms the user script source to extract the default export
+// into the __mcp_default__ global variable.
+func wrapScript(src string) string {
+	// Replace ES module "export default" with a __mcp_default__ assignment.
+	processed := strings.ReplaceAll(src, "export default ", "__mcp_default__ = ")
+
+	return `
+var __mcp_default__;
+var exports = {};
+var module = {exports: exports};
+` + processed + `
+if (typeof __mcp_default__ === 'undefined' && typeof module.exports === 'function') {
+    __mcp_default__ = module.exports;
+}
+`
 }

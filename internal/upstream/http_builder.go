@@ -31,7 +31,9 @@ func (b *HTTPBuilder) Build(ctx context.Context, cfg *config.UpstreamConfig, nam
 
 	outboundCfg := cfg.OutboundAuth
 	outboundCfg.Upstream = cfg.Name
-	provider, err := outboundauth.NewRegistry(b.pools).New(ctx, &outboundCfg)
+	outboundCfg.JSAuthPool = b.pools.JSAuth
+	outboundCfg.LuaAuthPool = b.pools.LuaAuth
+	provider, err := outboundauth.New(ctx, &outboundCfg)
 	if err != nil {
 		return nil, fmt.Errorf("build outbound auth for upstream %q: %w", cfg.Name, err)
 	}

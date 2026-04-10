@@ -1,4 +1,4 @@
-package upstream
+package command
 
 import (
 	"context"
@@ -7,29 +7,28 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 
-	"github.com/gaarutyunov/mcp-anything/internal/command"
-	"github.com/gaarutyunov/mcp-anything/internal/telemetry"
+	pkgtelemetry "github.com/gaarutyunov/mcp-anything/pkg/telemetry"
 )
 
-// CommandExecutor executes a command-backed tool.
-type CommandExecutor struct {
+// Executor executes a command-backed tool.
+type Executor struct {
 	toolName   string
-	commandDef *command.Def
+	commandDef *Def
 }
 
 // Execute runs the command and returns the MCP result.
 // Latency is recorded by the outer DispatchForGroup instrumentation in manager.go;
 // recording it here would double-count command tools.
-func (e *CommandExecutor) Execute(ctx context.Context, args map[string]any) (*sdkmcp.CallToolResult, error) {
+func (e *Executor) Execute(ctx context.Context, args map[string]any) (*sdkmcp.CallToolResult, error) {
 	toolAttrs := metric.WithAttributes(attribute.String("mcp.tool.name", e.toolName))
 
 	stdout, stderr, err := e.commandDef.Execute(ctx, args)
 	if err != nil {
-		if telemetry.ToolCallErrors != nil {
-			telemetry.ToolCallErrors.Add(ctx, 1, toolAttrs)
+		if pkgtelemetry.ToolCallErrors != nil {
+			pkgtelemetry.ToolCallErrors.Add(ctx, 1, toolAttrs)
 		}
-		return command.ToErrorResult(stderr, err), nil
+		return ToErrorResult(stderr, err), nil
 	}
 
-	return command.ToTextResult(stdout), nil
+	return ToTextResult(stdout), nil
 }

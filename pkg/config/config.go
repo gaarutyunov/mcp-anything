@@ -222,6 +222,9 @@ type UpstreamConfig struct {
 	OutboundAuth             OutboundAuthConfig  `koanf:"outbound_auth"`
 	Commands                 []CommandConfig     `koanf:"commands"` // used by type: command only
 	Scripts                  []ScriptConfig      `koanf:"scripts"`  // used by type: script only
+	// JSScriptPool is set programmatically (not from config file) to bound concurrent JS
+	// script tool executions. Nil is valid when no script upstream is configured.
+	JSScriptPool PoolAcquirer `koanf:"-"`
 }
 
 // CommandConfig defines a single command-backed MCP tool within a command upstream.

@@ -33,7 +33,7 @@ func NewBuilderRegistry(pools *runtime.Registry) *BuilderRegistry {
 	r.Register("", &HTTPBuilder{})
 	r.Register("http", &HTTPBuilder{})
 	r.Register("command", &CommandBuilder{})
-	r.Register("script", &ScriptBuilder{jsPool: pools.JSScript})
+	r.Register("script", &ScriptBuilder{})
 	return r
 }
 
@@ -53,13 +53,13 @@ func (r *BuilderRegistry) Build(ctx context.Context, cfg *config.UpstreamConfig,
 		return nil, fmt.Errorf("unknown upstream type %q", cfg.Type)
 	}
 
-	// Inject runtime pools into a copy of the outbound auth config so that
-	// pkg/upstream/http.HTTPBuilder can call outbound.New() without needing
-	// a direct reference to the runtime registry.
+	// Inject runtime pools into a copy of the config so that pkg-level builders
+	// can use bounded pools without holding a direct reference to the runtime registry.
 	cfgCopy := *cfg
 	if r.pools != nil {
 		cfgCopy.OutboundAuth.JSAuthPool = r.pools.JSAuth
 		cfgCopy.OutboundAuth.LuaAuthPool = r.pools.LuaAuth
+		cfgCopy.JSScriptPool = r.pools.JSScript
 	}
 
 	return b.Build(ctx, &cfgCopy, naming)

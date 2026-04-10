@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gaarutyunov/mcp-anything/internal/config"
-	"github.com/gaarutyunov/mcp-anything/internal/runtime"
-	"github.com/gaarutyunov/mcp-anything/internal/script"
+	"github.com/gaarutyunov/mcp-anything/pkg/config"
+	"github.com/gaarutyunov/mcp-anything/pkg/runtime"
+	"github.com/gaarutyunov/mcp-anything/pkg/upstream/script"
 )
 
 // TestCompileScript_ValidScript verifies that a valid script compiles without error.

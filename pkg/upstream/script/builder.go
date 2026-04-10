@@ -16,9 +16,8 @@ func init() {
 }
 
 // Register registers the script Builder with the pkg/upstream global builder registry.
-// Call this once at application startup when using pkg/upstream.Build directly and not
-// importing this package for its side effects.
-// When using internal/upstream.NewBuilderRegistry, registration is performed automatically.
+// This is called automatically via init() when the package is imported.
+// Call this explicitly only if you need to re-register (e.g. in tests).
 func Register() {
 	pkgupstream.RegisterBuilder("script", &Builder{})
 }

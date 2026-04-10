@@ -9,7 +9,7 @@ type ReadinessChecker interface {
 }
 
 // HealthChecker reports the health of a single upstream.
-// Implemented by Refresher in the internal/upstream package.
+// Implemented by Refresher in the pkg/upstream/http package.
 type HealthChecker interface {
 	IsHealthy() bool
 	UpstreamName() string

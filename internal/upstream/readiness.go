@@ -1,23 +1,22 @@
 package upstream
 
-import "fmt"
+import pkgupstream "github.com/gaarutyunov/mcp-anything/pkg/upstream"
 
 // RefresherSet holds a collection of Refreshers and implements server.ReadinessChecker.
-type RefresherSet struct {
-	refreshers []*Refresher
-}
+// See pkg/upstream.RefresherSet.
+type RefresherSet = pkgupstream.RefresherSet
+
+// HealthChecker reports health of a single upstream.
+// See pkg/upstream.HealthChecker.
+type HealthChecker = pkgupstream.HealthChecker
 
 // NewRefresherSet creates a RefresherSet from a slice of Refreshers.
+// This wrapper converts []*Refresher to the []HealthChecker interface
+// expected by pkg/upstream.NewRefresherSet.
 func NewRefresherSet(refreshers []*Refresher) *RefresherSet {
-	return &RefresherSet{refreshers: refreshers}
-}
-
-// IsReady returns false (with the upstream name) if any Refresher is unhealthy.
-func (rs *RefresherSet) IsReady() (bool, string) {
-	for _, r := range rs.refreshers {
-		if !r.IsHealthy() {
-			return false, fmt.Sprintf("upstream %q has exceeded max_refresh_failures", r.cfg.Name)
-		}
+	hcs := make([]pkgupstream.HealthChecker, len(refreshers))
+	for i, r := range refreshers {
+		hcs[i] = r
 	}
-	return true, ""
+	return pkgupstream.NewRefresherSet(hcs)
 }

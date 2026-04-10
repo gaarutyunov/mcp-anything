@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
+
+	"github.com/getkin/kin-openapi/openapi3"
 
 	outboundauth "github.com/gaarutyunov/mcp-anything/internal/auth/outbound"
 	"github.com/gaarutyunov/mcp-anything/internal/config"
@@ -79,4 +82,37 @@ func (b *HTTPBuilder) Build(ctx context.Context, cfg *config.UpstreamConfig, nam
 		Entries:      entries,
 		SpecYAMLRoot: specYAMLRoot,
 	}, nil
+}
+
+// extractResponseFormat reads x-mcp-response-format from an operation extension.
+func extractResponseFormat(op *openapi3.Operation) string {
+	if op == nil {
+		return "json"
+	}
+	val, ok := op.Extensions["x-mcp-response-format"]
+	if !ok {
+		return "json"
+	}
+	if s, ok := val.(string); ok && s != "" {
+		return s
+	}
+	return "json"
+}
+
+// extractAuthRequired reads x-mcp-auth-required from an operation extension (default true).
+func extractAuthRequired(op *openapi3.Operation) bool {
+	if op == nil {
+		return true
+	}
+	val, ok := op.Extensions["x-mcp-auth-required"]
+	if !ok {
+		return true
+	}
+	switch v := val.(type) {
+	case bool:
+		return v
+	case string:
+		return strings.ToLower(v) != "false"
+	}
+	return true
 }

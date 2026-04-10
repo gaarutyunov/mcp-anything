@@ -4,16 +4,16 @@ import (
 	"context"
 	"fmt"
 
+	pkgupstream "github.com/gaarutyunov/mcp-anything/pkg/upstream"
+
 	"github.com/gaarutyunov/mcp-anything/internal/config"
 	"github.com/gaarutyunov/mcp-anything/internal/runtime"
 )
 
 // Builder validates a single upstream configuration and returns a ValidatedUpstream
 // ready for registration in the tool registry.
-// Each upstream type (http, command, etc.) provides its own Builder implementation.
-type Builder interface {
-	Build(ctx context.Context, cfg *config.UpstreamConfig, naming *config.NamingConfig) (*ValidatedUpstream, error)
-}
+// See pkg/upstream.Builder.
+type Builder = pkgupstream.Builder
 
 // BuilderRegistry maps upstream type names to Builder implementations.
 // An empty type string is treated as equivalent to "http".

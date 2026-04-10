@@ -9,7 +9,10 @@ import (
 	pkgupstream "github.com/gaarutyunov/mcp-anything/pkg/upstream"
 )
 
-func init() {
+// Register registers the command Builder with the pkg/upstream global builder registry.
+// Call this once at application startup when using pkg/upstream.Build directly.
+// When using internal/upstream.NewBuilderRegistry, registration is performed automatically.
+func Register() {
 	pkgupstream.RegisterBuilder("command", &Builder{})
 }
 

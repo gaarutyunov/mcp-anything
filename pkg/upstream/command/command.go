@@ -1,6 +1,6 @@
 // Package command provides the command-backed upstream builder and executor for mcp-anything.
-// It implements the upstream.Builder interface for type "command" upstreams and registers
-// itself via init() so that importing this package is sufficient to enable command upstream support.
+// It implements the upstream.Builder interface for type "command" upstreams.
+// Call Register() at startup to register the builder with the pkg/upstream global registry.
 package command
 
 import (
@@ -27,7 +27,6 @@ import (
 const DefaultMaxOutputBytes = 1 << 20 // 1 MiB
 
 // Def holds the runtime definition for a command-backed MCP tool.
-// It is immutable after construction and safe for concurrent use.
 type Def struct {
 	// Command is the Go text/template command string.
 	// In non-shell mode it is split on whitespace into tokens, each rendered independently.
@@ -76,7 +75,11 @@ func (d *Def) Execute(ctx context.Context, args map[string]any) ([]byte, []byte,
 	// Inherit the process environment and apply overrides.
 	cmd.Env = os.Environ()
 	for k, v := range d.Env {
-		cmd.Env = append(cmd.Env, k+"="+os.ExpandEnv(v))
+		expanded, expandErr := expandBraced(v)
+		if expandErr != nil {
+			return nil, nil, fmt.Errorf("expanding env var %q: %w", k, expandErr)
+		}
+		cmd.Env = append(cmd.Env, k+"="+expanded)
 	}
 
 	if d.WorkingDir != "" {
@@ -157,6 +160,12 @@ func BuildTools(cfgs []config.CommandConfig, upstreamCfg *config.UpstreamConfig,
 		if err := validateTemplate(cfg.Command); err != nil {
 			return nil, fmt.Errorf("command %q: invalid command template: %w", cfg.ToolName, err)
 		}
+		// In non-shell mode, validate that whitespace-splitting produces complete tokens.
+		if !cfg.Shell {
+			if err := validateNonShellTokens(cfg.Command); err != nil {
+				return nil, fmt.Errorf("command %q: %w", cfg.ToolName, err)
+			}
+		}
 
 		prefixedName := prefix + sep + cfg.ToolName
 		if seenNames[prefixedName] {
@@ -236,6 +245,67 @@ func validateTemplate(tmplStr string) error {
 	return err
 }
 
+// validateNonShellTokens checks that the command, when split on whitespace, produces
+// complete argument tokens. It rejects commands with spaced template delimiters
+// (e.g. "{{ .msg }}" splits into fragments) which strings.Fields cannot handle.
+func validateNonShellTokens(command string) error {
+	for _, tok := range strings.Fields(command) {
+		hasOpen := strings.HasPrefix(tok, "{{")
+		hasClose := strings.HasSuffix(tok, "}}")
+		if tok == "{{" || (hasOpen && !hasClose) {
+			return fmt.Errorf("template delimiter fragment %q in non-shell command; use {{.var}} without spaces or enable shell: true", tok)
+		}
+		if hasClose && !hasOpen {
+			return fmt.Errorf("dangling \"}}\" in token %q; template delimiters must not span whitespace in non-shell mode", tok)
+		}
+	}
+	return nil
+}
+
+// expandBraced expands ${VAR} references in value using the process environment.
+// It returns an error if plain $VAR (unbraced) syntax is used, or if a ${VAR}
+// reference resolves to an unset variable. This enforces the project's ${ENV_VAR} convention.
+func expandBraced(value string) (string, error) {
+	if !strings.ContainsRune(value, '$') {
+		return value, nil // fast path: no expansion needed
+	}
+	var result strings.Builder
+	i := 0
+	for i < len(value) {
+		if value[i] != '$' {
+			result.WriteByte(value[i])
+			i++
+			continue
+		}
+		// Found '$' — check what follows.
+		if i+1 >= len(value) {
+			result.WriteByte('$')
+			i++
+			continue
+		}
+		if value[i+1] != '{' {
+			return "", fmt.Errorf("unbraced $VAR syntax at position %d; use ${VAR} instead", i)
+		}
+		// ${VAR} — find the closing '}'.
+		rest := value[i+2:]
+		end := strings.IndexByte(rest, '}')
+		if end < 0 {
+			return "", fmt.Errorf("unclosed ${ in env value")
+		}
+		varName := rest[:end]
+		if varName == "" {
+			return "", fmt.Errorf("empty variable name in ${}")
+		}
+		expanded, ok := os.LookupEnv(varName)
+		if !ok {
+			return "", fmt.Errorf("env var ${%s} is not set", varName)
+		}
+		result.WriteString(expanded)
+		i += 2 + end + 1 // skip past closing '}'
+	}
+	return result.String(), nil
+}
+
 // renderToken renders a single template token (no shell quoting — used in direct exec mode).
 func renderToken(tmplStr string, args map[string]any) (string, error) {
 	tmpl, err := template.New("").Parse(tmplStr)
@@ -258,17 +328,37 @@ func (s shellSafeString) String() string {
 	return shellQuote(string(s))
 }
 
+// shellSafeValue recursively wraps all string values in v with shellSafeString
+// so that nested strings in maps and slices are also shell-quoted on interpolation.
+func shellSafeValue(v any) any {
+	switch val := v.(type) {
+	case string:
+		return shellSafeString(val)
+	case map[string]any:
+		out := make(map[string]any, len(val))
+		for k, vv := range val {
+			out[k] = shellSafeValue(vv)
+		}
+		return out
+	case []any:
+		out := make([]any, len(val))
+		for i, vv := range val {
+			out[i] = shellSafeValue(vv)
+		}
+		return out
+	default:
+		return v
+	}
+}
+
 // renderShellTemplate renders the command template for shell execution.
-// All string values in args are wrapped as shellSafeString so that the template
-// engine automatically shell-quotes them when they are interpolated.
+// All string values in args are wrapped recursively as shellSafeString so that
+// the template engine automatically shell-quotes them when interpolated,
+// including strings nested inside maps and slices.
 func renderShellTemplate(tmplStr string, args map[string]any) (string, error) {
 	safeArgs := make(map[string]any, len(args))
 	for k, v := range args {
-		if s, ok := v.(string); ok {
-			safeArgs[k] = shellSafeString(s)
-		} else {
-			safeArgs[k] = v
-		}
+		safeArgs[k] = shellSafeValue(v)
 	}
 	tmpl, err := template.New("").Parse(tmplStr)
 	if err != nil {

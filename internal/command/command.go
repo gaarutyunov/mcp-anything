@@ -1,7 +1,12 @@
 // Package command re-exports from pkg/upstream/command. See pkg/upstream/command for documentation.
 package command
 
-import pkgcmd "github.com/gaarutyunov/mcp-anything/pkg/upstream/command"
+import (
+	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/gaarutyunov/mcp-anything/pkg/config"
+	pkgcmd "github.com/gaarutyunov/mcp-anything/pkg/upstream/command"
+)
 
 // DefaultMaxOutputBytes is the maximum bytes captured from stdout or stderr when
 // MaxOutput is not configured.
@@ -18,12 +23,18 @@ type Tool = pkgcmd.Tool
 
 // BuildTools converts a slice of CommandConfig entries into Tool descriptors.
 // See pkg/upstream/command.BuildTools.
-var BuildTools = pkgcmd.BuildTools
+func BuildTools(cfgs []config.CommandConfig, upstreamCfg *config.UpstreamConfig, namingCfg *config.NamingConfig) ([]*pkgcmd.Tool, error) {
+	return pkgcmd.BuildTools(cfgs, upstreamCfg, namingCfg)
+}
 
 // ToTextResult converts command stdout into a success CallToolResult.
 // See pkg/upstream/command.ToTextResult.
-var ToTextResult = pkgcmd.ToTextResult
+func ToTextResult(stdout []byte) *sdkmcp.CallToolResult {
+	return pkgcmd.ToTextResult(stdout)
+}
 
 // ToErrorResult converts a command failure into an error CallToolResult.
 // See pkg/upstream/command.ToErrorResult.
-var ToErrorResult = pkgcmd.ToErrorResult
+func ToErrorResult(stderr []byte, execErr error) *sdkmcp.CallToolResult {
+	return pkgcmd.ToErrorResult(stderr, execErr)
+}

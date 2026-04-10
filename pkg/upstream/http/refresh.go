@@ -53,6 +53,10 @@ type Refresher struct {
 	current  atomic.Pointer[Snapshot]
 	manager  RegistryManager
 	failures atomic.Int32
+	// degraded is true after RemoveUpstream is called and false again after
+	// a successful refresh re-registers the upstream. IsHealthy uses this
+	// flag so that /readyz stays unhealthy until tools actually recover.
+	degraded atomic.Bool
 	pools    *runtime.Registry
 
 	lastOverlayFetch time.Time
@@ -102,7 +106,12 @@ func (r *Refresher) Start(ctx context.Context) {
 							"upstream", r.cfg.Name,
 							"consecutive_failures", count)
 						r.manager.RemoveUpstream(r.cfg.Name)
-						return
+						r.degraded.Store(true)
+						// Reset the counter so we keep polling without calling
+						// RemoveUpstream on every subsequent tick. When the spec
+						// server recovers, refresh() will succeed and call
+						// UpdateUpstream, re-registering the upstream's tools.
+						r.failures.Store(0)
 					}
 				} else {
 					pkgtelemetry.RecordSpecRefresh(ctx, r.cfg.Name, true)
@@ -118,8 +127,12 @@ func (r *Refresher) Current() *Snapshot {
 	return r.current.Load()
 }
 
-// IsHealthy returns true if the upstream is below max_refresh_failures.
+// IsHealthy returns true if the upstream is below max_refresh_failures and
+// has not been marked degraded (i.e. its tools are present in the registry).
 func (r *Refresher) IsHealthy() bool {
+	if r.degraded.Load() {
+		return false
+	}
 	maxFail := r.cfg.OpenAPI.MaxRefreshFailures
 	if maxFail <= 0 {
 		return true
@@ -190,6 +203,8 @@ func (r *Refresher) refresh(ctx context.Context) error {
 	if err := r.manager.UpdateUpstream(r.cfg.Name, entries, specYAMLRoot); err != nil {
 		return fmt.Errorf("updating upstream registry: %w", err)
 	}
+	// Clear degraded flag: tools are back in the registry.
+	r.degraded.Store(false)
 
 	// 8. Atomically swap snapshot only after registry publish succeeds.
 	r.current.Store(snap)

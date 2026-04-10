@@ -57,7 +57,6 @@ func (r *BuilderRegistry) Build(ctx context.Context, cfg *config.UpstreamConfig,
 	// pkg/upstream/http.HTTPBuilder can call outbound.New() without needing
 	// a direct reference to the runtime registry.
 	cfgCopy := *cfg
-	cfgCopy.OutboundAuth = cfg.OutboundAuth
 	if r.pools != nil {
 		cfgCopy.OutboundAuth.JSAuthPool = r.pools.JSAuth
 		cfgCopy.OutboundAuth.LuaAuthPool = r.pools.LuaAuth

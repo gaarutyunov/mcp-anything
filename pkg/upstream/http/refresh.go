@@ -30,7 +30,6 @@ type Snapshot struct {
 	SpecETag      string
 	OverlayETag   string
 	FetchedAt     time.Time
-	FailureCount  int // consecutive refresh failures (0 = healthy)
 
 	// cachedSpecBytes and cachedOverlayBytes store raw bytes for reuse when
 	// the respective resource hasn't changed (304 Not Modified).
@@ -69,7 +68,7 @@ func NewRefresher(ctx context.Context, cfg *config.UpstreamConfig, naming *confi
 		pools:   pools,
 	}
 
-	snap, err := r.buildSnapshot(ctx, nil)
+	snap, err := r.buildSnapshot(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("initial snapshot for upstream %q: %w", cfg.Name, err)
 	}
@@ -103,6 +102,7 @@ func (r *Refresher) Start(ctx context.Context) {
 							"upstream", r.cfg.Name,
 							"consecutive_failures", count)
 						r.manager.RemoveUpstream(r.cfg.Name)
+						return
 					}
 				} else {
 					pkgtelemetry.RecordSpecRefresh(ctx, r.cfg.Name, true)
@@ -162,80 +162,15 @@ func (r *Refresher) refresh(ctx context.Context) error {
 	}
 
 	// 3. Apply overlay (if any).
-	var mergedBytes []byte
-	if overlayBytes != nil {
-		merged, warnings, applyErr := openapi.ApplyOverlayBytes(specData, overlayBytes)
-		if applyErr != nil {
-			return fmt.Errorf("applying overlay: %w", applyErr)
-		}
-		for _, w := range warnings {
-			slog.Warn("overlay unmatched target", "upstream", r.cfg.Name, "warning", w)
-		}
-		mergedBytes = merged
-	} else {
-		mergedBytes = specData
-	}
-
-	// 4. Run full pipeline from merged bytes.
-	doc, router, specYAMLRoot, err := openapi.LoadPipelineFromBytes(ctx, mergedBytes, r.cfg.OpenAPI)
+	mergedBytes, err := r.applyOverlay(specData, overlayBytes)
 	if err != nil {
-		return fmt.Errorf("loading pipeline: %w", err)
+		return err
 	}
 
-	// 5. Generate and validate tools.
-	tools, err := openapi.GenerateTools(doc, r.cfg, r.naming)
+	// 4-5. Run full pipeline from merged bytes.
+	entries, doc, router, specYAMLRoot, err := r.buildEntriesFromBytes(ctx, mergedBytes)
 	if err != nil {
-		return fmt.Errorf("generating tools: %w", err)
-	}
-	for _, gt := range tools {
-		gt.OperationNode = openapi.FindOperationYAMLNode(specYAMLRoot, gt.PathTemplate, strings.ToLower(gt.Method))
-	}
-
-	outboundCfg := r.cfg.OutboundAuth
-	outboundCfg.Upstream = r.cfg.Name
-	outboundCfg.JSAuthPool = r.pools.JSAuth
-	outboundCfg.LuaAuthPool = r.pools.LuaAuth
-	provider, err := pkgoutbound.New(ctx, &outboundCfg)
-	if err != nil {
-		return fmt.Errorf("building outbound auth: %w", err)
-	}
-
-	client, err := NewHTTPClient(r.cfg, provider)
-	if err != nil {
-		return fmt.Errorf("building HTTP client: %w", err)
-	}
-
-	up := &pkgupstream.Upstream{
-		Name:       r.cfg.Name,
-		ToolPrefix: r.cfg.ToolPrefix,
-		BaseURL:    r.cfg.BaseURL,
-		Client:     client,
-	}
-	validator := openapi.NewValidator(doc, router)
-
-	var entries []*pkgupstream.RegistryEntry
-	for _, gt := range tools {
-		vt, valErr := openapi.ValidateTool(ctx, gt, doc)
-		if valErr != nil {
-			return fmt.Errorf("validating tool %q: %w", gt.PrefixedName, valErr)
-		}
-		vt.Validator = validator
-		entry := &pkgupstream.RegistryEntry{
-			PrefixedName:   gt.PrefixedName,
-			OriginalName:   gt.OriginalName,
-			Upstream:       up,
-			MCPTool:        gt.MCPTool,
-			Transforms:     vt.Transforms,
-			ResponseFormat: extractResponseFormat(gt.Operation),
-			AuthRequired:   extractAuthRequired(gt.Operation),
-			Method:         gt.Method,
-			PathTemplate:   gt.PathTemplate,
-			Validator:      vt.Validator,
-			ValidationCfg:  r.cfg.Validation,
-			OperationNode:  gt.OperationNode,
-		}
-		entry.Executor = &Executor{entry: entry}
-		entries = append(entries, entry)
+		return err
 	}
 
 	// 6. Build new snapshot.
@@ -304,41 +239,39 @@ func (r *Refresher) fetchOverlay(ctx context.Context, prev *Snapshot) (data []by
 	return respData, respETag, true, nil
 }
 
-// buildSnapshot performs the initial load: fetches spec + overlay, runs the full pipeline,
-// and returns the first Snapshot (without notifying the manager).
-func (r *Refresher) buildSnapshot(ctx context.Context, prev *Snapshot) (*Snapshot, error) {
-	specData, specETag, _, err := openapi.FetchSpecConditional(ctx, r.cfg.OpenAPI, "", 5)
-	if err != nil {
-		return nil, fmt.Errorf("fetching spec: %w", err)
+// applyOverlay merges overlayBytes into specData and returns the merged bytes.
+// If overlayBytes is nil, specData is returned unchanged.
+func (r *Refresher) applyOverlay(specData, overlayBytes []byte) ([]byte, error) {
+	if overlayBytes == nil {
+		return specData, nil
 	}
-
-	overlayBytes, overlayETag, overlayFetched, err := r.fetchOverlay(ctx, &Snapshot{})
+	merged, warnings, err := openapi.ApplyOverlayBytes(specData, overlayBytes)
 	if err != nil {
-		return nil, fmt.Errorf("fetching overlay: %w", err)
+		return nil, fmt.Errorf("applying overlay: %w", err)
 	}
-
-	var mergedBytes []byte
-	if overlayBytes != nil {
-		merged, warnings, applyErr := openapi.ApplyOverlayBytes(specData, overlayBytes)
-		if applyErr != nil {
-			return nil, fmt.Errorf("applying overlay: %w", applyErr)
-		}
-		for _, w := range warnings {
-			slog.Warn("overlay unmatched target", "upstream", r.cfg.Name, "warning", w)
-		}
-		mergedBytes = merged
-	} else {
-		mergedBytes = specData
+	for _, w := range warnings {
+		slog.Warn("overlay unmatched target", "upstream", r.cfg.Name, "warning", w)
 	}
+	return merged, nil
+}
 
-	doc, router, specYAMLRoot, err := openapi.LoadPipelineFromBytes(ctx, mergedBytes, r.cfg.OpenAPI)
+// buildEntriesFromBytes runs the full tool-build pipeline from merged spec bytes.
+// It returns the generated RegistryEntry list plus the parsed doc, router, and YAML root.
+func (r *Refresher) buildEntriesFromBytes(ctx context.Context, mergedBytes []byte) (
+	entries []*pkgupstream.RegistryEntry,
+	doc *openapi3.T,
+	router routers.Router,
+	specYAMLRoot *yaml.Node,
+	err error,
+) {
+	doc, router, specYAMLRoot, err = openapi.LoadPipelineFromBytes(ctx, mergedBytes, r.cfg.OpenAPI)
 	if err != nil {
-		return nil, fmt.Errorf("loading pipeline: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("loading pipeline: %w", err)
 	}
 
 	tools, err := openapi.GenerateTools(doc, r.cfg, r.naming)
 	if err != nil {
-		return nil, fmt.Errorf("generating tools: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("generating tools: %w", err)
 	}
 	for _, gt := range tools {
 		gt.OperationNode = openapi.FindOperationYAMLNode(specYAMLRoot, gt.PathTemplate, strings.ToLower(gt.Method))
@@ -350,27 +283,26 @@ func (r *Refresher) buildSnapshot(ctx context.Context, prev *Snapshot) (*Snapsho
 	outboundCfg.LuaAuthPool = r.pools.LuaAuth
 	provider, err := pkgoutbound.New(ctx, &outboundCfg)
 	if err != nil {
-		return nil, fmt.Errorf("building outbound auth: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("building outbound auth: %w", err)
 	}
 
-	httpClient, err := NewHTTPClient(r.cfg, provider)
+	client, err := NewHTTPClient(r.cfg, provider)
 	if err != nil {
-		return nil, fmt.Errorf("building HTTP client: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("building HTTP client: %w", err)
 	}
 
 	up := &pkgupstream.Upstream{
 		Name:       r.cfg.Name,
 		ToolPrefix: r.cfg.ToolPrefix,
 		BaseURL:    r.cfg.BaseURL,
-		Client:     httpClient,
+		Client:     client,
 	}
 	validator := openapi.NewValidator(doc, router)
 
-	var entries []*pkgupstream.RegistryEntry
 	for _, gt := range tools {
 		vt, valErr := openapi.ValidateTool(ctx, gt, doc)
 		if valErr != nil {
-			return nil, fmt.Errorf("validating tool %q: %w", gt.PrefixedName, valErr)
+			return nil, nil, nil, nil, fmt.Errorf("validating tool %q: %w", gt.PrefixedName, valErr)
 		}
 		vt.Validator = validator
 		entry := &pkgupstream.RegistryEntry{
@@ -391,7 +323,31 @@ func (r *Refresher) buildSnapshot(ctx context.Context, prev *Snapshot) (*Snapsho
 		entries = append(entries, entry)
 	}
 
-	_ = prev
+	return entries, doc, router, specYAMLRoot, nil
+}
+
+// buildSnapshot performs the initial load: fetches spec + overlay, runs the full pipeline,
+// and returns the first Snapshot (without notifying the manager).
+func (r *Refresher) buildSnapshot(ctx context.Context) (*Snapshot, error) {
+	specData, specETag, _, err := openapi.FetchSpecConditional(ctx, r.cfg.OpenAPI, "", 5)
+	if err != nil {
+		return nil, fmt.Errorf("fetching spec: %w", err)
+	}
+
+	overlayBytes, overlayETag, overlayFetched, err := r.fetchOverlay(ctx, &Snapshot{})
+	if err != nil {
+		return nil, fmt.Errorf("fetching overlay: %w", err)
+	}
+
+	mergedBytes, err := r.applyOverlay(specData, overlayBytes)
+	if err != nil {
+		return nil, err
+	}
+
+	entries, doc, router, specYAMLRoot, err := r.buildEntriesFromBytes(ctx, mergedBytes)
+	if err != nil {
+		return nil, err
+	}
 
 	if overlayFetched {
 		r.lastOverlayFetch = time.Now()

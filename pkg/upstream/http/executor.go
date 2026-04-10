@@ -36,11 +36,17 @@ func (e *Executor) Execute(ctx context.Context, args map[string]any) (*sdkmcp.Ca
 	toolAttrs := metric.WithAttributes(attribute.String("mcp.tool.name", entry.PrefixedName))
 
 	// Get the typed transforms (set by the HTTP builder).
-	transforms, _ := entry.Transforms.(*transform.CompiledTransforms)
+	transforms, ok := entry.Transforms.(*transform.CompiledTransforms)
+	if !ok || transforms == nil {
+		return nil, fmt.Errorf("invalid transforms for tool %q: expected *transform.CompiledTransforms", entry.PrefixedName)
+	}
 
 	// Apply request transform jq → RequestEnvelope.
 	reqStart := time.Now()
 	envelope, err := transforms.RunRequest(ctx, args)
+	if err != nil {
+		return nil, fmt.Errorf("request transform: %w", err)
+	}
 	if pkgtelemetry.TransformDuration != nil {
 		pkgtelemetry.TransformDuration.Record(ctx, time.Since(reqStart).Seconds(),
 			metric.WithAttributes(
@@ -48,9 +54,6 @@ func (e *Executor) Execute(ctx context.Context, args map[string]any) (*sdkmcp.Ca
 				attribute.String("transform.stage", "request"),
 			),
 		)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("request transform: %w", err)
 	}
 
 	// Build upstream URL from the envelope.

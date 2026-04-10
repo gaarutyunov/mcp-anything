@@ -1,3 +1,7 @@
+// Package mcp bootstraps the MCP server using the official go-sdk, registers
+// all generated tools from the upstream registry, and implements the tool call
+// pipeline: prefix-based routing, transform, OpenAPI validation, outbound auth,
+// upstream HTTP dispatch, and response conversion.
 package mcp
 
 import (
@@ -17,9 +21,9 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"gopkg.in/yaml.v3"
 
-	"github.com/gaarutyunov/mcp-anything/internal/config"
-	"github.com/gaarutyunov/mcp-anything/internal/runtime"
-	"github.com/gaarutyunov/mcp-anything/internal/telemetry"
+	"github.com/gaarutyunov/mcp-anything/pkg/config"
+	"github.com/gaarutyunov/mcp-anything/pkg/runtime"
+	pkgtelemetry "github.com/gaarutyunov/mcp-anything/pkg/telemetry"
 	pkgupstream "github.com/gaarutyunov/mcp-anything/pkg/upstream"
 )
 
@@ -258,7 +262,7 @@ func (m *Manager) applyRegistryLocked(newRegistry *pkgupstream.Registry, groups 
 
 				spanName := "tools/call " + t.Name
 				callCtx, span := otel.Tracer("mcp-anything").Start(callCtx, spanName,
-					trace.WithAttributes(telemetry.ToolCallAttributes(t.Name, "tools/call", sessionID)...),
+					trace.WithAttributes(pkgtelemetry.ToolCallAttributes(t.Name, "tools/call", sessionID)...),
 					trace.WithSpanKind(trace.SpanKindServer),
 				)
 				defer span.End()
@@ -278,8 +282,8 @@ func (m *Manager) applyRegistryLocked(newRegistry *pkgupstream.Registry, groups 
 					attribute.String("mcp.tool.name", t.Name),
 					attribute.String("mcp.method", "tools/call"),
 				)
-				if telemetry.ToolCallDuration != nil {
-					telemetry.ToolCallDuration.Record(callCtx, elapsed, toolAttrs)
+				if pkgtelemetry.ToolCallDuration != nil {
+					pkgtelemetry.ToolCallDuration.Record(callCtx, elapsed, toolAttrs)
 				}
 				if dispErr != nil {
 					span.RecordError(dispErr)

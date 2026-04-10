@@ -52,7 +52,13 @@ func New(ctx context.Context, cfg *config.OutboundAuthConfig) (TokenProvider, er
 	f, ok := registry[strategy]
 	mu.RUnlock()
 	if !ok {
-		return nil, fmt.Errorf("unknown outbound auth strategy %q (did you import the provider package?)", strategy)
+		pkgName := strategy
+		if pkgName == "js_script" {
+			pkgName = "js"
+		}
+		return nil, fmt.Errorf("unknown outbound auth strategy %q — did you forget to import _ %q?",
+			strategy,
+			"github.com/gaarutyunov/mcp-anything/pkg/auth/outbound/"+pkgName)
 	}
 	return f(ctx, cfg)
 }

@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/gaarutyunov/mcp-anything/internal/config"
+	"github.com/gaarutyunov/mcp-anything/pkg/config"
 )
 
 // BuildTLSConfig constructs a *tls.Config for outbound (upstream) connections.

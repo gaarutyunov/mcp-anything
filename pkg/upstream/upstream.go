@@ -48,7 +48,9 @@ func Build(ctx context.Context, cfg *config.UpstreamConfig, naming *config.Namin
 	b, ok := builders[cfg.Type]
 	buildersMu.RUnlock()
 	if !ok {
-		return nil, fmt.Errorf("unknown upstream type %q: did you import the builder package?", cfg.Type)
+		return nil, fmt.Errorf("unknown upstream type %q — did you forget to import _ %q?",
+			cfg.Type,
+			"github.com/gaarutyunov/mcp-anything/pkg/upstream/"+cfg.Type)
 	}
 	return b.Build(ctx, cfg, naming)
 }

@@ -1,29 +1,29 @@
-## MCPProxy for Binance market data.
+## MCPProxy for Kraken market data.
 ##
-## This proxy exposes Binance public market data endpoints as MCP tools
+## This proxy exposes Kraken public market data endpoints as MCP tools
 ## with no inbound authentication (market data is publicly accessible).
 ##
 ## Prerequisites:
 ##   1. mcp-anything operator is deployed (see helm-values.yaml)
-##   2. The binance-market-data ConfigMaps are created:
-##      kubectl -n mcp-system create configmap binance-spec \
-##        --from-file=spec.yaml=deploy/examples/binance/spec.yaml
-##      kubectl -n mcp-system create configmap binance-overlay \
-##        --from-file=overlay.yaml=deploy/examples/binance/overlay.yaml
+##   2. The kraken ConfigMaps are created:
+##      kubectl -n mcp-system create configmap kraken-spec \
+##        --from-file=spec.yaml=deploy/examples/kraken/spec.yaml
+##      kubectl -n mcp-system create configmap kraken-overlay \
+##        --from-file=overlay.yaml=deploy/examples/kraken/overlay.yaml
 ##   3. The MCPUpstream is applied (see mcpupstream.yaml)
 ##
 ## Apply:
-##   kubectl apply -f deploy/examples/binance/mcpproxy.yaml
+##   kubectl apply -f deploy/examples/kraken/mcpproxy.yaml
 apiVersion: mcp-anything.ai/v1alpha1
 kind: MCPProxy
 metadata:
-  name: binance-proxy
+  name: kraken-proxy
   namespace: mcp-system
 spec:
-  # Select the Binance MCPUpstream in the same namespace.
+  # Select the Kraken MCPUpstream in the same namespace.
   upstreamSelector:
     matchLabels:
-      mcp-anything.ai/proxy: binance-proxy
+      mcp-anything.ai/proxy: kraken-proxy
 
   # Use the latest proxy image.
   image: ghcr.io/gaarutyunov/mcp-anything:latest
@@ -45,13 +45,13 @@ spec:
       - sse
 
   # Tool naming: use double-underscore separator for tool names,
-  # e.g. "binance__get_price", "binance__get_24hr_stats".
+  # e.g. "kraken__get_ticker", "kraken__get_ohlc".
   naming:
     separator: "__"
     maxLength: 128
     conflictResolution: error
 
-  # No inbound authentication — Binance public market data requires no API key.
+  # No inbound authentication — Kraken public market data requires no API key.
   # To add JWT authentication, uncomment:
   # inboundAuth:
   #   strategy: jwt

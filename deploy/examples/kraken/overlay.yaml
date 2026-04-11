@@ -1,0 +1,72 @@
+overlay: 1.0.0
+info:
+  title: Kraken Market Data Overlay
+  description: >
+    OpenAPI Overlay that customises Kraken market data tools exposed via
+    mcp-anything. Adds jq-based response transforms to extract the most
+    relevant fields, and provides improved tool names and descriptions.
+  version: 1.0.0
+x-speakeasy-jsonpath: rfc9535
+
+actions:
+  # ─── System Status ────────────────────────────────────────────────────────────
+  # Extract status and timestamp from the result wrapper.
+  - target: "$.paths[\"/0/public/SystemStatus\"].get"
+    update:
+      x-mcp-tool-name: get_system_status
+      description: >
+        Get Kraken exchange system status and current server time.
+        Returns status (online/maintenance/cancel_only/post_only) and ISO 8601 timestamp.
+      x-mcp-response-transform: ".result"
+
+  # ─── Ticker ──────────────────────────────────────────────────────────────────
+  # Kraken ticker returns data under the normalised pair name (e.g. XXBTZUSD).
+  # Extract the first (and only) entry and rename array fields to readable names.
+  # a=ask, b=bid, c=last, v=volume, p=vwap, t=trades, l=low, h=high, o=open.
+  - target: "$.paths[\"/0/public/Ticker\"].get"
+    update:
+      x-mcp-tool-name: get_ticker
+      description: >
+        Get current ticker information for a trading pair (e.g. XBTUSD, ETHUSD).
+        Returns ask, bid, last price, 24h volume, VWAP, high, low, trade count,
+        and today's opening price.
+      x-mcp-response-transform: ".result | to_entries[0] | {pair: .key, ask: .value.a[0], bid: .value.b[0], lastPrice: .value.c[0], volume24h: .value.v[1], vwap24h: .value.p[1], high24h: .value.h[1], low24h: .value.l[1], trades24h: .value.t[1], openingPrice: .value.o}"
+
+  # ─── OHLC ─────────────────────────────────────────────────────────────────────
+  # Kraken OHLC result contains the pair array and a "last" timestamp key.
+  # Strip the "last" key, then map each candle array to named fields.
+  # Candle format: [time, open, high, low, close, vwap, volume, count].
+  - target: "$.paths[\"/0/public/OHLC\"].get"
+    update:
+      x-mcp-tool-name: get_ohlc
+      description: >
+        Get OHLC candlestick data for a trading pair (e.g. XBTUSD) at a
+        specified interval in minutes (1, 5, 15, 30, 60, 240, 1440).
+        Returns open/high/low/close prices, VWAP, volume, and trade count per candle.
+      x-mcp-response-transform: ".result | del(.last) | to_entries[0] | {pair: .key, candles: [.value[] | {time: .[0], open: .[1], high: .[2], low: .[3], close: .[4], vwap: .[5], volume: .[6], trades: .[7]}]}"
+
+  # ─── Order Book ───────────────────────────────────────────────────────────────
+  # Limit depth to top 5 levels for readability.
+  # Each level is [price, volume, timestamp].
+  - target: "$.paths[\"/0/public/Depth\"].get"
+    update:
+      x-mcp-tool-name: get_order_book
+      description: >
+        Get the current order book for a trading pair (e.g. XBTUSD).
+        Returns up to 5 best bid and ask price levels, each with price, volume,
+        and timestamp.
+      x-mcp-response-transform: ".result | to_entries[0] | {pair: .key, asks: .value.asks[:5], bids: .value.bids[:5]}"
+
+  # ─── Recent Trades ────────────────────────────────────────────────────────────
+  # Kraken Trades result contains the pair array and a "last" trade ID key.
+  # Strip "last", map each trade array to readable fields, return first 10.
+  # Trade format: [price, volume, time, side, type, misc, trade_id].
+  # side: "b"=buy, "s"=sell; type: "l"=limit, "m"=market.
+  - target: "$.paths[\"/0/public/Trades\"].get"
+    update:
+      x-mcp-tool-name: get_recent_trades
+      description: >
+        Get the most recent public trades for a trading pair (e.g. XBTUSD).
+        Returns the last 10 trades with price, volume, time, side (buy/sell),
+        and order type (limit/market).
+      x-mcp-response-transform: ".result | del(.last) | to_entries[0] | {pair: .key, trades: [.value[] | {price: .[0], volume: .[1], time: .[2], side: (if .[3] == \"b\" then \"buy\" else \"sell\" end), type: (if .[4] == \"l\" then \"limit\" else \"market\" end)}][:10]}"

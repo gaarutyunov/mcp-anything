@@ -31,29 +31,28 @@ import (
 )
 
 const (
-	binanceTestNamespace = "binance-e2e"
-	binanceProxyName     = "binance-proxy"
-	binanceUpstreamName  = "market-data"
+	krakenTestNamespace = "kraken-e2e"
+	krakenProxyName     = "kraken-proxy"
+	krakenUpstreamName  = "market-data"
 
 	// Paths to example files relative to the tests/integration directory.
-	binanceSpecRelPath    = "../../deploy/examples/binance/spec.yaml"
-	binanceOverlayRelPath = "../../deploy/examples/binance/overlay.yaml"
+	krakenSpecRelPath    = "../../deploy/examples/kraken/spec.yaml"
+	krakenOverlayRelPath = "../../deploy/examples/kraken/overlay.yaml"
 )
 
-// TestBinanceMarketDataE2E deploys the proxy to the shared k3s cluster via the
-// in-process operator, then makes real requests to the Binance public market data
+// TestKrakenMarketDataE2E deploys the proxy to the shared k3s cluster via the
+// in-process operator, then makes real requests to the Kraken public market data
 // API through the MCP protocol.
 //
 // The test:
 //  1. Loads the proxy image into k3s.
-//  2. Applies the Binance spec and overlay as ConfigMaps.
+//  2. Applies the Kraken spec and overlay as ConfigMaps.
 //  3. Creates MCPUpstream and MCPProxy CRDs — the operator reconciles them
 //     and creates the proxy Deployment, Service, and ConfigMaps.
 //  4. Waits for the proxy pod to become Ready.
 //  5. Port-forwards to the proxy pod and connects an MCP client.
-//  6. Calls several Binance market data tools and verifies the responses.
-//
-func TestBinanceMarketDataE2E(t *testing.T) {
+//  6. Calls several Kraken market data tools and verifies the responses.
+func TestKrakenMarketDataE2E(t *testing.T) {
 	if globalK3s == nil {
 		t.Fatal("shared k3s cluster unavailable")
 	}
@@ -65,7 +64,7 @@ func TestBinanceMarketDataE2E(t *testing.T) {
 
 	proxyImage := os.Getenv("PROXY_IMAGE")
 	if proxyImage == "" {
-		proxyImage = "ghcr.io/gaarutyunov/mcp-anything:latest"
+		t.Fatal("PROXY_IMAGE must point to the image built for this test run")
 	}
 
 	t.Logf("loading proxy image %q into k3s", proxyImage)
@@ -88,8 +87,8 @@ func TestBinanceMarketDataE2E(t *testing.T) {
 
 	// ── 3. Create namespace ───────────────────────────────────────────────────
 
-	t.Logf("creating namespace %s", binanceTestNamespace)
-	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: binanceTestNamespace}}
+	t.Logf("creating namespace %s", krakenTestNamespace)
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: krakenTestNamespace}}
 	if err := k8sClient.Create(ctx, ns); err != nil && !apierrors.IsAlreadyExists(err) {
 		t.Fatalf("creating namespace: %v", err)
 	}
@@ -97,38 +96,38 @@ func TestBinanceMarketDataE2E(t *testing.T) {
 		cleanCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		existing := &corev1.Namespace{}
-		if err := k8sClient.Get(cleanCtx, types.NamespacedName{Name: binanceTestNamespace}, existing); err == nil {
+		if err := k8sClient.Get(cleanCtx, types.NamespacedName{Name: krakenTestNamespace}, existing); err == nil {
 			if err := k8sClient.Delete(cleanCtx, existing); err != nil && !apierrors.IsNotFound(err) {
-				t.Logf("cleanup: delete namespace %s: %v", binanceTestNamespace, err)
+				t.Logf("cleanup: delete namespace %s: %v", krakenTestNamespace, err)
 			}
 		}
 	})
 
 	// ── 4. Load spec and overlay from example files ───────────────────────────
 
-	specData, err := os.ReadFile(filepath.Join(".", binanceSpecRelPath))
+	specData, err := os.ReadFile(filepath.Join(".", krakenSpecRelPath))
 	if err != nil {
-		t.Fatalf("reading binance spec from %s: %v", binanceSpecRelPath, err)
+		t.Fatalf("reading kraken spec from %s: %v", krakenSpecRelPath, err)
 	}
-	overlayData, err := os.ReadFile(filepath.Join(".", binanceOverlayRelPath))
+	overlayData, err := os.ReadFile(filepath.Join(".", krakenOverlayRelPath))
 	if err != nil {
-		t.Fatalf("reading binance overlay from %s: %v", binanceOverlayRelPath, err)
+		t.Fatalf("reading kraken overlay from %s: %v", krakenOverlayRelPath, err)
 	}
 
 	// ── 5. Create ConfigMaps for spec and overlay ─────────────────────────────
 
 	t.Log("creating ConfigMaps for spec and overlay")
 	if err := createOrUpdateConfigMap(ctx, k8sClient, &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{Name: "binance-spec", Namespace: binanceTestNamespace},
+		ObjectMeta: metav1.ObjectMeta{Name: "kraken-spec", Namespace: krakenTestNamespace},
 		Data:       map[string]string{"spec.yaml": string(specData)},
 	}); err != nil {
-		t.Fatalf("creating binance-spec ConfigMap: %v", err)
+		t.Fatalf("creating kraken-spec ConfigMap: %v", err)
 	}
 	if err := createOrUpdateConfigMap(ctx, k8sClient, &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{Name: "binance-overlay", Namespace: binanceTestNamespace},
+		ObjectMeta: metav1.ObjectMeta{Name: "kraken-overlay", Namespace: krakenTestNamespace},
 		Data:       map[string]string{"overlay.yaml": string(overlayData)},
 	}); err != nil {
-		t.Fatalf("creating binance-overlay ConfigMap: %v", err)
+		t.Fatalf("creating kraken-overlay ConfigMap: %v", err)
 	}
 
 	// ── 6. Start operator in-process ─────────────────────────────────────────
@@ -139,27 +138,27 @@ func TestBinanceMarketDataE2E(t *testing.T) {
 
 	// ── 7. Create MCPUpstream ─────────────────────────────────────────────────
 
-	t.Logf("creating MCPUpstream %s/%s", binanceTestNamespace, binanceUpstreamName)
+	t.Logf("creating MCPUpstream %s/%s", krakenTestNamespace, krakenUpstreamName)
 	upstream := &v1alpha1.MCPUpstream{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      binanceUpstreamName,
-			Namespace: binanceTestNamespace,
+			Name:      krakenUpstreamName,
+			Namespace: krakenTestNamespace,
 			Labels: map[string]string{
-				"mcp-anything.ai/proxy": binanceProxyName,
+				"mcp-anything.ai/proxy": krakenProxyName,
 			},
 		},
 		Spec: v1alpha1.MCPUpstreamSpec{
-			ToolPrefix: "binance",
-			BaseURL:    "https://api.binance.com",
+			ToolPrefix: "kraken",
+			BaseURL:    "https://api.kraken.com",
 			OpenAPI: v1alpha1.MCPUpstreamOpenAPISpec{
 				ConfigMapRef: &v1alpha1.ConfigMapKeyRef{
-					Name: "binance-spec",
+					Name: "kraken-spec",
 					Key:  "spec.yaml",
 				},
 			},
 			Overlay: &v1alpha1.MCPUpstreamOverlaySpec{
 				ConfigMapRef: &v1alpha1.ConfigMapKeyRef{
-					Name: "binance-overlay",
+					Name: "kraken-overlay",
 					Key:  "overlay.yaml",
 				},
 			},
@@ -171,16 +170,16 @@ func TestBinanceMarketDataE2E(t *testing.T) {
 
 	// ── 8. Create MCPProxy ────────────────────────────────────────────────────
 
-	t.Logf("creating MCPProxy %s/%s", binanceTestNamespace, binanceProxyName)
+	t.Logf("creating MCPProxy %s/%s", krakenTestNamespace, krakenProxyName)
 	proxyResource := &v1alpha1.MCPProxy{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      binanceProxyName,
-			Namespace: binanceTestNamespace,
+			Name:      krakenProxyName,
+			Namespace: krakenTestNamespace,
 		},
 		Spec: v1alpha1.MCPProxySpec{
 			UpstreamSelector: metav1.LabelSelector{
 				MatchLabels: map[string]string{
-					"mcp-anything.ai/proxy": binanceProxyName,
+					"mcp-anything.ai/proxy": krakenProxyName,
 				},
 			},
 			Image: proxyImage,
@@ -199,7 +198,7 @@ func TestBinanceMarketDataE2E(t *testing.T) {
 	// ── 9. Wait for proxy pod to be ready ─────────────────────────────────────
 
 	t.Log("waiting for proxy pod to become Ready (up to 5 minutes)")
-	podName, err := waitForBinanceProxyPod(ctx, t, k8sClient, binanceTestNamespace, binanceProxyName)
+	podName, err := waitForKrakenProxyPod(ctx, t, k8sClient, krakenTestNamespace, krakenProxyName)
 	if err != nil {
 		t.Fatalf("proxy pod not ready: %v", err)
 	}
@@ -213,7 +212,7 @@ func TestBinanceMarketDataE2E(t *testing.T) {
 	}
 	t.Logf("port-forwarding localhost:%d → %s:8080", localPort, podName)
 
-	stopForward, err := portForwardToPod(ctx, t, restCfg, binanceTestNamespace, podName, localPort, 8080)
+	stopForward, err := portForwardToPod(ctx, t, restCfg, krakenTestNamespace, podName, localPort, 8080)
 	if err != nil {
 		t.Fatalf("starting port-forward: %v", err)
 	}
@@ -233,15 +232,15 @@ func TestBinanceMarketDataE2E(t *testing.T) {
 
 	// ── 12. Connect MCP client ────────────────────────────────────────────────
 
-	transport := &sdkmcp.StreamableClientTransport{
+	mcpTransport := &sdkmcp.StreamableClientTransport{
 		Endpoint: proxyURL + "/mcp",
 	}
-	mcpClient := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "binance-test-client", Version: "v0.0.1"}, nil)
+	mcpClient := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "kraken-test-client", Version: "v0.0.1"}, nil)
 
 	callCtx, callCancel := context.WithTimeout(ctx, 60*time.Second)
 	defer callCancel()
 
-	session, err := mcpClient.Connect(callCtx, transport, nil)
+	session, err := mcpClient.Connect(callCtx, mcpTransport, nil)
 	if err != nil {
 		t.Fatalf("connect MCP client: %v", err)
 	}
@@ -253,92 +252,74 @@ func TestBinanceMarketDataE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list tools: %v", err)
 	}
-	t.Logf("exposed %d Binance tools: %v", len(toolsResult.Tools), toolNames(toolsResult.Tools))
+	t.Logf("exposed %d Kraken tools: %v", len(toolsResult.Tools), toolNames(toolsResult.Tools))
 
 	if len(toolsResult.Tools) == 0 {
-		t.Fatal("expected at least one Binance market data tool, got none")
+		t.Fatal("expected at least one Kraken market data tool, got none")
 	}
 
-	// ── 14. Call get_price for BTCUSDT ────────────────────────────────────────
+	// ── 14. Call get_system_status ────────────────────────────────────────────
 
-	t.Log("calling binance__get_price for BTCUSDT")
-	priceResult, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{
-		Name:      "binance__get_price",
-		Arguments: map[string]any{"symbol": "BTCUSDT"},
+	t.Log("calling kraken__get_system_status")
+	statusResult, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{
+		Name:      "kraken__get_system_status",
+		Arguments: map[string]any{},
 	})
 	if err != nil {
-		t.Fatalf("call binance__get_price: %v", err)
+		t.Fatalf("call kraken__get_system_status: %v", err)
 	}
-	if priceResult.IsError {
-		errText := contentText(priceResult.Content)
-		if strings.Contains(errText, "451") {
-			t.Skipf("binance__get_price: Binance geo-restricted (HTTP 451) from this region — skipping API call assertions")
-		}
-		t.Fatalf("binance__get_price returned error: %s", errText)
+	if statusResult.IsError {
+		t.Fatalf("kraken__get_system_status returned error: %s", contentText(statusResult.Content))
 	}
-	priceText := contentText(priceResult.Content)
-	t.Logf("BTCUSDT price response: %s", priceText)
-	if !strings.Contains(priceText, "BTCUSDT") {
-		t.Errorf("price response does not contain BTCUSDT symbol: %s", priceText)
-	}
-	if !strings.Contains(priceText, "price") {
-		t.Errorf("price response does not contain price field: %s", priceText)
+	statusText := contentText(statusResult.Content)
+	t.Logf("Kraken system status: %s", statusText)
+	if !strings.Contains(statusText, "status") {
+		t.Errorf("system status response does not contain status field: %s", statusText)
 	}
 
-	// ── 15. Call get_24hr_stats for ETHUSDT ───────────────────────────────────
+	// ── 15. Call get_ticker for XBTUSD ────────────────────────────────────────
 
-	t.Log("calling binance__get_24hr_stats for ETHUSDT")
-	statsResult, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{
-		Name:      "binance__get_24hr_stats",
-		Arguments: map[string]any{"symbol": "ETHUSDT"},
+	t.Log("calling kraken__get_ticker for XBTUSD")
+	tickerResult, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{
+		Name:      "kraken__get_ticker",
+		Arguments: map[string]any{"pair": "XBTUSD"},
 	})
 	if err != nil {
-		t.Fatalf("call binance__get_24hr_stats: %v", err)
+		t.Fatalf("call kraken__get_ticker: %v", err)
 	}
-	if statsResult.IsError {
-		errText := contentText(statsResult.Content)
-		if strings.Contains(errText, "451") {
-			t.Skipf("binance__get_24hr_stats: Binance geo-restricted (HTTP 451) from this region — skipping API call assertions")
-		}
-		t.Fatalf("binance__get_24hr_stats returned error: %s", errText)
+	if tickerResult.IsError {
+		t.Fatalf("kraken__get_ticker returned error: %s", contentText(tickerResult.Content))
 	}
-	statsText := contentText(statsResult.Content)
-	t.Logf("ETHUSDT 24hr stats response: %s", statsText)
-	if !strings.Contains(statsText, "ETHUSDT") {
-		t.Errorf("24hr stats response does not contain ETHUSDT symbol: %s", statsText)
-	}
-	if !strings.Contains(statsText, "lastPrice") {
-		t.Errorf("24hr stats response does not contain lastPrice field: %s", statsText)
+	tickerText := contentText(tickerResult.Content)
+	t.Logf("XBTUSD ticker response: %s", tickerText)
+	if !strings.Contains(tickerText, "lastPrice") {
+		t.Errorf("ticker response does not contain lastPrice field: %s", tickerText)
 	}
 
-	// ── 16. Call get_avg_price for BNBUSDT ────────────────────────────────────
+	// ── 16. Call get_ohlc for XBTUSD with hourly interval ────────────────────
 
-	t.Log("calling binance__get_avg_price for BNBUSDT")
-	avgResult, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{
-		Name:      "binance__get_avg_price",
-		Arguments: map[string]any{"symbol": "BNBUSDT"},
+	t.Log("calling kraken__get_ohlc for XBTUSD at 60-minute interval")
+	ohlcResult, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{
+		Name:      "kraken__get_ohlc",
+		Arguments: map[string]any{"pair": "XBTUSD", "interval": 60},
 	})
 	if err != nil {
-		t.Fatalf("call binance__get_avg_price: %v", err)
+		t.Fatalf("call kraken__get_ohlc: %v", err)
 	}
-	if avgResult.IsError {
-		errText := contentText(avgResult.Content)
-		if strings.Contains(errText, "451") {
-			t.Skipf("binance__get_avg_price: Binance geo-restricted (HTTP 451) from this region — skipping API call assertions")
-		}
-		t.Fatalf("binance__get_avg_price returned error: %s", errText)
+	if ohlcResult.IsError {
+		t.Fatalf("kraken__get_ohlc returned error: %s", contentText(ohlcResult.Content))
 	}
-	avgText := contentText(avgResult.Content)
-	t.Logf("BNBUSDT avg price response: %s", avgText)
-	if !strings.Contains(avgText, "price") {
-		t.Errorf("avg price response does not contain price field: %s", avgText)
+	ohlcText := contentText(ohlcResult.Content)
+	t.Logf("XBTUSD OHLC response (truncated): %.200s…", ohlcText)
+	if !strings.Contains(ohlcText, "candles") {
+		t.Errorf("OHLC response does not contain candles field: %s", ohlcText)
 	}
 }
 
-// waitForBinanceProxyPod polls until a pod with the proxy labels is Running and Ready,
+// waitForKrakenProxyPod polls until a pod with the proxy labels is Running and Ready,
 // or until the context is cancelled. Returns the pod name or an error.
 // If an image pull failure is detected it returns immediately with an error.
-func waitForBinanceProxyPod(ctx context.Context, t *testing.T, c client.Client, ns, proxyName string) (string, error) {
+func waitForKrakenProxyPod(ctx context.Context, t *testing.T, c client.Client, ns, proxyName string) (string, error) {
 	t.Helper()
 
 	podLabels := map[string]string{

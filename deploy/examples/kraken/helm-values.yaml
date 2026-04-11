@@ -1,0 +1,68 @@
+## Helm values for deploying mcp-anything operator to serve Kraken market data.
+##
+## Usage:
+##   helm install mcp-anything ./deploy/helm/mcp-anything \
+##     -n mcp-system --create-namespace \
+##     -f deploy/examples/kraken/helm-values.yaml
+##
+## After installing the operator, apply the MCPProxy and MCPUpstream resources:
+##   kubectl apply -f deploy/examples/kraken/mcpproxy.yaml
+##   kubectl apply -f deploy/examples/kraken/mcpupstream.yaml
+
+replicaCount: 1
+
+image:
+  repository: ghcr.io/gaarutyunov/mcp-anything-operator
+  pullPolicy: IfNotPresent
+  tag: ""  # defaults to .Chart.AppVersion
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: [ALL]
+  readOnlyRootFilesystem: true
+
+# Resources sized for a small-to-medium deployment.
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 128Mi
+
+# Watch only the mcp-system namespace.
+watchNamespace: "mcp-system"
+
+leaderElect: true
+
+webhooks:
+  enabled: false
+  certManager: false
+
+metrics:
+  enabled: true
+  port: 8443
+
+healthProbe:
+  port: 8081
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

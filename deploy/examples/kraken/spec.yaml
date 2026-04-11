@@ -1,0 +1,213 @@
+openapi: "3.0.0"
+info:
+  title: Kraken Public Market Data API
+  description: >
+    Public market data endpoints for Kraken cryptocurrency exchange.
+    All endpoints listed here require no authentication and are accessible
+    globally including from the United States.
+  version: "0"
+servers:
+  - url: https://api.kraken.com
+
+paths:
+  /0/public/SystemStatus:
+    get:
+      operationId: getSystemStatus
+      summary: Get Kraken system status
+      description: >
+        Get the current system status or trading mode and the current server
+        time in ISO 8601 format.
+      responses:
+        "200":
+          description: System status and timestamp
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: array
+                    items:
+                      type: string
+                  result:
+                    type: object
+                    properties:
+                      status:
+                        type: string
+                        description: Current system status (online, maintenance, cancel_only, post_only)
+                      timestamp:
+                        type: string
+                        description: Current server time in ISO 8601 format
+
+  /0/public/Ticker:
+    get:
+      operationId: getTicker
+      summary: Get ticker information
+      description: >
+        Get ticker information for a trading pair. Returns current ask/bid
+        prices, last trade price, volume, VWAP, high, low, trade count,
+        and opening price for today and the last 24 hours.
+      parameters:
+        - name: pair
+          in: query
+          required: true
+          description: Asset pair to get ticker data for (e.g. XBTUSD, ETHUSD)
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Ticker information
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: array
+                    items:
+                      type: string
+                  result:
+                    type: object
+                    description: >
+                      Map of asset pair name to ticker data. Each value contains
+                      ask (a), bid (b), last trade (c), volume (v), VWAP (p),
+                      trades (t), low (l), high (h), and opening price (o).
+
+  /0/public/OHLC:
+    get:
+      operationId: getOHLC
+      summary: Get OHLC candlestick data
+      description: >
+        Get OHLC (Open, High, Low, Close) candlestick data for a trading pair
+        at a specified time interval. Returns an array of candles with
+        timestamp, OHLC prices, VWAP, volume, and trade count.
+      parameters:
+        - name: pair
+          in: query
+          required: true
+          description: Asset pair to get OHLC data for (e.g. XBTUSD, ETHUSD)
+          schema:
+            type: string
+        - name: interval
+          in: query
+          required: false
+          description: >
+            Time interval in minutes. One of: 1, 5, 15, 30, 60, 240, 1440
+            (1 day), 10080 (1 week), 21600 (15 days). Defaults to 1.
+          schema:
+            type: integer
+            enum: [1, 5, 15, 30, 60, 240, 1440, 10080, 21600]
+            default: 1
+        - name: since
+          in: query
+          required: false
+          description: Return committed OHLC data since given ID (exclusive)
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: OHLC candlestick data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: array
+                    items:
+                      type: string
+                  result:
+                    type: object
+                    description: >
+                      Map of asset pair name to array of OHLC entries.
+                      Each entry is [time, open, high, low, close, vwap, volume, count].
+                      Also contains a "last" key with the timestamp of the last candle.
+
+  /0/public/Depth:
+    get:
+      operationId: getOrderBook
+      summary: Get order book depth
+      description: >
+        Get the current order book (bids and asks) for a trading pair.
+        Returns arrays of [price, volume, timestamp] for each level.
+      parameters:
+        - name: pair
+          in: query
+          required: true
+          description: Asset pair to get order book for (e.g. XBTUSD, ETHUSD)
+          schema:
+            type: string
+        - name: count
+          in: query
+          required: false
+          description: Maximum number of asks/bids to return (1-500, default 100)
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+      responses:
+        "200":
+          description: Order book bids and asks
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: array
+                    items:
+                      type: string
+                  result:
+                    type: object
+                    description: >
+                      Map of asset pair name to order book with bids and asks arrays.
+                      Each entry is [price, volume, timestamp].
+
+  /0/public/Trades:
+    get:
+      operationId: getRecentTrades
+      summary: Get recent public trades
+      description: >
+        Get the most recent public trades for a trading pair. Returns trade
+        data including price, volume, time, side (buy/sell), type
+        (limit/market), and miscellaneous info.
+      parameters:
+        - name: pair
+          in: query
+          required: true
+          description: Asset pair to get recent trades for (e.g. XBTUSD, ETHUSD)
+          schema:
+            type: string
+        - name: since
+          in: query
+          required: false
+          description: Return trades since given trade ID
+          schema:
+            type: string
+        - name: count
+          in: query
+          required: false
+          description: Return specific number of trades (1-1000, default 1000)
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+      responses:
+        "200":
+          description: Recent public trades
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: array
+                    items:
+                      type: string
+                  result:
+                    type: object
+                    description: >
+                      Map of asset pair name to array of trade entries.
+                      Each entry is [price, volume, time, side, type, misc, trade_id].
+                      "b" = buy, "s" = sell; "l" = limit, "m" = market.

@@ -1,0 +1,57 @@
+## MCPUpstream for Kraken public market data API.
+##
+## This upstream connects to the Kraken REST API and exposes a filtered set
+## of public market data endpoints as MCP tools.
+## No authentication is required for these endpoints.
+##
+## The overlay applies jq-based response transforms to extract the most
+## relevant fields from each response.
+##
+## Prerequisites:
+##   Create ConfigMaps with the spec and overlay:
+##     kubectl -n mcp-system create configmap kraken-spec \
+##       --from-file=spec.yaml=deploy/examples/kraken/spec.yaml
+##     kubectl -n mcp-system create configmap kraken-overlay \
+##       --from-file=overlay.yaml=deploy/examples/kraken/overlay.yaml
+##
+## Apply:
+##   kubectl apply -f deploy/examples/kraken/mcpupstream.yaml
+apiVersion: mcp-anything.ai/v1alpha1
+kind: MCPUpstream
+metadata:
+  name: market-data
+  namespace: mcp-system
+  labels:
+    # Must match the MCPProxy's upstreamSelector.
+    mcp-anything.ai/proxy: kraken-proxy
+spec:
+  # Prefix for all tool names exposed by this upstream.
+  # Tools will be named e.g. "kraken__get_ticker", "kraken__get_ohlc".
+  toolPrefix: kraken
+
+  # Kraken REST API base URL.
+  baseURL: "https://api.kraken.com"
+
+  # OpenAPI spec from a ConfigMap. Contains only public market data endpoints.
+  # See deploy/examples/kraken/spec.yaml for the full spec.
+  openapi:
+    configMapRef:
+      name: kraken-spec
+      key: spec.yaml
+
+  # OpenAPI Overlay that adds jq response transforms and improves tool names.
+  # See deploy/examples/kraken/overlay.yaml for the full overlay.
+  overlay:
+    configMapRef:
+      name: kraken-overlay
+      key: overlay.yaml
+
+  # No outbound auth — Kraken public market data is unauthenticated.
+  # For authenticated endpoints (trading, account), add:
+  # outboundAuth:
+  #   strategy: api_key
+  #   ... (requires a Secret with the API key)
+
+  # HTTP transport tuning for Kraken API.
+  transport:
+    maxIdleConns: 20

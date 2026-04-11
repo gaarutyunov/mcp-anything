@@ -5,6 +5,7 @@ package integration_test
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -269,7 +270,11 @@ func TestBinanceMarketDataE2E(t *testing.T) {
 		t.Fatalf("call binance__get_price: %v", err)
 	}
 	if priceResult.IsError {
-		t.Fatalf("binance__get_price returned error: %s", contentText(priceResult.Content))
+		errText := contentText(priceResult.Content)
+		if strings.Contains(errText, "451") {
+			t.Skipf("binance__get_price: Binance geo-restricted (HTTP 451) from this region — skipping API call assertions")
+		}
+		t.Fatalf("binance__get_price returned error: %s", errText)
 	}
 	priceText := contentText(priceResult.Content)
 	t.Logf("BTCUSDT price response: %s", priceText)
@@ -291,7 +296,11 @@ func TestBinanceMarketDataE2E(t *testing.T) {
 		t.Fatalf("call binance__get_24hr_stats: %v", err)
 	}
 	if statsResult.IsError {
-		t.Fatalf("binance__get_24hr_stats returned error: %s", contentText(statsResult.Content))
+		errText := contentText(statsResult.Content)
+		if strings.Contains(errText, "451") {
+			t.Skipf("binance__get_24hr_stats: Binance geo-restricted (HTTP 451) from this region — skipping API call assertions")
+		}
+		t.Fatalf("binance__get_24hr_stats returned error: %s", errText)
 	}
 	statsText := contentText(statsResult.Content)
 	t.Logf("ETHUSDT 24hr stats response: %s", statsText)
@@ -313,7 +322,11 @@ func TestBinanceMarketDataE2E(t *testing.T) {
 		t.Fatalf("call binance__get_avg_price: %v", err)
 	}
 	if avgResult.IsError {
-		t.Fatalf("binance__get_avg_price returned error: %s", contentText(avgResult.Content))
+		errText := contentText(avgResult.Content)
+		if strings.Contains(errText, "451") {
+			t.Skipf("binance__get_avg_price: Binance geo-restricted (HTTP 451) from this region — skipping API call assertions")
+		}
+		t.Fatalf("binance__get_avg_price returned error: %s", errText)
 	}
 	avgText := contentText(avgResult.Content)
 	t.Logf("BNBUSDT avg price response: %s", avgText)
@@ -396,12 +409,11 @@ func portForwardToPod(ctx context.Context, t *testing.T, cfg *rest.Config, ns, p
 
 	stopCh := make(chan struct{})
 	readyCh := make(chan struct{})
-	var buf strings.Builder
 
 	fw, err := portforward.New(dialer,
 		[]string{fmt.Sprintf("%d:%d", localPort, remotePort)},
 		stopCh, readyCh,
-		&buf, &buf,
+		io.Discard, io.Discard,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("creating port forwarder: %w", err)

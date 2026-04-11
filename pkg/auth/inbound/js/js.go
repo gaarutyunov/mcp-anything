@@ -1,4 +1,4 @@
-// Package js registers the "js_script" inbound auth strategy.
+// Package js registers the "js" inbound auth strategy.
 // Import this package (blank import) to make the strategy available via inbound.New().
 package js
 
@@ -25,9 +25,9 @@ const defaultTimeout = 500 * time.Millisecond
 const defaultFetchTimeout = 30 * time.Second
 
 func init() {
-	inbound.Register("js_script", func(_ context.Context, cfg *config.InboundAuthConfig) (inbound.TokenValidator, string, error) {
+	inbound.Register("js", func(_ context.Context, cfg *config.InboundAuthConfig) (inbound.TokenValidator, string, error) {
 		if cfg.JSAuthPool == nil {
-			return nil, "", fmt.Errorf("js_script inbound auth requires runtime pools; set InboundAuthConfig.JSAuthPool")
+			return nil, "", fmt.Errorf("js inbound auth requires runtime pools; set InboundAuthConfig.JSAuthPool")
 		}
 		v, err := NewValidator(cfg.JS, cfg.JSAuthPool)
 		return v, "", err

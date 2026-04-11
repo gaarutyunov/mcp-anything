@@ -77,13 +77,9 @@ func New(ctx context.Context, cfg *config.InboundAuthConfig) (TokenValidator, st
 	f, ok := registry[cfg.Strategy]
 	mu.RUnlock()
 	if !ok {
-		pkgName := cfg.Strategy
-		if pkgName == "js_script" {
-			pkgName = "js"
-		}
 		return nil, "", fmt.Errorf("unknown inbound auth strategy %q — did you forget to import _ %q?",
 			cfg.Strategy,
-			"github.com/gaarutyunov/mcp-anything/pkg/auth/inbound/"+pkgName)
+			"github.com/gaarutyunov/mcp-anything/pkg/auth/inbound/"+cfg.Strategy)
 	}
 	return f(ctx, cfg)
 }

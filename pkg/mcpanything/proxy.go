@@ -86,7 +86,7 @@ func New(ctx context.Context, cfg *pkgconfig.ProxyConfig, opts ...Option) (*Prox
 	p.pools = pools
 	slog.Info("runtime pools configured",
 		"js_auth_vms", pools.JSAuth.Cap(),
-		"js_script_vms", pools.JSScript.Cap(),
+		"js_vms", pools.JSScript.Cap(),
 		"lua_auth_vms", pools.LuaAuth.Cap(),
 	)
 

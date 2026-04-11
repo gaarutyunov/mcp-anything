@@ -34,7 +34,7 @@ paths:
 `
 
 // TestInboundJSAuthAllowsValidToken verifies that the proxy accepts requests with the
-// token the JS script approves, and rejects others (strategy: js_script).
+// token the JS script approves, and rejects others (strategy: js).
 func TestInboundJSAuthAllowsValidToken(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -79,7 +79,7 @@ telemetry:
   service_name: mcp-anything
   service_version: v0.0.0-test
 inbound_auth:
-  strategy: js_script
+  strategy: js
   js:
     script_path: /etc/mcp-anything/auth.js
     timeout: 500ms
@@ -166,7 +166,7 @@ telemetry:
   service_name: mcp-anything
   service_version: v0.0.0-test
 inbound_auth:
-  strategy: js_script
+  strategy: js
   js:
     script_path: /etc/mcp-anything/auth.js
     timeout: 500ms
@@ -279,7 +279,7 @@ upstreams:
       source: /etc/mcp-anything/spec.yaml
       version: "3.0"
     outbound_auth:
-      strategy: js_script
+      strategy: js
       js:
         script_path: /etc/mcp-anything/outbound.js
         timeout: 500ms
@@ -378,7 +378,7 @@ telemetry:
   service_name: mcp-anything
   service_version: v0.0.0-test
 inbound_auth:
-  strategy: js_script
+  strategy: js
   js:
     script_path: /etc/mcp-anything/auth.js
     timeout: 500ms
@@ -490,7 +490,7 @@ telemetry:
   service_name: mcp-anything
   service_version: v0.0.0-test
 inbound_auth:
-  strategy: js_script
+  strategy: js
   js:
     script_path: /etc/mcp-anything/auth.js
     timeout: 2s
@@ -615,7 +615,7 @@ upstreams:
       source: /etc/mcp-anything/spec.yaml
       version: "3.0"
     outbound_auth:
-      strategy: js_script
+      strategy: js
       js:
         script_path: /etc/mcp-anything/outbound.js
         timeout: 500ms
@@ -730,7 +730,7 @@ upstreams:
       source: /etc/mcp-anything/spec.yaml
       version: "3.0"
     outbound_auth:
-      strategy: js_script
+      strategy: js
       js:
         script_path: /etc/mcp-anything/outbound.js
         timeout: 500ms

@@ -62,7 +62,7 @@ type GroupConfig struct {
 
 // InboundAuthConfig controls how inbound MCP clients are authenticated.
 type InboundAuthConfig struct {
-	Strategy      string              `koanf:"strategy"` // jwt|introspection|apikey|lua|js_script|none
+	Strategy      string              `koanf:"strategy"` // jwt|introspection|apikey|lua|js|none
 	JWT           JWTAuthConfig       `koanf:"jwt"`
 	Introspection IntrospectionConfig `koanf:"introspection"`
 	APIKey        APIKeyAuthConfig    `koanf:"apikey"`
@@ -265,14 +265,14 @@ type CommandSchemaProperty struct {
 
 // OutboundAuthConfig controls how the proxy authenticates outbound requests to an upstream API.
 type OutboundAuthConfig struct {
-	Strategy                string               `koanf:"strategy"` // bearer|api_key|oauth2_client_credentials|lua|js_script|none
+	Strategy                string               `koanf:"strategy"` // bearer|api_key|oauth2_client_credentials|lua|js|none
 	Bearer                  BearerOutboundConfig `koanf:"bearer"`
 	APIKey                  APIKeyOutboundConfig `koanf:"api_key"`
 	OAuth2ClientCredentials OAuth2CCConfig       `koanf:"oauth2_client_credentials"`
 	Lua                     LuaOutboundConfig    `koanf:"lua"`
 	JS                      JSOutboundConfig     `koanf:"js"`
 	// Upstream is set programmatically (not from config file) to the owning upstream's name.
-	// Used by the lua and js_script strategies to pass the upstream name to scripts.
+	// Used by the lua and js strategies to pass the upstream name to scripts.
 	Upstream string `koanf:"-"`
 	// JSAuthPool and LuaAuthPool are set programmatically for script-based strategies.
 	// Not loaded from the config file. Nil is valid when no script strategy is configured.

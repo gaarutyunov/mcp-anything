@@ -15,13 +15,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gaarutyunov/mcp-anything/internal/config"
-	internaltls "github.com/gaarutyunov/mcp-anything/internal/transport"
+	"github.com/gaarutyunov/mcp-anything/pkg/config"
+	pkgtransport "github.com/gaarutyunov/mcp-anything/pkg/transport"
 )
 
 func TestBuild_Defaults(t *testing.T) {
 	t.Parallel()
-	b := internaltls.NewBuilder()
+	b := pkgtransport.NewBuilder()
 	tr, err := b.Build(config.TransportConfig{})
 	if err != nil {
 		t.Fatalf("Build with empty config: %v", err)
@@ -39,7 +39,7 @@ func TestBuild_Defaults(t *testing.T) {
 
 func TestBuild_ExplicitPooling(t *testing.T) {
 	t.Parallel()
-	b := internaltls.NewBuilder()
+	b := pkgtransport.NewBuilder()
 	tr, err := b.Build(config.TransportConfig{
 		MaxIdleConns:        200,
 		MaxIdleConnsPerHost: 20,
@@ -61,7 +61,7 @@ func TestBuild_ExplicitPooling(t *testing.T) {
 
 func TestBuild_ForceHTTP2(t *testing.T) {
 	t.Parallel()
-	b := internaltls.NewBuilder()
+	b := pkgtransport.NewBuilder()
 	tr, err := b.Build(config.TransportConfig{ForceHTTP2: true})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
@@ -73,7 +73,7 @@ func TestBuild_ForceHTTP2(t *testing.T) {
 
 func TestBuild_ResponseHeaderTimeout(t *testing.T) {
 	t.Parallel()
-	b := internaltls.NewBuilder()
+	b := pkgtransport.NewBuilder()
 	tr, err := b.Build(config.TransportConfig{ResponseHeaderTimeout: 5 * time.Second})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
@@ -85,7 +85,7 @@ func TestBuild_ResponseHeaderTimeout(t *testing.T) {
 
 func TestBuild_HTTPProxy(t *testing.T) {
 	t.Parallel()
-	b := internaltls.NewBuilder()
+	b := pkgtransport.NewBuilder()
 	tr, err := b.Build(config.TransportConfig{ProxyURL: "http://proxy.example.com:3128"})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
@@ -97,7 +97,7 @@ func TestBuild_HTTPProxy(t *testing.T) {
 
 func TestBuild_InvalidProxyURL(t *testing.T) {
 	t.Parallel()
-	b := internaltls.NewBuilder()
+	b := pkgtransport.NewBuilder()
 	_, err := b.Build(config.TransportConfig{ProxyURL: "://invalid"})
 	if err == nil {
 		t.Error("expected error for invalid proxy URL, got nil")
@@ -106,7 +106,7 @@ func TestBuild_InvalidProxyURL(t *testing.T) {
 
 func TestBuild_InsecureSkipVerify(t *testing.T) {
 	t.Parallel()
-	b := internaltls.NewBuilder()
+	b := pkgtransport.NewBuilder()
 	tr, err := b.Build(config.TransportConfig{
 		TLS: config.TLSConfig{InsecureSkipVerify: true},
 	})
@@ -120,7 +120,7 @@ func TestBuild_InsecureSkipVerify(t *testing.T) {
 
 func TestBuild_TLSVersions(t *testing.T) {
 	t.Parallel()
-	b := internaltls.NewBuilder()
+	b := pkgtransport.NewBuilder()
 	tr, err := b.Build(config.TransportConfig{
 		TLS: config.TLSConfig{MinVersion: "1.2", MaxVersion: "1.3"},
 	})
@@ -137,7 +137,7 @@ func TestBuild_TLSVersions(t *testing.T) {
 
 func TestBuild_InvalidTLSVersion(t *testing.T) {
 	t.Parallel()
-	b := internaltls.NewBuilder()
+	b := pkgtransport.NewBuilder()
 	_, err := b.Build(config.TransportConfig{
 		TLS: config.TLSConfig{MinVersion: "99.9"},
 	})
@@ -148,7 +148,7 @@ func TestBuild_InvalidTLSVersion(t *testing.T) {
 
 func TestBuild_SessionCache(t *testing.T) {
 	t.Parallel()
-	b := internaltls.NewBuilder()
+	b := pkgtransport.NewBuilder()
 	tr, err := b.Build(config.TransportConfig{
 		TLS: config.TLSConfig{SessionCacheSize: 32},
 	})
@@ -173,7 +173,7 @@ func TestBuild_CustomRootCA(t *testing.T) {
 	}
 	_ = caCert
 
-	b := internaltls.NewBuilder()
+	b := pkgtransport.NewBuilder()
 	tr, err := b.Build(config.TransportConfig{
 		TLS: config.TLSConfig{RootCAPath: caPath},
 	})
@@ -193,7 +193,7 @@ func TestBuild_InvalidRootCA(t *testing.T) {
 		t.Fatalf("write file: %v", err)
 	}
 
-	b := internaltls.NewBuilder()
+	b := pkgtransport.NewBuilder()
 	_, err := b.Build(config.TransportConfig{
 		TLS: config.TLSConfig{RootCAPath: caPath},
 	})
@@ -204,7 +204,7 @@ func TestBuild_InvalidRootCA(t *testing.T) {
 
 func TestBuild_MissingRootCAFile(t *testing.T) {
 	t.Parallel()
-	b := internaltls.NewBuilder()
+	b := pkgtransport.NewBuilder()
 	_, err := b.Build(config.TransportConfig{
 		TLS: config.TLSConfig{RootCAPath: "/nonexistent/ca.pem"},
 	})
@@ -218,7 +218,7 @@ func TestBuild_mTLS(t *testing.T) {
 	tmpDir := t.TempDir()
 	certPath, keyPath := generateClientCert(t, tmpDir)
 
-	b := internaltls.NewBuilder()
+	b := pkgtransport.NewBuilder()
 	tr, err := b.Build(config.TransportConfig{
 		TLS: config.TLSConfig{
 			ClientCertPath: certPath,
@@ -235,7 +235,7 @@ func TestBuild_mTLS(t *testing.T) {
 
 func TestBuild_mTLS_MissingKey(t *testing.T) {
 	t.Parallel()
-	b := internaltls.NewBuilder()
+	b := pkgtransport.NewBuilder()
 	_, err := b.Build(config.TransportConfig{
 		TLS: config.TLSConfig{
 			ClientCertPath: "/some/cert.pem",
@@ -249,7 +249,7 @@ func TestBuild_mTLS_MissingKey(t *testing.T) {
 
 func TestBuild_SNIOverride(t *testing.T) {
 	t.Parallel()
-	b := internaltls.NewBuilder()
+	b := pkgtransport.NewBuilder()
 	tr, err := b.Build(config.TransportConfig{
 		TLS: config.TLSConfig{ServerName: "override.example.com"},
 	})
@@ -266,7 +266,7 @@ func TestBuildServerTLSConfig_Basic(t *testing.T) {
 	tmpDir := t.TempDir()
 	certPath, keyPath := generateServerCert(t, tmpDir)
 
-	tlsCfg, err := internaltls.BuildServerTLSConfig(config.ServerTLSConfig{
+	tlsCfg, err := pkgtransport.BuildServerTLSConfig(config.ServerTLSConfig{
 		CertPath: certPath,
 		KeyPath:  keyPath,
 	})
@@ -291,7 +291,7 @@ func TestBuildServerTLSConfig_RequireAndVerify(t *testing.T) {
 		t.Fatalf("write CA file: %v", err)
 	}
 
-	tlsCfg, err := internaltls.BuildServerTLSConfig(config.ServerTLSConfig{
+	tlsCfg, err := pkgtransport.BuildServerTLSConfig(config.ServerTLSConfig{
 		CertPath:     certPath,
 		KeyPath:      keyPath,
 		ClientAuth:   "require_and_verify",
@@ -313,7 +313,7 @@ func TestBuildServerTLSConfig_InvalidClientAuth(t *testing.T) {
 	tmpDir := t.TempDir()
 	certPath, keyPath := generateServerCert(t, tmpDir)
 
-	_, err := internaltls.BuildServerTLSConfig(config.ServerTLSConfig{
+	_, err := pkgtransport.BuildServerTLSConfig(config.ServerTLSConfig{
 		CertPath:   certPath,
 		KeyPath:    keyPath,
 		ClientAuth: "bogus",
@@ -328,7 +328,7 @@ func TestBuildServerTLSConfig_MinVersion(t *testing.T) {
 	tmpDir := t.TempDir()
 	certPath, keyPath := generateServerCert(t, tmpDir)
 
-	tlsCfg, err := internaltls.BuildServerTLSConfig(config.ServerTLSConfig{
+	tlsCfg, err := pkgtransport.BuildServerTLSConfig(config.ServerTLSConfig{
 		CertPath:   certPath,
 		KeyPath:    keyPath,
 		MinVersion: "1.3",

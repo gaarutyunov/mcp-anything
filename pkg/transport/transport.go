@@ -10,7 +10,7 @@ import (
 
 	"golang.org/x/net/proxy"
 
-	"github.com/gaarutyunov/mcp-anything/internal/config"
+	"github.com/gaarutyunov/mcp-anything/pkg/config"
 )
 
 // Builder constructs configured http.Transport instances per upstream.

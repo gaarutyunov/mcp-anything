@@ -1,4 +1,4 @@
-// Package js registers the "js_script" outbound auth strategy.
+// Package js registers the "js" outbound auth strategy.
 // Import this package (blank import) to make the strategy available via outbound.New().
 package js
 
@@ -30,9 +30,9 @@ const defaultFetchTimeout = 30 * time.Second
 const noCacheExpiry = int64(1)
 
 func init() {
-	outbound.Register("js_script", func(_ context.Context, cfg *config.OutboundAuthConfig) (outbound.TokenProvider, error) {
+	outbound.Register("js", func(_ context.Context, cfg *config.OutboundAuthConfig) (outbound.TokenProvider, error) {
 		if cfg.JSAuthPool == nil {
-			return nil, fmt.Errorf("js_script outbound auth requires runtime pools; set OutboundAuthConfig.JSAuthPool")
+			return nil, fmt.Errorf("js outbound auth requires runtime pools; set OutboundAuthConfig.JSAuthPool")
 		}
 		return NewProvider(cfg.Upstream, cfg.JS, cfg.JSAuthPool)
 	})

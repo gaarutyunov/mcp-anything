@@ -13,7 +13,7 @@ import (
 	"github.com/knadh/koanf/providers/file"
 	"github.com/knadh/koanf/v2"
 
-	"github.com/gaarutyunov/mcp-anything/internal/telemetry"
+	pkgtelemetry "github.com/gaarutyunov/mcp-anything/pkg/telemetry"
 )
 
 // Loader watches a config file and atomically updates the live configuration on change.
@@ -101,21 +101,21 @@ func (l *Loader) Watch(ctx context.Context) {
 // tryReload attempts to load and validate the config file. On success it atomically swaps
 // the active config. On failure it retains the previous config and logs the error.
 func (l *Loader) tryReload(ctx context.Context) {
-	telemetry.IncrConfigReloadTotal()
+	pkgtelemetry.IncrConfigReloadTotal()
 
 	cfg, err := Load(l.path)
 	if err != nil {
 		slog.Error("config reload failed", "error", err)
-		telemetry.IncrConfigReloadErrors(ctx)
+		pkgtelemetry.IncrConfigReloadErrors(ctx)
 		return
 	}
 	if err := l.onLoad(cfg); err != nil {
 		slog.Error("config reload failed", "error", err)
-		telemetry.IncrConfigReloadErrors(ctx)
+		pkgtelemetry.IncrConfigReloadErrors(ctx)
 		return
 	}
 	l.current.Store(cfg)
-	telemetry.IncrConfigReloadSuccess(ctx)
+	pkgtelemetry.IncrConfigReloadSuccess(ctx)
 	slog.Info("config reloaded", "upstreams", len(cfg.Upstreams))
 }
 

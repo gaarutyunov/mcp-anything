@@ -5,11 +5,11 @@ import (
 	nethttp "net/http"
 	"strings"
 
-	"github.com/gaarutyunov/mcp-anything/internal/transport"
 	pkginbound "github.com/gaarutyunov/mcp-anything/pkg/auth/inbound"
 	pkgoutbound "github.com/gaarutyunov/mcp-anything/pkg/auth/outbound"
 	"github.com/gaarutyunov/mcp-anything/pkg/config"
 	pkgtelemetry "github.com/gaarutyunov/mcp-anything/pkg/telemetry"
+	pkgtransport "github.com/gaarutyunov/mcp-anything/pkg/transport"
 )
 
 // headerRoundTripper injects static headers into every outbound request.
@@ -61,7 +61,7 @@ func NewHTTPClient(cfg *config.UpstreamConfig, provider pkgoutbound.TokenProvide
 		transportCfg.TLS.InsecureSkipVerify = true
 	}
 
-	t, err := transport.NewBuilder().Build(transportCfg)
+	t, err := pkgtransport.NewBuilder().Build(transportCfg)
 	if err != nil {
 		return nil, fmt.Errorf("building transport: %w", err)
 	}

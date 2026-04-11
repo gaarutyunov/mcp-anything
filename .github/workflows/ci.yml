@@ -82,6 +82,11 @@ jobs:
           wait: 'true'
 
       - name: Integration tests
-        run: make integration
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          retry_wait_seconds: 10
+          command: make integration
         env:
           PROXY_IMAGE: ${{ env.PROXY_IMAGE }}

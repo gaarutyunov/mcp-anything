@@ -1,0 +1,76 @@
+overlay: 1.0.0
+info:
+  title: Binance Market Data Overlay
+  description: >
+    OpenAPI Overlay that customises Binance market data tools exposed via
+    mcp-anything. Adds jq-based response transforms to extract the most
+    relevant fields, and provides improved tool names and descriptions.
+  version: 1.0.0
+x-speakeasy-jsonpath: rfc9535
+
+actions:
+  # ─── Symbol Price Ticker ─────────────────────────────────────────────────────
+  # Extract symbol and price fields. Handles both single-symbol (object) and
+  # all-symbols (array) responses using a conditional jq expression.
+  - target: "$.paths[\"/api/v3/ticker/price\"].get"
+    update:
+      x-mcp-tool-name: get_price
+      description: >
+        Get the latest price for a trading pair (e.g. BTCUSDT) or for all
+        pairs. Returns symbol and price fields.
+      x-mcp-response-transform: "if type == \"array\" then map({symbol: .symbol, price: .price}) else {symbol: .symbol, price: .price} end"
+
+  # ─── 24-Hour Statistics ───────────────────────────────────────────────────────
+  # Extract the most useful market statistics fields. Handles both single and
+  # all-symbol responses.
+  - target: "$.paths[\"/api/v3/ticker/24hr\"].get"
+    update:
+      x-mcp-tool-name: get_24hr_stats
+      description: >
+        Get 24-hour rolling window price change statistics for a trading pair
+        (e.g. BTCUSDT) or for all pairs. Returns key metrics including last
+        price, price change, and volume.
+      x-mcp-response-transform: "if type == \"array\" then map({symbol: .symbol, lastPrice: .lastPrice, priceChange: .priceChange, priceChangePercent: .priceChangePercent, highPrice: .highPrice, lowPrice: .lowPrice, volume: .quoteVolume, count: .count}) else {symbol: .symbol, lastPrice: .lastPrice, priceChange: .priceChange, priceChangePercent: .priceChangePercent, highPrice: .highPrice, lowPrice: .lowPrice, volume: .quoteVolume, count: .count} end"
+
+  # ─── Average Price ────────────────────────────────────────────────────────────
+  # Extract the average price and interval.
+  - target: "$.paths[\"/api/v3/avgPrice\"].get"
+    update:
+      x-mcp-tool-name: get_avg_price
+      description: >
+        Get the current average price for a trading pair (e.g. BTCUSDT),
+        calculated over a 5-minute rolling window.
+      x-mcp-response-transform: "{mins: .mins, price: .price}"
+
+  # ─── Order Book Ticker ────────────────────────────────────────────────────────
+  # Extract best bid/ask with quantities. Handles both single and all-symbol
+  # responses.
+  - target: "$.paths[\"/api/v3/ticker/bookTicker\"].get"
+    update:
+      x-mcp-tool-name: get_book_ticker
+      description: >
+        Get the best bid price and quantity, and best ask price and quantity,
+        on the order book for a trading pair (e.g. BTCUSDT) or for all pairs.
+      x-mcp-response-transform: "if type == \"array\" then map({symbol: .symbol, bidPrice: .bidPrice, bidQty: .bidQty, askPrice: .askPrice, askQty: .askQty}) else {symbol: .symbol, bidPrice: .bidPrice, bidQty: .bidQty, askPrice: .askPrice, askQty: .askQty} end"
+
+  # ─── Klines/Candlesticks ──────────────────────────────────────────────────────
+  # Transform raw kline arrays into named-field objects for readability.
+  # Each kline is [openTime, open, high, low, close, volume, closeTime, ...]
+  - target: "$.paths[\"/api/v3/klines\"].get"
+    update:
+      x-mcp-tool-name: get_klines
+      description: >
+        Get OHLCV candlestick data for a trading pair (e.g. BTCUSDT) at a
+        specified interval (e.g. 1m, 1h, 1d). Returns open/high/low/close
+        prices and volume for each candle.
+      x-mcp-response-transform: "[.[] | {openTime: .[0], open: .[1], high: .[2], low: .[3], close: .[4], volume: .[5], closeTime: .[6], numTrades: .[8]}]"
+
+  # ─── Order Book Depth ─────────────────────────────────────────────────────────
+  # Limit depth to top 5 levels for readability.
+  - target: "$.paths[\"/api/v3/depth\"].get"
+    update:
+      x-mcp-tool-name: get_order_book
+      description: >
+        Get the current order book for a trading pair (e.g. BTCUSDT). Returns
+        up to 5 best bid and ask price levels by default.
+      x-mcp-response-transform: "{lastUpdateId: .lastUpdateId, bids: .bids[:5], asks: .asks[:5]}"

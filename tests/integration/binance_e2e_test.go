@@ -52,11 +52,9 @@ const (
 //  5. Port-forwards to the proxy pod and connects an MCP client.
 //  6. Calls several Binance market data tools and verifies the responses.
 //
-// If the proxy image cannot be loaded into k3s (e.g. not yet built or published),
-// the test is skipped rather than failed, consistent with the issue guidance.
 func TestBinanceMarketDataE2E(t *testing.T) {
 	if globalK3s == nil {
-		t.Skip("shared k3s cluster unavailable; skipping Binance e2e test")
+		t.Fatal("shared k3s cluster unavailable")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
@@ -71,7 +69,7 @@ func TestBinanceMarketDataE2E(t *testing.T) {
 
 	t.Logf("loading proxy image %q into k3s", proxyImage)
 	if err := globalK3s.container.LoadImages(ctx, proxyImage); err != nil {
-		t.Skipf("cannot load proxy image %q into k3s (image may not be locally available): %v — skipping e2e test", proxyImage, err)
+		t.Fatalf("cannot load proxy image %q into k3s: %v", proxyImage, err)
 	}
 	t.Log("proxy image loaded into k3s")
 
@@ -202,7 +200,7 @@ func TestBinanceMarketDataE2E(t *testing.T) {
 	t.Log("waiting for proxy pod to become Ready (up to 5 minutes)")
 	podName, err := waitForBinanceProxyPod(ctx, t, k8sClient, binanceTestNamespace, binanceProxyName)
 	if err != nil {
-		t.Skipf("proxy pod not ready — image may not be pullable in k3s: %v", err)
+		t.Fatalf("proxy pod not ready: %v", err)
 	}
 	t.Logf("proxy pod ready: %s", podName)
 

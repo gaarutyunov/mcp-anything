@@ -203,6 +203,26 @@ type ValidationConfig struct {
 	ErrorStatus               []int  `koanf:"error_status"`
 }
 
+// AppUIConfig configures an interactive HTML UI for all tools in an upstream.
+// If both static and script are set, script takes precedence.
+type AppUIConfig struct {
+	// Static is the path to a static HTML file served as-is for every tool.
+	Static string `koanf:"static"`
+	// Script is the path to a JavaScript render script executed by Sobek at
+	// resource-fetch time. The function receives a ctx object with toolName,
+	// description, schema, env, fetch, and log, and must return an HTML string.
+	Script string `koanf:"script"`
+}
+
+// ToolUIConfig is the resolved UI configuration for a single tool.
+// It is computed by merging the per-upstream AppUIConfig with per-operation
+// x-mcp-ui-static / x-mcp-ui-script OpenAPI overlay extensions.
+// Script takes precedence over static when both are set at the same level.
+type ToolUIConfig struct {
+	Static string // path to static HTML file
+	Script string // path to JS render script
+}
+
 // UpstreamConfig describes a single upstream, either HTTP API or command-backed tools.
 type UpstreamConfig struct {
 	Name                     string              `koanf:"name"`
@@ -222,6 +242,9 @@ type UpstreamConfig struct {
 	OutboundAuth             OutboundAuthConfig  `koanf:"outbound_auth"`
 	Commands                 []CommandConfig     `koanf:"commands"` // used by type: command only
 	Scripts                  []ScriptConfig      `koanf:"scripts"`  // used by type: script only
+	// AppUI configures an optional interactive HTML UI for every tool in this upstream.
+	// Per-tool overlay extensions (x-mcp-ui-static, x-mcp-ui-script) take precedence.
+	AppUI *AppUIConfig `koanf:"app_ui"`
 	// JSScriptPool is set programmatically (not from config file) to bound concurrent JS
 	// script tool executions. Nil is valid when no script upstream is configured.
 	JSScriptPool PoolAcquirer `koanf:"-"`

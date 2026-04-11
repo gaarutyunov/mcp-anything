@@ -13,6 +13,7 @@ concurrency:
 env:
   GOWORK: off
   PROXY_IMAGE: ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
+  CADDY_IMAGE: ghcr.io/${{ github.repository }}:caddy-sha-${{ github.sha }}
 
 jobs:
   lint-and-test:
@@ -63,10 +64,34 @@ jobs:
           push: true
           tags: ${{ env.PROXY_IMAGE }}
 
+  build-caddy-image:
+    name: Build & Push Caddy Image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.caddy
+          push: true
+          tags: ${{ env.CADDY_IMAGE }}
+
   integration-test:
     name: Integration Tests
     runs-on: ubuntu-latest
-    needs: [lint-and-test, build-image]
+    needs: [lint-and-test, build-image, build-caddy-image]
     steps:
       - uses: actions/checkout@v4
 
@@ -90,3 +115,4 @@ jobs:
           command: make integration
         env:
           PROXY_IMAGE: ${{ env.PROXY_IMAGE }}
+          CADDY_IMAGE: ${{ env.CADDY_IMAGE }}

@@ -236,6 +236,9 @@ func (m *Manager) applyRegistryLocked(newRegistry *pkgupstream.Registry, groups 
 			srv.RemoveTools(removedNames...)
 		}
 
+		// Diff and update resources (MCP Apps UI handlers).
+		m.applyResourcesLocked(srv, g.Name, newRegistry)
+
 		// Add or replace tools (AddTool replaces existing tools with the same name).
 		var addedNames []string
 		for _, tool := range newTools {
@@ -299,6 +302,57 @@ func (m *Manager) applyRegistryLocked(newRegistry *pkgupstream.Registry, groups 
 	}
 
 	m.registry = newRegistry
+}
+
+// applyResourcesLocked diffs the MCP Apps UI resources for a single group and
+// calls AddResource / RemoveResources on the server to keep them in sync with the
+// new registry. Must be called with m.mu held for writing.
+func (m *Manager) applyResourcesLocked(srv *sdkmcp.Server, groupName string, newRegistry *pkgupstream.Registry) {
+	newTools := newRegistry.ToolsForGroup(groupName)
+
+	// Build the new resource set: tool name → handler (nil entry = no UI).
+	type resourceEntry struct {
+		handler sdkmcp.ResourceHandler
+		name    string
+	}
+	newResources := make(map[string]resourceEntry, len(newTools))
+	for _, tool := range newTools {
+		h := newRegistry.UIHandlerForTool(tool.Name)
+		if h != nil {
+			uri := "ui://" + tool.Name + "/app"
+			newResources[uri] = resourceEntry{handler: h, name: tool.Name}
+		}
+	}
+
+	// Build the old resource set for diffing.
+	oldResourceURIs := make(map[string]bool)
+	if m.registry != nil {
+		for _, tool := range m.registry.ToolsForGroup(groupName) {
+			if m.registry.UIHandlerForTool(tool.Name) != nil {
+				oldResourceURIs["ui://"+tool.Name+"/app"] = true
+			}
+		}
+	}
+
+	// Remove resources whose tools are no longer present or no longer have a UI.
+	var removedURIs []string
+	for uri := range oldResourceURIs {
+		if _, ok := newResources[uri]; !ok {
+			removedURIs = append(removedURIs, uri)
+		}
+	}
+	if len(removedURIs) > 0 {
+		srv.RemoveResources(removedURIs...)
+	}
+
+	// Register (add or replace) resources for all tools that have a UI handler.
+	for uri, re := range newResources {
+		srv.AddResource(&sdkmcp.Resource{
+			URI:      uri,
+			Name:     re.name,
+			MIMEType: "text/html",
+		}, re.handler)
+	}
 }
 
 // UpdateUpstream atomically replaces the tools for one upstream in the registry.

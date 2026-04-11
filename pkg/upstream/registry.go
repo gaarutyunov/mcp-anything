@@ -39,6 +39,9 @@ type RegistryEntry struct {
 	ValidationCfg  config.ValidationConfig
 	OperationNode  *yaml.Node   // YAML node for JSONPath group filter evaluation (nil for command/script tools)
 	Executor       ToolExecutor // set by builders; dispatches tool execution
+	// UIHandler is the MCP resource handler that serves the tool's interactive HTML UI.
+	// Nil when no UI is configured. Set by HTTP builders when a ToolUIConfig is resolved.
+	UIHandler sdkmcp.ResourceHandler
 }
 
 // ValidatedUpstream is the result of validating a single upstream configuration.
@@ -355,6 +358,16 @@ func (r *Registry) ToolUpstreamName(toolName string) string {
 		return ""
 	}
 	return entry.Upstream.Name
+}
+
+// UIHandlerForTool returns the ResourceHandler for the tool's interactive HTML UI,
+// or nil if the tool has no UI configured.
+func (r *Registry) UIHandlerForTool(toolName string) sdkmcp.ResourceHandler {
+	entry, ok := r.byPrefixedName[toolName]
+	if !ok {
+		return nil
+	}
+	return entry.UIHandler
 }
 
 // Dispatch routes a tool call to the correct upstream entry.

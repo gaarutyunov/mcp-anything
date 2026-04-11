@@ -8,13 +8,16 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strings"
+	"time"
 
 	"github.com/getkin/kin-openapi/openapi3"
 
 	pkgoutbound "github.com/gaarutyunov/mcp-anything/pkg/auth/outbound"
 	"github.com/gaarutyunov/mcp-anything/pkg/config"
 	"github.com/gaarutyunov/mcp-anything/pkg/openapi"
+	"github.com/gaarutyunov/mcp-anything/pkg/ui"
 	pkgupstream "github.com/gaarutyunov/mcp-anything/pkg/upstream"
 )
 
@@ -61,6 +64,13 @@ func (b *Builder) Build(ctx context.Context, cfg *config.UpstreamConfig, naming 
 		Client:     client,
 	}
 
+	// Build a fetch HTTP client for UI render scripts.
+	fetchTimeout := cfg.Timeout
+	if fetchTimeout <= 0 {
+		fetchTimeout = 30 * time.Second
+	}
+	uiFetchClient := &http.Client{Timeout: fetchTimeout}
+
 	entries := make([]*pkgupstream.RegistryEntry, 0, len(tools))
 	for _, vt := range tools {
 		authRequired := extractAuthRequired(vt.Operation)
@@ -82,6 +92,22 @@ func (b *Builder) Build(ctx context.Context, cfg *config.UpstreamConfig, naming 
 			OperationNode:  vt.OperationNode,
 		}
 		entry.Executor = &Executor{entry: entry}
+
+		// Load and attach a UI handler when a UI source is configured for this tool.
+		if vt.UIConfig != nil {
+			loader, uiErr := ui.New(vt.UIConfig, nil, uiFetchClient, cfg.JSScriptPool)
+			if uiErr != nil {
+				return nil, fmt.Errorf("loading UI for tool %q: %w", vt.PrefixedName, uiErr)
+			}
+			resourceURI := "ui://" + vt.PrefixedName + "/app"
+			entry.UIHandler = loader.ResourceHandler(
+				vt.PrefixedName,
+				vt.MCPTool.Description,
+				vt.MCPTool.InputSchema,
+				resourceURI,
+			)
+		}
+
 		entries = append(entries, entry)
 	}
 

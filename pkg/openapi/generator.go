@@ -11,6 +11,9 @@ import (
 	"github.com/gaarutyunov/mcp-anything/pkg/config"
 )
 
+// uiResourceURIPrefix is the URI scheme prefix for MCP Apps UI resources.
+const uiResourceURIPrefix = "ui://"
+
 // ParamInfo holds metadata about a single OpenAPI parameter used for HTTP routing.
 type ParamInfo struct {
 	Name       string
@@ -32,6 +35,9 @@ type GeneratedTool struct {
 	HeaderParams  []ParamInfo
 	Operation     *openapi3.Operation // original operation for jq generation and response schema extraction
 	OperationNode *yaml.Node          // YAML node for this operation, used for JSONPath group filter evaluation
+	// UIConfig is the resolved per-tool UI configuration, or nil if no UI is configured.
+	// Computed by merging upstream.AppUI with x-mcp-ui-static / x-mcp-ui-script extensions.
+	UIConfig *config.ToolUIConfig
 }
 
 // GenerateTools walks all operations in the OpenAPI document and returns a list of MCP
@@ -78,10 +84,23 @@ func GenerateTools(doc *openapi3.T, upstream *config.UpstreamConfig, naming *con
 			}
 			description = TruncateDescription(description, naming.DescriptionMaxLength, naming.DescriptionTruncationSuffix)
 
+			// Resolve per-tool UI config from operation extensions and upstream default.
+			uiCfg := resolveToolUIConfig(op, upstream.AppUI)
+
 			tool := &mcp.Tool{
 				Name:        prefixedName,
 				Description: description,
 				InputSchema: inputSchema,
+			}
+
+			// Set _meta["ui"]["resourceUri"] when a UI source is configured.
+			if uiCfg != nil {
+				if tool.Meta == nil {
+					tool.Meta = make(mcp.Meta)
+				}
+				tool.Meta["ui"] = map[string]any{
+					"resourceUri": uiResourceURIPrefix + prefixedName + "/app",
+				}
 			}
 
 			// Copy the operation and replace Parameters with the merged list so
@@ -100,6 +119,7 @@ func GenerateTools(doc *openapi3.T, upstream *config.UpstreamConfig, naming *con
 				QueryParams:  queryParams,
 				HeaderParams: headerParams,
 				Operation:    &mergedOp,
+				UIConfig:     uiCfg,
 			}
 
 			tools = append(tools, gt)
@@ -219,6 +239,39 @@ func FindOperationYAMLNode(root *yaml.Node, path, method string) *yaml.Node {
 		return nil
 	}
 	return yamlMappingGet(pathNode, strings.ToLower(method))
+}
+
+// resolveToolUIConfig determines the per-tool UI config for an operation.
+// Per-operation x-mcp-ui-script / x-mcp-ui-static extensions take precedence over
+// the upstream-level AppUIConfig default. Script takes precedence over static at
+// each level. Returns nil when no UI source is configured at either level.
+func resolveToolUIConfig(op *openapi3.Operation, upstreamDefault *config.AppUIConfig) *config.ToolUIConfig {
+	var opScript, opStatic string
+	if val, ok := op.Extensions["x-mcp-ui-script"]; ok {
+		if s, ok := val.(string); ok {
+			opScript = s
+		}
+	}
+	if val, ok := op.Extensions["x-mcp-ui-static"]; ok {
+		if s, ok := val.(string); ok {
+			opStatic = s
+		}
+	}
+
+	// Per-operation extensions take precedence.
+	if opScript != "" || opStatic != "" {
+		return &config.ToolUIConfig{Script: opScript, Static: opStatic}
+	}
+
+	// Fall back to upstream-level default.
+	if upstreamDefault != nil && (upstreamDefault.Script != "" || upstreamDefault.Static != "") {
+		return &config.ToolUIConfig{
+			Script: upstreamDefault.Script,
+			Static: upstreamDefault.Static,
+		}
+	}
+
+	return nil
 }
 
 // yamlMappingGet returns the value node for the given key in a YAML mapping node.

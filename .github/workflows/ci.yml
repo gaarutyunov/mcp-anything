@@ -168,3 +168,39 @@ jobs:
         env:
           PROXY_IMAGE: ${{ env.PROXY_IMAGE }}
           CADDY_IMAGE: ${{ env.CADDY_IMAGE }}
+    
+  e2e-tests:
+    name: E2E / ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    needs: [build-image, build-operator-image]
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Kraken Market Data
+            test: TestKrakenMarketDataE2E
+          - name: Kagent RemoteMCPServer
+            test: TestKagentRemoteMCPServerE2E
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Setup Testcontainers Cloud Client
+        uses: atomicjar/testcontainers-cloud-setup-action@v1
+        with:
+          token: ${{ secrets.TC_CLOUD_TOKEN }}
+          wait: 'true'
+
+      - name: Run E2E test
+        run: |
+          go test -race -tags e2e -count=1 -timeout 600s \
+            -run ${{ matrix.test }} \
+            ./tests/e2e/...
+        env:
+          PROXY_IMAGE: ${{ env.PROXY_IMAGE }}
+          OPERATOR_IMAGE: ${{ env.OPERATOR_IMAGE }}

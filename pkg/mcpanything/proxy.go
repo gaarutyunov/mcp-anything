@@ -162,15 +162,21 @@ func New(ctx context.Context, cfg *pkgconfig.ProxyConfig, opts ...Option) (*Prox
 		return nil, err
 	}
 
-	// Build readiness checker from refresher health.
-	var readiness pkgserver.ReadinessChecker
+	// Build readiness checker combining refresher health and circuit breaker state.
+	var readinessCheckers []pkgupstream.ReadinessChecker
 	if len(p.refreshers) > 0 {
 		hcs := make([]pkgupstream.HealthChecker, len(p.refreshers))
 		for i, r := range p.refreshers {
 			hcs[i] = r
 		}
-		readiness = pkgupstream.NewRefresherSet(hcs)
+		readinessCheckers = append(readinessCheckers, pkgupstream.NewRefresherSet(hcs))
 	}
+	// Circuit breaker readiness is always added; it returns (true, "") when no
+	// circuit breakers are configured, so it is a no-op for unconfigured upstreams.
+	readinessCheckers = append(readinessCheckers,
+		pkgupstream.ReadinessCheckerFunc(p.manager.IsCircuitBreakerReady),
+	)
+	var readiness pkgserver.ReadinessChecker = pkgupstream.NewCompositeReadiness(readinessCheckers...)
 
 	// Store handlers for external consumers (e.g. pkg/caddy Caddy module).
 	p.mcpHandlers = mcpHandlers

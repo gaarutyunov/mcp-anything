@@ -24,6 +24,22 @@ builds:
       - amd64
       - arm64
 
+  - id: operator
+    main: ./cmd/operator
+    binary: operator
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.ShortCommit}}
+      - -X main.date={{.Date}}
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+
 archives:
   - id: default
     formats:
@@ -41,6 +57,17 @@ dockers_v2:
       - linux/amd64
       - linux/arm64
     dockerfile: Dockerfile.goreleaser
+
+  - ids: [operator]
+    images:
+      - "ghcr.io/gaarutyunov/mcp-anything-operator"
+    tags:
+      - "{{ .Version }}"
+      - "latest"
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    dockerfile: Dockerfile.operator.goreleaser
 
 helm_charts:
   - name: mcp-anything

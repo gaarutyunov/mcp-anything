@@ -1,3 +1,6 @@
+---
+globs: tests/e2e/**
+---
 # E2E test rules
 
 E2E tests live in `tests/e2e/` with build tag `//go:build e2e`. They use a shared k3s cluster (created once in `TestMain`) and test full-stack behaviour — real containers, real Kubernetes, real network traffic.

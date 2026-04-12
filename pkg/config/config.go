@@ -27,6 +27,7 @@ type ProxyConfig struct {
 	TokenCounting  TokenCountingConfig        `koanf:"token_counting"`
 	RateLimits     map[string]RateLimitConfig `koanf:"rate_limits"`
 	RateLimitStore RateLimitStoreConfig       `koanf:"rate_limit_store"`
+	ToolSearch     *ToolSearchConfig          `koanf:"tool_search"`
 	SessionStore   SessionStoreConfig         `koanf:"session_store"`
 	// Caches defines named cache configurations referenced by upstreams or per-tool overlays.
 	Caches map[string]CacheConfig `koanf:"caches"`
@@ -71,6 +72,100 @@ type TokenCountingConfig struct {
 	// Encoding selects the tiktoken BPE encoding used for tokenization.
 	// Supported values: "cl100k_base" (default), "o200k_base".
 	Encoding string `koanf:"encoding"`
+}
+
+// ToolSearchConfig configures semantic tool search using a vector index.
+// When enabled, tools/list returns only search_tools; actual tools remain callable.
+type ToolSearchConfig struct {
+	// Enabled activates semantic tool search. Default: false.
+	Enabled bool `koanf:"enabled"`
+	// Limit is the default number of tools returned per search query. Default: 5.
+	Limit     int             `koanf:"limit"`
+	Embedding EmbeddingConfig `koanf:"embedding"`
+}
+
+// EmbeddingConfig configures the embedding provider for semantic search.
+type EmbeddingConfig struct {
+	// Provider selects the embedding backend.
+	// Built-in: openai, openai_compat, ollama, cohere, mistral, jina, mixedbread, vertex, azure_openai, localai.
+	// Separate package (heavy dep): hugot.
+	Provider     string                   `koanf:"provider"`
+	OpenAI       *OpenAIEmbedConfig       `koanf:"openai"`
+	OpenAICompat *OpenAICompatEmbedConfig `koanf:"openai_compat"`
+	Ollama       *OllamaEmbedConfig       `koanf:"ollama"`
+	Cohere       *CohereEmbedConfig       `koanf:"cohere"`
+	Mistral      *MistralEmbedConfig      `koanf:"mistral"`
+	Jina         *JinaEmbedConfig         `koanf:"jina"`
+	Mixedbread   *MixedbreadEmbedConfig   `koanf:"mixedbread"`
+	Vertex       *VertexEmbedConfig       `koanf:"vertex"`
+	AzureOpenAI  *AzureOpenAIEmbedConfig  `koanf:"azure_openai"`
+	Hugot        *HugotEmbedConfig        `koanf:"hugot"`
+}
+
+// OpenAIEmbedConfig configures the OpenAI embedding provider.
+type OpenAIEmbedConfig struct {
+	APIKey string `koanf:"api_key"` // supports ${ENV_VAR} expansion
+	Model  string `koanf:"model"`   // e.g. "text-embedding-3-small"
+}
+
+// OpenAICompatEmbedConfig configures an OpenAI-compatible embedding endpoint.
+// Also used for the localai provider (base_url defaults to http://localhost:8080/v1).
+type OpenAICompatEmbedConfig struct {
+	BaseURL string `koanf:"base_url"`
+	APIKey  string `koanf:"api_key"` // supports ${ENV_VAR} expansion
+	Model   string `koanf:"model"`
+}
+
+// OllamaEmbedConfig configures the Ollama embedding provider.
+type OllamaEmbedConfig struct {
+	BaseURL string `koanf:"base_url"` // defaults to http://localhost:11434/api
+	Model   string `koanf:"model"`    // e.g. "nomic-embed-text"
+}
+
+// CohereEmbedConfig configures the Cohere embedding provider.
+type CohereEmbedConfig struct {
+	APIKey string `koanf:"api_key"` // supports ${ENV_VAR} expansion
+	Model  string `koanf:"model"`   // e.g. "embed-english-v3.0"
+}
+
+// MistralEmbedConfig configures the Mistral embedding provider.
+type MistralEmbedConfig struct {
+	APIKey string `koanf:"api_key"` // supports ${ENV_VAR} expansion
+}
+
+// JinaEmbedConfig configures the Jina embedding provider.
+type JinaEmbedConfig struct {
+	APIKey string `koanf:"api_key"` // supports ${ENV_VAR} expansion
+	Model  string `koanf:"model"`   // e.g. "jina-embeddings-v2-base-en"
+}
+
+// MixedbreadEmbedConfig configures the Mixedbread embedding provider.
+type MixedbreadEmbedConfig struct {
+	APIKey string `koanf:"api_key"` // supports ${ENV_VAR} expansion
+	Model  string `koanf:"model"`   // e.g. "mxbai-embed-large-v1"
+}
+
+// VertexEmbedConfig configures the Google Vertex AI embedding provider.
+type VertexEmbedConfig struct {
+	APIKey  string `koanf:"api_key"` // supports ${ENV_VAR} expansion
+	Project string `koanf:"project"`
+	Model   string `koanf:"model"` // e.g. "text-embedding-004"
+}
+
+// AzureOpenAIEmbedConfig configures the Azure OpenAI embedding provider.
+type AzureOpenAIEmbedConfig struct {
+	APIKey        string `koanf:"api_key"`        // supports ${ENV_VAR} expansion
+	DeploymentURL string `koanf:"deployment_url"` // e.g. "https://RESOURCE.openai.azure.com/openai/deployments/DEPLOYMENT"
+	APIVersion    string `koanf:"api_version"`    // defaults to "2024-02-01"
+	Model         string `koanf:"model"`
+}
+
+// HugotEmbedConfig configures the in-process ONNX embedding provider.
+// The model directory must contain tokenizer.json and an .onnx model file.
+// Uses a pure-Go ONNX backend (no CGO required).
+type HugotEmbedConfig struct {
+	ModelPath    string `koanf:"model_path"`    // path to directory containing model files
+	OnnxFilename string `koanf:"onnx_filename"` // .onnx filename within ModelPath; default "model.onnx"
 }
 
 // CacheConfig defines TTL and per-user key settings for a named cache.

@@ -24,12 +24,17 @@ import (
 	pkginbound "github.com/gaarutyunov/mcp-anything/pkg/auth/inbound"
 	pkgcache "github.com/gaarutyunov/mcp-anything/pkg/cache"
 	"github.com/gaarutyunov/mcp-anything/pkg/config"
+	pkgembedding "github.com/gaarutyunov/mcp-anything/pkg/embedding"
 	"github.com/gaarutyunov/mcp-anything/pkg/ratelimit"
 	"github.com/gaarutyunov/mcp-anything/pkg/runtime"
+	pkgsearch "github.com/gaarutyunov/mcp-anything/pkg/search"
 	pkgtelemetry "github.com/gaarutyunov/mcp-anything/pkg/telemetry"
 	"github.com/gaarutyunov/mcp-anything/pkg/tokencounter"
 	pkgupstream "github.com/gaarutyunov/mcp-anything/pkg/upstream"
 )
+
+// searchToolName is the name of the semantic search MCP tool.
+const searchToolName = "search_tools"
 
 // upstreamState holds the current per-upstream entries and spec YAML root,
 // used for incremental registry rebuilds triggered by background refresh.
@@ -64,6 +69,11 @@ type Manager struct {
 	namingCfg      *config.NamingConfig
 	upstreamByName map[string]*upstreamState // latest state per upstream name
 
+	// Semantic tool search state, keyed by group endpoint.
+	searchIndexes map[string]*pkgsearch.Index
+	searchTools   map[string]*sdkmcp.Tool
+	searchLimit   int
+
 	// Cache state — populated by Rebuild when caches are configured.
 	store        pkgcache.Store
 	cacheConfigs map[string]config.CacheConfig
@@ -77,6 +87,8 @@ func NewManager(pools *runtime.Registry) *Manager {
 		servers:        make(map[string]*sdkmcp.Server),
 		upstreamByName: make(map[string]*upstreamState),
 		pools:          pools,
+		searchIndexes:  make(map[string]*pkgsearch.Index),
+		searchTools:    make(map[string]*sdkmcp.Tool),
 	}
 }
 
@@ -319,31 +331,112 @@ func (m *Manager) Rebuild(ctx context.Context, cfg *config.ProxyConfig) error {
 		}
 	}
 
+	// Build per-group search indexes outside the lock (embedding calls may be slow).
+	newSearchIndexes, newSearchTools, newSearchLimit, searchErr := m.buildSearchState(ctx, cfg.ToolSearch, newRegistry, groups)
+	if searchErr != nil {
+		// Search index build failure is non-fatal: degrade gracefully.
+		slog.Error("failed to build search indexes — tool search will be unavailable", "error", searchErr)
+		newSearchIndexes = make(map[string]*pkgsearch.Index)
+		newSearchTools = make(map[string]*sdkmcp.Tool)
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	m.counter = newCounter
 	m.enforcer = newEnforcer
 	m.rateLimitCfgs = cfg.RateLimits
-	m.applyRegistryLocked(newRegistry, groups)
+	m.applyRegistryLocked(newRegistry, groups, newSearchTools)
 
 	m.groups = groups
 	m.namingCfg = &cfg.Naming
 	m.upstreamByName = newUpstreamByName
+	m.searchIndexes = newSearchIndexes
+	m.searchTools = newSearchTools
+	m.searchLimit = newSearchLimit
 	m.store = newStore
 	m.cacheConfigs = cfg.Caches
 	return nil
 }
 
+// buildSearchState builds per-group search indexes when tool_search is enabled.
+// Returns empty maps when disabled or on error; the caller handles the error.
+func (m *Manager) buildSearchState(
+	ctx context.Context,
+	cfg *config.ToolSearchConfig,
+	reg *pkgupstream.Registry,
+	groups []config.GroupConfig,
+) (map[string]*pkgsearch.Index, map[string]*sdkmcp.Tool, int, error) {
+	indexes := make(map[string]*pkgsearch.Index)
+	tools := make(map[string]*sdkmcp.Tool)
+
+	if cfg == nil || !cfg.Enabled {
+		return indexes, tools, 0, nil
+	}
+
+	embeddingFunc, err := pkgembedding.New(ctx, &cfg.Embedding)
+	if err != nil {
+		return nil, nil, 0, fmt.Errorf("building embedding func: %w", err)
+	}
+
+	limit := cfg.Limit
+	if limit <= 0 {
+		limit = 5
+	}
+
+	searchTool := buildSearchTool(limit)
+
+	for _, g := range groups {
+		groupTools := reg.ToolsForGroup(g.Name)
+		idx, idxErr := pkgsearch.Build(ctx, groupTools, embeddingFunc)
+		if idxErr != nil {
+			return nil, nil, 0, fmt.Errorf("building search index for group %q: %w", g.Name, idxErr)
+		}
+		indexes[g.Endpoint] = idx
+		tools[g.Endpoint] = searchTool
+		slog.Info("search index built", "group", g.Name, "tools", len(groupTools))
+	}
+
+	return indexes, tools, limit, nil
+}
+
+// buildSearchTool creates the search_tools MCP tool definition.
+func buildSearchTool(defaultLimit int) *sdkmcp.Tool {
+	return &sdkmcp.Tool{
+		Name:        searchToolName,
+		Description: fmt.Sprintf("Search available tools by natural language query. Returns up to %d matching tool definitions including their input schemas.", defaultLimit),
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"query": map[string]any{
+					"type":        "string",
+					"description": "Natural language description of what you want to do",
+				},
+				"limit": map[string]any{
+					"type":        "integer",
+					"description": fmt.Sprintf("Maximum number of tools to return (default: %d)", defaultLimit),
+				},
+			},
+			"required": []string{"query"},
+		},
+	}
+}
+
 // applyRegistryLocked diffs the new registry against the current one and updates
 // MCP servers accordingly. Must be called with m.mu held for writing.
-func (m *Manager) applyRegistryLocked(newRegistry *pkgupstream.Registry, groups []config.GroupConfig) {
+// newSearchTools maps group endpoint → search_tools tool definition; pass nil
+// to leave existing search tool state unchanged (used by incremental updates).
+func (m *Manager) applyRegistryLocked(newRegistry *pkgupstream.Registry, groups []config.GroupConfig, newSearchTools map[string]*sdkmcp.Tool) {
 	for _, g := range groups {
-		groupName := g.Name // capture for closure
+		groupName := g.Name    // capture for closure
+		endpoint := g.Endpoint // capture for closure
 
 		srv, exists := m.servers[g.Endpoint]
 		if !exists {
 			srv = sdkmcp.NewServer(m.impl, nil)
+			// Add the tools/list intercept middleware once on server creation.
+			// It is dynamic: reads m.searchTools[endpoint] at request time.
+			srv.AddReceivingMiddleware(m.listToolsMiddleware(endpoint))
 			m.servers[g.Endpoint] = srv
 		}
 
@@ -464,9 +557,104 @@ func (m *Manager) applyRegistryLocked(newRegistry *pkgupstream.Registry, groups 
 		if len(addedNames) > 0 || len(removedNames) > 0 {
 			slog.Info("tools updated", "group", g.Name, "added", addedNames, "removed", removedNames)
 		}
+
+		// Handle search_tools: add when enabled, remove when disabled.
+		// Only act when newSearchTools is provided (nil = incremental update, leave as-is).
+		if newSearchTools != nil {
+			if searchTool, ok := newSearchTools[endpoint]; ok {
+				srv.AddTool(searchTool, m.makeSearchHandler(endpoint))
+			} else {
+				// Search disabled for this group; remove if it was present before.
+				if m.searchTools != nil {
+					if _, wasPresentBefore := m.searchTools[endpoint]; wasPresentBefore {
+						srv.RemoveTools(searchToolName)
+					}
+				}
+			}
+		}
 	}
 
 	m.registry = newRegistry
+}
+
+// listToolsMiddleware returns a Middleware that intercepts tools/list and
+// returns only search_tools when semantic search is enabled for this endpoint.
+// The middleware is dynamic: it reads the current search state under a read lock
+// so changes take effect on the next tools/list call after a config reload.
+func (m *Manager) listToolsMiddleware(endpoint string) sdkmcp.Middleware {
+	return func(next sdkmcp.MethodHandler) sdkmcp.MethodHandler {
+		return func(ctx context.Context, method string, req sdkmcp.Request) (sdkmcp.Result, error) {
+			if method != "tools/list" {
+				return next(ctx, method, req)
+			}
+			m.mu.RLock()
+			searchTool := m.searchTools[endpoint]
+			m.mu.RUnlock()
+			if searchTool == nil {
+				// Search not enabled — return the full tool list.
+				return next(ctx, method, req)
+			}
+			// Search enabled — return only search_tools.
+			return &sdkmcp.ListToolsResult{
+				Tools: []*sdkmcp.Tool{searchTool},
+			}, nil
+		}
+	}
+}
+
+// makeSearchHandler returns a ToolHandler for the search_tools tool.
+// The handler reads from the live search index for the given endpoint.
+func (m *Manager) makeSearchHandler(endpoint string) sdkmcp.ToolHandler {
+	return func(ctx context.Context, req *sdkmcp.CallToolRequest) (*sdkmcp.CallToolResult, error) {
+		args, parseErr := managerParseArguments(req.Params.Arguments)
+		if parseErr != nil {
+			return nil, fmt.Errorf("parsing search_tools arguments: %w", parseErr)
+		}
+
+		query, _ := args["query"].(string)
+		if query == "" {
+			return &sdkmcp.CallToolResult{
+				IsError: true,
+				Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: "query is required"}},
+			}, nil
+		}
+
+		m.mu.RLock()
+		idx := m.searchIndexes[endpoint]
+		limit := m.searchLimit
+		m.mu.RUnlock()
+
+		if lf, ok := args["limit"].(float64); ok && lf > 0 {
+			limit = int(lf)
+		}
+		if limit <= 0 {
+			limit = 5
+		}
+
+		if idx == nil {
+			return &sdkmcp.CallToolResult{
+				IsError: true,
+				Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: "search index not available"}},
+			}, nil
+		}
+
+		results, searchErr := idx.Search(ctx, query, limit)
+		if searchErr != nil {
+			return &sdkmcp.CallToolResult{
+				IsError: true,
+				Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: "search failed: " + searchErr.Error()}},
+			}, nil
+		}
+
+		resultJSON, marshalErr := json.Marshal(results)
+		if marshalErr != nil {
+			return nil, fmt.Errorf("marshalling search results: %w", marshalErr)
+		}
+
+		return &sdkmcp.CallToolResult{
+			Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: string(resultJSON)}},
+		}, nil
+	}
 }
 
 // applyResourcesLocked diffs the MCP Apps UI resources for a single group and
@@ -576,7 +764,8 @@ func (m *Manager) rebuildFromStateLocked() error {
 		return fmt.Errorf("rebuilding registry: %w", err)
 	}
 
-	m.applyRegistryLocked(newRegistry, m.groups)
+	// Pass nil for search tools: incremental updates do not change search state.
+	m.applyRegistryLocked(newRegistry, m.groups, nil)
 	return nil
 }
 

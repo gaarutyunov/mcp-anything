@@ -1,6 +1,6 @@
 ## Agent — a kagent declarative agent that uses mcp-anything tools.
 ## Apply after ModelConfig and RemoteMCPServer are created:
-##   kubectl apply -f deploy/examples/kagent/agent.yaml -n <NAMESPACE>
+##   kubectl apply -f examples/kagent/agent.yaml -n <NAMESPACE>
 
 apiVersion: kagent.dev/v1alpha2
 kind: Agent

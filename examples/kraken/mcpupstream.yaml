@@ -10,12 +10,12 @@
 ## Prerequisites:
 ##   Create ConfigMaps with the spec and overlay:
 ##     kubectl -n mcp-system create configmap kraken-spec \
-##       --from-file=spec.yaml=deploy/examples/kraken/spec.yaml
+##       --from-file=spec.yaml=examples/kraken/spec.yaml
 ##     kubectl -n mcp-system create configmap kraken-overlay \
-##       --from-file=overlay.yaml=deploy/examples/kraken/overlay.yaml
+##       --from-file=overlay.yaml=examples/kraken/overlay.yaml
 ##
 ## Apply:
-##   kubectl apply -f deploy/examples/kraken/mcpupstream.yaml
+##   kubectl apply -f examples/kraken/mcpupstream.yaml
 apiVersion: mcp-anything.ai/v1alpha1
 kind: MCPUpstream
 metadata:
@@ -33,14 +33,14 @@ spec:
   baseURL: "https://api.kraken.com"
 
   # OpenAPI spec from a ConfigMap. Contains only public market data endpoints.
-  # See deploy/examples/kraken/spec.yaml for the full spec.
+  # See examples/kraken/spec.yaml for the full spec.
   openapi:
     configMapRef:
       name: kraken-spec
       key: spec.yaml
 
   # OpenAPI Overlay that adds jq response transforms and improves tool names.
-  # See deploy/examples/kraken/overlay.yaml for the full overlay.
+  # See examples/kraken/overlay.yaml for the full overlay.
   overlay:
     configMapRef:
       name: kraken-overlay

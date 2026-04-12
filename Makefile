@@ -1,4 +1,4 @@
-.PHONY: build build-operator lint vet test integration check clean
+.PHONY: build build-operator lint vet test integration e2e check clean
 
 BINARY := bin/proxy
 OPERATOR_BINARY := bin/operator
@@ -22,6 +22,9 @@ test:
 
 integration:
 	go test $(GOFLAGS) -tags integration -count=1 -timeout $(INTEGRATION_TIMEOUT) ./tests/integration/...
+
+e2e:
+	go test $(GOFLAGS) -tags e2e -count=1 -timeout $(INTEGRATION_TIMEOUT) ./tests/e2e/...
 
 check: lint vet test build build-operator
 

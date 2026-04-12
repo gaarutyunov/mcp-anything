@@ -1,6 +1,6 @@
 ## RemoteMCPServer — registers mcp-anything as a tool provider for kagent.
 ## Apply after the mcp-anything proxy Service is running:
-##   kubectl apply -f deploy/examples/kagent/remotemcpserver.yaml -n <NAMESPACE>
+##   kubectl apply -f examples/kagent/remotemcpserver.yaml -n <NAMESPACE>
 ##
 ## Replace <MCP_SERVICE_URL> with the in-cluster address of the mcp-anything proxy Service,
 ## e.g. http://demo-proxy.mcp-system.svc.cluster.local:8080/mcp

@@ -1,6 +1,6 @@
 ## MCPUpstream — configures the mcp-anything operator to proxy the Demo Items API.
 ## Apply after the mcp-anything operator is running:
-##   kubectl apply -f deploy/examples/kagent/mcpupstream.yaml -n mcp-system
+##   kubectl apply -f examples/kagent/mcpupstream.yaml -n mcp-system
 ##
 ## Replace <UPSTREAM_BASE_URL> with your upstream's address (e.g. http://items-api:8080)
 ## and <OPENAPI_SPEC_URL> with the address of its OpenAPI spec.

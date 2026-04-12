@@ -1,6 +1,6 @@
-//go:build integration
+//go:build e2e
 
-package integration_test
+package e2e_test
 
 import (
 	"bufio"
@@ -262,7 +262,7 @@ func TestKagentRemoteMCPServerE2E(t *testing.T) {
 	}
 
 	t.Log("waiting for mcp-anything proxy pod to become Ready")
-	mcpPodName, err := waitForKrakenProxyPod(ctx, t, k8sClient, kagentTestNamespace, kagentMCPProxyName)
+	mcpPodName, err := waitForProxyPod(ctx, t, k8sClient, kagentTestNamespace, kagentMCPProxyName)
 	if err != nil {
 		t.Fatalf("mcp-anything proxy pod not ready: %v", err)
 	}

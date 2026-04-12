@@ -6,7 +6,7 @@
 ##
 ##   helm install kagent oci://ghcr.io/kagent-dev/kagent/helm/kagent \
 ##     --version v0.9.0-beta3 --namespace kagent \
-##     -f deploy/examples/kagent/kagent-values.yaml \
+##     -f examples/kagent/kagent-values.yaml \
 ##     --set providers.anthropic.apiKey=<YOUR_ANTHROPIC_API_KEY>
 ##
 ## Adjust providers.anthropic.apiKey (or use providers.openAI / providers.ollama).

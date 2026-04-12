@@ -17,13 +17,26 @@ type PoolAcquirer interface {
 
 // ProxyConfig is the top-level configuration struct.
 type ProxyConfig struct {
-	Server      ServerConfig      `koanf:"server"`
-	Telemetry   TelemetryConfig   `koanf:"telemetry"`
-	Naming      NamingConfig      `koanf:"naming"`
-	Upstreams   []UpstreamConfig  `koanf:"upstreams"`
-	InboundAuth InboundAuthConfig `koanf:"inbound_auth"`
-	Groups      []GroupConfig     `koanf:"groups"`
-	Runtime     RuntimeConfig     `koanf:"runtime"`
+	Server        ServerConfig        `koanf:"server"`
+	Telemetry     TelemetryConfig     `koanf:"telemetry"`
+	Naming        NamingConfig        `koanf:"naming"`
+	Upstreams     []UpstreamConfig    `koanf:"upstreams"`
+	InboundAuth   InboundAuthConfig   `koanf:"inbound_auth"`
+	Groups        []GroupConfig       `koanf:"groups"`
+	Runtime       RuntimeConfig       `koanf:"runtime"`
+	TokenCounting TokenCountingConfig `koanf:"token_counting"`
+}
+
+// TokenCountingConfig configures per-tool token counting on tool results.
+// When enabled, successful tool call results are tokenized and the count is
+// recorded as a Prometheus histogram (mcp_tool_result_tokens).
+// When absent or enabled: false, no tokenization occurs.
+type TokenCountingConfig struct {
+	// Enabled activates token counting. Default: false.
+	Enabled bool `koanf:"enabled"`
+	// Encoding selects the tiktoken BPE encoding used for tokenization.
+	// Supported values: "cl100k_base" (default), "o200k_base".
+	Encoding string `koanf:"encoding"`
 }
 
 // RuntimeConfig controls the bounded pools for concurrent script runtime instances.

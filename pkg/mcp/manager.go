@@ -24,6 +24,7 @@ import (
 	"github.com/gaarutyunov/mcp-anything/pkg/config"
 	"github.com/gaarutyunov/mcp-anything/pkg/runtime"
 	pkgtelemetry "github.com/gaarutyunov/mcp-anything/pkg/telemetry"
+	"github.com/gaarutyunov/mcp-anything/pkg/tokencounter"
 	pkgupstream "github.com/gaarutyunov/mcp-anything/pkg/upstream"
 )
 
@@ -42,7 +43,8 @@ type Manager struct {
 	impl     *sdkmcp.Implementation // set on first Rebuild
 	mu       sync.RWMutex
 
-	pools *runtime.Registry // for injecting runtime pools into upstream configs
+	pools   *runtime.Registry     // for injecting runtime pools into upstream configs
+	counter *tokencounter.Counter // nil when token counting is disabled
 
 	// State needed for per-upstream incremental updates (background refresh).
 	groups         []config.GroupConfig
@@ -177,6 +179,15 @@ func (m *Manager) Rebuild(ctx context.Context, cfg *config.ProxyConfig) error {
 		return fmt.Errorf("building tool registry: %w", err)
 	}
 
+	// Build token counter when enabled in config.
+	var newCounter *tokencounter.Counter
+	if cfg.TokenCounting.Enabled {
+		newCounter, err = tokencounter.New(cfg.TokenCounting.Encoding)
+		if err != nil {
+			slog.Warn("token counting disabled: could not initialise tokenizer", "error", err)
+		}
+	}
+
 	// Build per-upstream state map from the new registry.
 	newUpstreamByName := make(map[string]*upstreamState, len(validatedUpstreams))
 	for _, vu := range validatedUpstreams {
@@ -189,6 +200,7 @@ func (m *Manager) Rebuild(ctx context.Context, cfg *config.ProxyConfig) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	m.counter = newCounter
 	m.applyRegistryLocked(newRegistry, groups)
 
 	m.groups = groups
@@ -290,6 +302,19 @@ func (m *Manager) applyRegistryLocked(newRegistry *pkgupstream.Registry, groups 
 				}
 				if dispErr != nil {
 					span.RecordError(dispErr)
+				}
+
+				// Record token count for successful results (no error, non-nil counter).
+				if dispErr == nil && result != nil {
+					m.mu.RLock()
+					ctr := m.counter
+					reg := m.registry
+					m.mu.RUnlock()
+					upstreamName := ""
+					if reg != nil {
+						upstreamName = reg.ToolUpstreamName(t.Name)
+					}
+					ctr.Record(callCtx, t.Name, upstreamName, result)
 				}
 
 				return result, dispErr

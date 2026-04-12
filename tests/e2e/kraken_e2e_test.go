@@ -46,10 +46,6 @@ const (
 //  5. Port-forwards to the proxy pod and connects an MCP client.
 //  6. Calls several Kraken market data tools and verifies the responses.
 func TestKrakenMarketDataE2E(t *testing.T) {
-	if globalK3s == nil {
-		t.Skip("shared k3s cluster unavailable")
-	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 

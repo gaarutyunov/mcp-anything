@@ -82,10 +82,6 @@ var (
 //	                    receives a user task, calls the LLM stub, invokes
 //	                    demo__get_item, and returns the final answer.
 func TestKagentRemoteMCPServerE2E(t *testing.T) {
-	if globalK3s == nil {
-		t.Skip("shared k3s cluster unavailable")
-	}
-
 	proxyImage := getProxyImage(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)

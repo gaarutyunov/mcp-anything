@@ -30,10 +30,9 @@ func TestMain(m *testing.M) {
 	slog.Info("TestMain: k3s started", "total_startup", time.Since(total).Round(time.Millisecond))
 
 	if k3sErr != nil {
-		slog.Warn("shared k3s cluster unavailable; E2E tests will be skipped", "error", k3sErr)
-	} else {
-		globalK3s = k3sResult
+		os.Exit(1)
 	}
+	globalK3s = k3sResult
 
 	slog.Info("TestMain: running tests")
 	runStart := time.Now()

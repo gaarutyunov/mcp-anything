@@ -15,7 +15,6 @@ import (
 	"testing"
 )
 
-
 // TestCommandOnly_TreeShake verifies that importing pkg/mcpanything and
 // pkg/upstream/command does NOT pull in heavy dependencies used only by
 // the script, http, or auth strategy sub-packages.
@@ -113,6 +112,43 @@ func main() {}
 	for _, pkg := range forbidden {
 		if strings.Contains(gosum, pkg) {
 			t.Errorf("tree-shaking failure: upstream/http+auth/outbound/bearer pulls in forbidden dep %q", pkg)
+		}
+	}
+}
+
+// TestEmbeddingWithoutHugot_TreeShake verifies that importing pkg/embedding (the
+// base embedding registry with built-in chromem-go providers) does NOT pull in
+// the hugot ONNX inference stack (knights-analytics/hugot, gomlx, etc.).
+// Only importing pkg/embedding/hugot (or pkg/embedding/all) should bring in
+// those heavy transitive dependencies.
+func TestEmbeddingWithoutHugot_TreeShake(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	repoRoot := findRepoRoot(t)
+
+	writeFile(t, filepath.Join(dir, "go.mod"), "module treeshaketest\n\ngo 1.21\n\nrequire github.com/gaarutyunov/mcp-anything v0.0.0\n\nreplace github.com/gaarutyunov/mcp-anything => "+repoRoot+"\n")
+	writeFile(t, filepath.Join(dir, "main.go"), `package main
+
+import (
+	_ "github.com/gaarutyunov/mcp-anything/pkg/embedding"
+)
+
+func main() {}
+`)
+
+	runGoCmd(t, dir, "mod", "tidy")
+
+	gosum := readFile(t, filepath.Join(dir, "go.sum"))
+	forbidden := []string{
+		"knights-analytics/hugot",
+		"knights-analytics/tokenizers",
+		"gomlx/gomlx",
+		"yalue/onnxruntime_go",
+	}
+	for _, pkg := range forbidden {
+		if strings.Contains(gosum, pkg) {
+			t.Errorf("tree-shaking failure: pkg/embedding pulls in forbidden dep %q", pkg)
 		}
 	}
 }

@@ -123,7 +123,7 @@ func ValidateTool(ctx context.Context, gt *GeneratedTool, doc *openapi3.T) (*Val
 	argMap := DeriveArgMapping(op)
 
 	// Determine request jq expression.
-	reqExpr := transform.GenerateRequestJq(op, gt.PrefixedName, argMap)
+	reqExpr := GenerateRequestJq(op, gt.PrefixedName, argMap)
 
 	// Determine response jq expression.
 	respExpr := transform.DefaultResponseExpr

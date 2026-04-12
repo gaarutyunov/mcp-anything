@@ -153,6 +153,68 @@ func main() {}
 	}
 }
 
+// TestPostgresSession_TreeShake verifies that importing only pkg/session/postgres
+// does NOT pull in the Redis driver.
+func TestPostgresSession_TreeShake(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	repoRoot := findRepoRoot(t)
+
+	writeFile(t, filepath.Join(dir, "go.mod"), "module treeshaketest\n\ngo 1.21\n\nrequire github.com/gaarutyunov/mcp-anything v0.0.0\n\nreplace github.com/gaarutyunov/mcp-anything => "+repoRoot+"\n")
+	writeFile(t, filepath.Join(dir, "main.go"), `package main
+
+import (
+	_ "github.com/gaarutyunov/mcp-anything/pkg/session/postgres"
+)
+
+func main() {}
+`)
+
+	runGoCmd(t, dir, "mod", "tidy")
+
+	gosum := readFile(t, filepath.Join(dir, "go.sum"))
+	forbidden := []string{
+		"redis/go-redis",
+	}
+	for _, pkg := range forbidden {
+		if strings.Contains(gosum, pkg) {
+			t.Errorf("tree-shaking failure: session/postgres pulls in forbidden dep %q", pkg)
+		}
+	}
+}
+
+// TestRedisSession_TreeShake verifies that importing only pkg/session/redis
+// does NOT pull in the PostgreSQL driver.
+func TestRedisSession_TreeShake(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	repoRoot := findRepoRoot(t)
+
+	writeFile(t, filepath.Join(dir, "go.mod"), "module treeshaketest\n\ngo 1.21\n\nrequire github.com/gaarutyunov/mcp-anything v0.0.0\n\nreplace github.com/gaarutyunov/mcp-anything => "+repoRoot+"\n")
+	writeFile(t, filepath.Join(dir, "main.go"), `package main
+
+import (
+	_ "github.com/gaarutyunov/mcp-anything/pkg/session/redis"
+)
+
+func main() {}
+`)
+
+	runGoCmd(t, dir, "mod", "tidy")
+
+	gosum := readFile(t, filepath.Join(dir, "go.sum"))
+	forbidden := []string{
+		"jackc/pgx",
+	}
+	for _, pkg := range forbidden {
+		if strings.Contains(gosum, pkg) {
+			t.Errorf("tree-shaking failure: session/redis pulls in forbidden dep %q", pkg)
+		}
+	}
+}
+
 // findRepoRoot walks up from the test's working directory to find the go.mod root.
 func findRepoRoot(t *testing.T) string {
 	t.Helper()

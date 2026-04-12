@@ -28,6 +28,9 @@ import (
 
 	// Register all embedding providers (including hugot for in-process ONNX).
 	_ "github.com/gaarutyunov/mcp-anything/pkg/embedding/all"
+
+	// Register all session store providers (memory, postgres, redis).
+	_ "github.com/gaarutyunov/mcp-anything/pkg/session/all"
 )
 
 // Set by goreleaser ldflags.

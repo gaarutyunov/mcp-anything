@@ -59,6 +59,11 @@ type Manager struct {
 	// Updated in Rebuild; read under mu.
 	rateLimitCfgs map[string]config.RateLimitConfig
 
+	// oauthStore and oauthCallbackReg are injected for oauth2_user_session strategy.
+	// Nil when no session_store is configured.
+	oauthStore       config.OAuthTokenStore
+	oauthCallbackReg config.OAuthCallbackRegistrar
+
 	// State needed for per-upstream incremental updates (background refresh).
 	groups         []config.GroupConfig
 	namingCfg      *config.NamingConfig
@@ -68,6 +73,7 @@ type Manager struct {
 	searchIndexes map[string]*pkgsearch.Index
 	searchTools   map[string]*sdkmcp.Tool
 	searchLimit   int
+
 	// Cache state — populated by Rebuild when caches are configured.
 	store        pkgcache.Store
 	cacheConfigs map[string]config.CacheConfig
@@ -84,6 +90,15 @@ func NewManager(pools *runtime.Registry) *Manager {
 		searchIndexes:  make(map[string]*pkgsearch.Index),
 		searchTools:    make(map[string]*sdkmcp.Tool),
 	}
+}
+
+// SetOAuthConfig configures per-user OAuth session storage for the oauth2_user_session strategy.
+// Must be called before the first Rebuild when any upstream uses oauth2_user_session.
+func (m *Manager) SetOAuthConfig(store config.OAuthTokenStore, reg config.OAuthCallbackRegistrar) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.oauthStore = store
+	m.oauthCallbackReg = reg
 }
 
 // HTTPHandlers returns HTTP handlers for each group endpoint.
@@ -220,6 +235,9 @@ func (m *Manager) Rebuild(ctx context.Context, cfg *config.ProxyConfig) error {
 			cfgCopy.OutboundAuth.LuaAuthPool = m.pools.LuaAuth
 			cfgCopy.JSScriptPool = m.pools.JSScript
 		}
+		// Inject OAuth session config for oauth2_user_session strategy.
+		cfgCopy.OutboundAuth.OAuthTokenStore = m.oauthStore
+		cfgCopy.OutboundAuth.OAuthCallbackReg = m.oauthCallbackReg
 
 		vu, vuErr := pkgupstream.Build(ctx, &cfgCopy, &cfg.Naming)
 		if vuErr != nil {

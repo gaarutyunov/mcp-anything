@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -17,6 +18,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 
+	pkgoutbound "github.com/gaarutyunov/mcp-anything/pkg/auth/outbound"
 	"github.com/gaarutyunov/mcp-anything/pkg/content"
 	"github.com/gaarutyunov/mcp-anything/pkg/openapi"
 	pkgtelemetry "github.com/gaarutyunov/mcp-anything/pkg/telemetry"
@@ -120,6 +122,16 @@ func (e *Executor) Execute(ctx context.Context, args map[string]any) (*sdkmcp.Ca
 	// Execute the upstream HTTP call.
 	resp, err := entry.Upstream.Client.Do(httpReq)
 	if err != nil {
+		// Check if the outbound auth strategy requires user authorization.
+		var authErr *pkgoutbound.AuthRequiredError
+		if errors.As(err, &authErr) {
+			return &sdkmcp.CallToolResult{
+				IsError: true,
+				Content: []sdkmcp.Content{
+					&sdkmcp.TextContent{Text: "Authorization required. Please visit the following URL to grant access:\n" + authErr.AuthURL},
+				},
+			}, nil
+		}
 		return nil, fmt.Errorf("executing HTTP request: %w", err)
 	}
 	defer func() {

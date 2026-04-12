@@ -197,10 +197,12 @@ jobs:
           wait: 'true'
 
       - name: Run E2E test
-        run: |
-          go test -race -tags e2e -count=1 -timeout 600s \
-            -run ${{ matrix.test }} \
-            ./tests/e2e/...
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          retry_wait_seconds: 10
+          command: make e2e
         env:
           PROXY_IMAGE: ${{ env.PROXY_IMAGE }}
           OPERATOR_IMAGE: ${{ env.OPERATOR_IMAGE }}

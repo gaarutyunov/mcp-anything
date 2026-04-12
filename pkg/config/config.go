@@ -27,6 +27,7 @@ type ProxyConfig struct {
 	TokenCounting  TokenCountingConfig        `koanf:"token_counting"`
 	RateLimits     map[string]RateLimitConfig `koanf:"rate_limits"`
 	RateLimitStore RateLimitStoreConfig       `koanf:"rate_limit_store"`
+	SessionStore   SessionStoreConfig         `koanf:"session_store"`
 	// Caches defines named cache configurations referenced by upstreams or per-tool overlays.
 	Caches map[string]CacheConfig `koanf:"caches"`
 	// CacheStore configures the cache backend. Defaults to the memory provider when absent.
@@ -367,12 +368,13 @@ type CommandSchemaProperty struct {
 
 // OutboundAuthConfig controls how the proxy authenticates outbound requests to an upstream API.
 type OutboundAuthConfig struct {
-	Strategy                string               `koanf:"strategy"` // bearer|api_key|oauth2_client_credentials|lua|js|none
-	Bearer                  BearerOutboundConfig `koanf:"bearer"`
-	APIKey                  APIKeyOutboundConfig `koanf:"api_key"`
-	OAuth2ClientCredentials OAuth2CCConfig       `koanf:"oauth2_client_credentials"`
-	Lua                     LuaOutboundConfig    `koanf:"lua"`
-	JS                      JSOutboundConfig     `koanf:"js"`
+	Strategy                string                  `koanf:"strategy"` // bearer|api_key|oauth2_client_credentials|oauth2_user_session|lua|js|none
+	Bearer                  BearerOutboundConfig    `koanf:"bearer"`
+	APIKey                  APIKeyOutboundConfig    `koanf:"api_key"`
+	OAuth2ClientCredentials OAuth2CCConfig          `koanf:"oauth2_client_credentials"`
+	OAuth2UserSession       OAuth2UserSessionConfig `koanf:"oauth2_user_session"`
+	Lua                     LuaOutboundConfig       `koanf:"lua"`
+	JS                      JSOutboundConfig        `koanf:"js"`
 	// Upstream is set programmatically (not from config file) to the owning upstream's name.
 	// Used by the lua and js strategies to pass the upstream name to scripts.
 	Upstream string `koanf:"-"`
@@ -380,6 +382,10 @@ type OutboundAuthConfig struct {
 	// Not loaded from the config file. Nil is valid when no script strategy is configured.
 	JSAuthPool  PoolAcquirer `koanf:"-"`
 	LuaAuthPool PoolAcquirer `koanf:"-"`
+	// OAuthTokenStore and OAuthCallbackReg are set programmatically for oauth2_user_session strategy.
+	// Not loaded from the config file. Nil is valid when no oauth2_user_session strategy is configured.
+	OAuthTokenStore  OAuthTokenStore        `koanf:"-"`
+	OAuthCallbackReg OAuthCallbackRegistrar `koanf:"-"`
 }
 
 // LuaOutboundConfig configures outbound credential acquisition via a Lua script.
@@ -435,4 +441,89 @@ type OverlayConfig struct {
 	AuthHeader      string        `koanf:"auth_header"`
 	RefreshInterval time.Duration `koanf:"refresh_interval"`
 	Inline          string        `koanf:"inline"`
+}
+
+// OAuthToken holds per-user OAuth 2.0 token data returned by an authorization flow.
+type OAuthToken struct {
+	AccessToken  string
+	RefreshToken string
+	Expiry       time.Time
+	TokenType    string
+}
+
+// OAuthTokenStore persists per-user OAuth tokens keyed by (userSubject, upstreamName).
+// Implementations must be safe for concurrent use.
+// Implemented by pkg/session/memory, pkg/session/postgres, and pkg/session/redis.
+type OAuthTokenStore interface {
+	Save(ctx context.Context, userSubject, upstreamName string, token *OAuthToken) error
+	Load(ctx context.Context, userSubject, upstreamName string) (*OAuthToken, error)
+	Delete(ctx context.Context, userSubject, upstreamName string) error
+}
+
+// OAuthCallbackRegistrar is implemented by pkg/oauth/callbackmux.Mux.
+// Outbound auth providers call RegisterProvider to participate in the OAuth2 callback flow.
+type OAuthCallbackRegistrar interface {
+	// RegisterProvider registers an upstream's OAuth2 configuration.
+	// After registration the proxy handles GET /oauth/callback/{upstreamName}.
+	RegisterProvider(upstreamName, authURL, tokenURL, clientID, clientSecret string, scopes []string, redirectURL string)
+	// AuthURL returns the full authorization URL for the given upstream and user subject,
+	// including an HMAC-SHA256-signed state parameter.
+	AuthURL(upstreamName, userSubject string) (string, error)
+}
+
+// SessionStoreConfig configures the session store backend for oauth2_user_session.
+type SessionStoreConfig struct {
+	// Provider selects the store backend: memory|postgres|redis.
+	Provider string `koanf:"provider"`
+	// HMACKey is used to sign OAuth state parameters (CSRF protection).
+	// Supports ${ENV_VAR} expansion. If empty, a random key is generated on startup
+	// (states will not survive proxy restarts).
+	HMACKey  string                `koanf:"hmac_key"`
+	Postgres PostgresSessionConfig `koanf:"postgres"`
+	Redis    RedisSessionConfig    `koanf:"redis"`
+}
+
+// PostgresSessionConfig configures a PostgreSQL-backed session store.
+type PostgresSessionConfig struct {
+	// DSN is the PostgreSQL connection string. Supports ${ENV_VAR} expansion.
+	DSN string `koanf:"dsn"`
+	// EncryptionKey is a 32-byte AES-256 key encoded as 64 hex characters.
+	// Supports ${ENV_VAR} expansion.
+	EncryptionKey string `koanf:"encryption_key"`
+}
+
+// RedisSessionConfig configures a Redis-backed session store.
+type RedisSessionConfig struct {
+	// Addr is the Redis server address (host:port).
+	Addr string `koanf:"addr"`
+	// Password is the Redis AUTH password. Supports ${ENV_VAR} expansion.
+	Password string `koanf:"password"`
+	// EncryptionKey is a 32-byte AES-256 key encoded as 64 hex characters.
+	// Supports ${ENV_VAR} expansion.
+	EncryptionKey string `koanf:"encryption_key"`
+}
+
+// OAuth2UserSessionConfig configures the oauth2_user_session outbound auth strategy.
+// It stores per-user OAuth tokens in a session store and handles token refresh.
+type OAuth2UserSessionConfig struct {
+	// Provider selects the OAuth2/OIDC provider.
+	// Built-in shortcuts: "github" | "google" | "gitlab" | "slack"
+	// Standard: "oidc" (auto-discovers endpoints from issuer_url) | "oauth2" (explicit endpoints)
+	Provider string `koanf:"provider"`
+	// IssuerURL is the OIDC issuer URL for provider "oidc".
+	// Endpoints are discovered from <issuer_url>/.well-known/openid-configuration.
+	IssuerURL string `koanf:"issuer_url"`
+	// AuthURL is the OAuth2 authorization endpoint for provider "oauth2".
+	AuthURL string `koanf:"auth_url"`
+	// TokenURL is the OAuth2 token endpoint for provider "oauth2".
+	TokenURL string `koanf:"token_url"`
+	// ClientID is the OAuth2 application client ID.
+	ClientID string `koanf:"client_id"`
+	// ClientSecret is the OAuth2 application client secret. Supports ${ENV_VAR} expansion.
+	ClientSecret string `koanf:"client_secret"`
+	// Scopes is the list of OAuth2 scopes to request.
+	Scopes []string `koanf:"scopes"`
+	// CallbackURL is the full URL of the proxy's OAuth callback endpoint,
+	// e.g. "https://mcp.example.com/oauth/callback/my-upstream".
+	CallbackURL string `koanf:"callback_url"`
 }

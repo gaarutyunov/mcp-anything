@@ -32,6 +32,19 @@ var (
 	registry = make(map[string]ProviderFactory)
 )
 
+// AuthRequiredError is returned by TokenProvider.Token when the calling user must
+// complete an OAuth2 authorization flow before the request can proceed.
+// The HTTP executor converts this error to a CallToolResult{IsError: true} containing
+// the authorization URL.
+type AuthRequiredError struct {
+	// AuthURL is the URL the user must visit to authorize access.
+	AuthURL string
+}
+
+func (e *AuthRequiredError) Error() string {
+	return "authorization required: visit " + e.AuthURL
+}
+
 // Register adds a factory for the given strategy name.
 // Typically called from init() in strategy sub-packages.
 func Register(strategy string, factory ProviderFactory) {

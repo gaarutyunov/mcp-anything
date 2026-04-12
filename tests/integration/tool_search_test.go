@@ -97,10 +97,14 @@ func TestToolSearchEnabled(t *testing.T) {
 
 	// 3. Register WireMock stubs.
 	// Embedding endpoint — called during proxy startup (index build) and at search time.
-	registerStub(t, wiremockExternalURL, `{
+	embeddingBodyEncoded, err := json.Marshal(embeddingResponseBody)
+	if err != nil {
+		t.Fatalf("marshal embedding body: %v", err)
+	}
+	registerStub(t, wiremockExternalURL, fmt.Sprintf(`{
 		"request": {"method": "POST", "url": "/v1/embeddings"},
-		"response": {"status": 200, "body": `+"`"+embeddingResponseBody+"`"+`, "headers": {"Content-Type": "application/json"}}
-	}`)
+		"response": {"status": 200, "body": %s, "headers": {"Content-Type": "application/json"}}
+	}`, embeddingBodyEncoded))
 	// Upstream API endpoint — called when tools/call invokes an actual tool.
 	registerStub(t, wiremockExternalURL, `{
 		"request": {"method": "GET", "url": "/pets"},

@@ -27,11 +27,31 @@ type ProxyConfig struct {
 	TokenCounting  TokenCountingConfig        `koanf:"token_counting"`
 	RateLimits     map[string]RateLimitConfig `koanf:"rate_limits"`
 	RateLimitStore RateLimitStoreConfig       `koanf:"rate_limit_store"`
+	ToolSearch     *ToolSearchConfig          `koanf:"tool_search"`
 	SessionStore   SessionStoreConfig         `koanf:"session_store"`
 	// Caches defines named cache configurations referenced by upstreams or per-tool overlays.
 	Caches map[string]CacheConfig `koanf:"caches"`
 	// CacheStore configures the cache backend. Defaults to the memory provider when absent.
-	CacheStore CacheStoreConfig `koanf:"cache_store"`
+	CacheStore      CacheStoreConfig                `koanf:"cache_store"`
+	CircuitBreakers map[string]CircuitBreakerConfig `koanf:"circuit_breakers"`
+}
+
+// CircuitBreakerConfig defines a named circuit breaker policy.
+// Named policies are referenced per upstream via the circuit_breaker field.
+type CircuitBreakerConfig struct {
+	// Threshold is the error ratio at which the circuit opens (0.0–1.0).
+	// For example, 0.5 means the circuit opens when 50% or more requests fail.
+	Threshold float64 `koanf:"threshold"`
+	// MinRequests is the minimum number of requests required before the error
+	// ratio is evaluated. The circuit will not open until this many requests
+	// have been observed.
+	MinRequests uint32 `koanf:"min_requests"`
+	// FallbackDuration is how long the circuit stays open before transitioning
+	// to the half-open (recovering) state.
+	FallbackDuration time.Duration `koanf:"fallback_duration"`
+	// RecoveryDuration is the gradual ramp-up period in half-open state before
+	// the circuit fully closes (returns to normal operation).
+	RecoveryDuration time.Duration `koanf:"recovery_duration"`
 }
 
 // RateLimitConfig defines a named rate limit policy.
@@ -71,6 +91,100 @@ type TokenCountingConfig struct {
 	// Encoding selects the tiktoken BPE encoding used for tokenization.
 	// Supported values: "cl100k_base" (default), "o200k_base".
 	Encoding string `koanf:"encoding"`
+}
+
+// ToolSearchConfig configures semantic tool search using a vector index.
+// When enabled, tools/list returns only search_tools; actual tools remain callable.
+type ToolSearchConfig struct {
+	// Enabled activates semantic tool search. Default: false.
+	Enabled bool `koanf:"enabled"`
+	// Limit is the default number of tools returned per search query. Default: 5.
+	Limit     int             `koanf:"limit"`
+	Embedding EmbeddingConfig `koanf:"embedding"`
+}
+
+// EmbeddingConfig configures the embedding provider for semantic search.
+type EmbeddingConfig struct {
+	// Provider selects the embedding backend.
+	// Built-in: openai, openai_compat, ollama, cohere, mistral, jina, mixedbread, vertex, azure_openai, localai.
+	// Separate package (heavy dep): hugot.
+	Provider     string                   `koanf:"provider"`
+	OpenAI       *OpenAIEmbedConfig       `koanf:"openai"`
+	OpenAICompat *OpenAICompatEmbedConfig `koanf:"openai_compat"`
+	Ollama       *OllamaEmbedConfig       `koanf:"ollama"`
+	Cohere       *CohereEmbedConfig       `koanf:"cohere"`
+	Mistral      *MistralEmbedConfig      `koanf:"mistral"`
+	Jina         *JinaEmbedConfig         `koanf:"jina"`
+	Mixedbread   *MixedbreadEmbedConfig   `koanf:"mixedbread"`
+	Vertex       *VertexEmbedConfig       `koanf:"vertex"`
+	AzureOpenAI  *AzureOpenAIEmbedConfig  `koanf:"azure_openai"`
+	Hugot        *HugotEmbedConfig        `koanf:"hugot"`
+}
+
+// OpenAIEmbedConfig configures the OpenAI embedding provider.
+type OpenAIEmbedConfig struct {
+	APIKey string `koanf:"api_key"` // supports ${ENV_VAR} expansion
+	Model  string `koanf:"model"`   // e.g. "text-embedding-3-small"
+}
+
+// OpenAICompatEmbedConfig configures an OpenAI-compatible embedding endpoint.
+// Also used for the localai provider (base_url defaults to http://localhost:8080/v1).
+type OpenAICompatEmbedConfig struct {
+	BaseURL string `koanf:"base_url"`
+	APIKey  string `koanf:"api_key"` // supports ${ENV_VAR} expansion
+	Model   string `koanf:"model"`
+}
+
+// OllamaEmbedConfig configures the Ollama embedding provider.
+type OllamaEmbedConfig struct {
+	BaseURL string `koanf:"base_url"` // defaults to http://localhost:11434/api
+	Model   string `koanf:"model"`    // e.g. "nomic-embed-text"
+}
+
+// CohereEmbedConfig configures the Cohere embedding provider.
+type CohereEmbedConfig struct {
+	APIKey string `koanf:"api_key"` // supports ${ENV_VAR} expansion
+	Model  string `koanf:"model"`   // e.g. "embed-english-v3.0"
+}
+
+// MistralEmbedConfig configures the Mistral embedding provider.
+type MistralEmbedConfig struct {
+	APIKey string `koanf:"api_key"` // supports ${ENV_VAR} expansion
+}
+
+// JinaEmbedConfig configures the Jina embedding provider.
+type JinaEmbedConfig struct {
+	APIKey string `koanf:"api_key"` // supports ${ENV_VAR} expansion
+	Model  string `koanf:"model"`   // e.g. "jina-embeddings-v2-base-en"
+}
+
+// MixedbreadEmbedConfig configures the Mixedbread embedding provider.
+type MixedbreadEmbedConfig struct {
+	APIKey string `koanf:"api_key"` // supports ${ENV_VAR} expansion
+	Model  string `koanf:"model"`   // e.g. "mxbai-embed-large-v1"
+}
+
+// VertexEmbedConfig configures the Google Vertex AI embedding provider.
+type VertexEmbedConfig struct {
+	APIKey  string `koanf:"api_key"` // supports ${ENV_VAR} expansion
+	Project string `koanf:"project"`
+	Model   string `koanf:"model"` // e.g. "text-embedding-004"
+}
+
+// AzureOpenAIEmbedConfig configures the Azure OpenAI embedding provider.
+type AzureOpenAIEmbedConfig struct {
+	APIKey        string `koanf:"api_key"`        // supports ${ENV_VAR} expansion
+	DeploymentURL string `koanf:"deployment_url"` // e.g. "https://RESOURCE.openai.azure.com/openai/deployments/DEPLOYMENT"
+	APIVersion    string `koanf:"api_version"`    // defaults to "2024-02-01"
+	Model         string `koanf:"model"`
+}
+
+// HugotEmbedConfig configures the in-process ONNX embedding provider.
+// The model directory must contain tokenizer.json and an .onnx model file.
+// Uses a pure-Go ONNX backend (no CGO required).
+type HugotEmbedConfig struct {
+	ModelPath    string `koanf:"model_path"`    // path to directory containing model files
+	OnnxFilename string `koanf:"onnx_filename"` // .onnx filename within ModelPath; default "model.onnx"
 }
 
 // CacheConfig defines TTL and per-user key settings for a named cache.
@@ -322,6 +436,10 @@ type UpstreamConfig struct {
 	// from this upstream. Per-tool x-mcp-rate-limit overlay extension overrides this.
 	// Empty string means no rate limiting.
 	RateLimit string `koanf:"rate_limit"`
+	// CircuitBreaker is the name of a top-level circuit_breakers entry to attach to
+	// this upstream. All tool calls for this upstream are wrapped with circuit breaking.
+	// Empty string means no circuit breaking.
+	CircuitBreaker string `koanf:"circuit_breaker"`
 	// AppUI configures an optional interactive HTML UI for every tool in this upstream.
 	// Per-tool overlay extensions (x-mcp-ui-static, x-mcp-ui-script) take precedence.
 	AppUI *AppUIConfig `koanf:"app_ui"`

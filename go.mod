@@ -20,12 +20,14 @@ require (
 	github.com/knadh/koanf/v2 v2.1.2
 	github.com/lucasjones/reggen v0.0.0-20200904144131-37ba4fa293bb
 	github.com/modelcontextprotocol/go-sdk v1.4.1
+	github.com/pkoukk/tiktoken-go v0.1.8
 	github.com/prometheus/client_golang v1.23.2
 	github.com/redis/go-redis/v9 v9.18.0
 	github.com/speakeasy-api/jsonpath v0.6.0
 	github.com/speakeasy-api/openapi-overlay v0.10.3
 	github.com/testcontainers/testcontainers-go v0.41.0
 	github.com/testcontainers/testcontainers-go/modules/k3s v0.41.0
+	github.com/ulule/limiter/v3 v3.11.2
 	github.com/yuin/gopher-lua v1.1.2
 	github.com/zitadel/oidc/v3 v3.46.0
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.67.0

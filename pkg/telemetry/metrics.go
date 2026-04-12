@@ -11,6 +11,9 @@ import (
 // histogramBoundaries are the histogram bucket boundaries per SPEC.md §16.
 var histogramBoundaries = []float64{0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10}
 
+// tokenBuckets are the histogram bucket boundaries for tool result token counts.
+var tokenBuckets = []float64{100, 500, 1000, 2000, 5000, 10000, 50000}
+
 // Metric instruments — initialised once at startup by InitMetrics.
 var (
 	// ToolCallDuration tracks MCP tool call duration.
@@ -23,6 +26,9 @@ var (
 	ConfigReloadCounter metric.Int64Counter
 	// SpecRefreshCounter counts spec refresh attempts by upstream and status.
 	SpecRefreshCounter metric.Int64Counter
+	// ToolResultTokens tracks the token count of tool result content.
+	// Labels: tool_name, upstream_name.
+	ToolResultTokens metric.Int64Histogram
 )
 
 // InitMetrics creates all MCP-specific metric instruments using the given provider.
@@ -72,6 +78,15 @@ func InitMetrics(mp metric.MeterProvider) error {
 	)
 	if err != nil {
 		return fmt.Errorf("creating mcp_anything.spec_refresh: %w", err)
+	}
+
+	ToolResultTokens, err = m.Int64Histogram("mcp_tool_result_tokens",
+		metric.WithUnit("{token}"),
+		metric.WithDescription("Token count of tool result content"),
+		metric.WithExplicitBucketBoundaries(tokenBuckets...),
+	)
+	if err != nil {
+		return fmt.Errorf("creating mcp_tool_result_tokens: %w", err)
 	}
 
 	return nil

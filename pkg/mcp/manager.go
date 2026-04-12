@@ -24,8 +24,10 @@ import (
 	pkginbound "github.com/gaarutyunov/mcp-anything/pkg/auth/inbound"
 	pkgcache "github.com/gaarutyunov/mcp-anything/pkg/cache"
 	"github.com/gaarutyunov/mcp-anything/pkg/config"
+	"github.com/gaarutyunov/mcp-anything/pkg/ratelimit"
 	"github.com/gaarutyunov/mcp-anything/pkg/runtime"
 	pkgtelemetry "github.com/gaarutyunov/mcp-anything/pkg/telemetry"
+	"github.com/gaarutyunov/mcp-anything/pkg/tokencounter"
 	pkgupstream "github.com/gaarutyunov/mcp-anything/pkg/upstream"
 )
 
@@ -44,7 +46,13 @@ type Manager struct {
 	impl     *sdkmcp.Implementation // set on first Rebuild
 	mu       sync.RWMutex
 
-	pools *runtime.Registry // for injecting runtime pools into upstream configs
+	pools    *runtime.Registry     // for injecting runtime pools into upstream configs
+	counter  *tokencounter.Counter // nil when token counting is disabled
+	enforcer *ratelimit.Enforcer   // nil when no rate limits are configured
+
+	// rateLimitCfgs holds the named rate limit configs for source key resolution.
+	// Updated in Rebuild; read under mu.
+	rateLimitCfgs map[string]config.RateLimitConfig
 
 	// State needed for per-upstream incremental updates (background refresh).
 	groups         []config.GroupConfig
@@ -174,6 +182,17 @@ func (m *Manager) Rebuild(ctx context.Context, cfg *config.ProxyConfig) error {
 		return fmt.Errorf("invalid upstream configuration: %w", err)
 	}
 
+	// Validate that rate_limit references on upstreams exist in rate_limits map.
+	for i := range cfg.Upstreams {
+		up := &cfg.Upstreams[i]
+		if !up.Enabled || up.RateLimit == "" {
+			continue
+		}
+		if _, ok := cfg.RateLimits[up.RateLimit]; !ok {
+			return fmt.Errorf("upstream %q references unknown rate limit %q", up.Name, up.RateLimit)
+		}
+	}
+
 	// Validate each enabled upstream with its configured timeout.
 	var validatedUpstreams []*pkgupstream.ValidatedUpstream
 	for i := range cfg.Upstreams {
@@ -220,6 +239,18 @@ func (m *Manager) Rebuild(ctx context.Context, cfg *config.ProxyConfig) error {
 		return fmt.Errorf("building tool registry: %w", err)
 	}
 
+	// Validate that x-mcp-rate-limit overlay entries on tools reference known rate limits.
+	for _, vu := range validatedUpstreams {
+		for _, entry := range vu.Entries {
+			if entry.RateLimit == "" {
+				continue
+			}
+			if _, ok := cfg.RateLimits[entry.RateLimit]; !ok {
+				return fmt.Errorf("tool %q references unknown rate limit %q", entry.PrefixedName, entry.RateLimit)
+			}
+		}
+	}
+
 	// Validate that all cache names referenced by tools exist in the top-level caches map.
 	for _, vu := range validatedUpstreams {
 		for _, entry := range vu.Entries {
@@ -230,6 +261,21 @@ func (m *Manager) Rebuild(ctx context.Context, cfg *config.ProxyConfig) error {
 				return fmt.Errorf("upstream %q tool %q references unknown cache %q — define it under the top-level \"caches\" key",
 					vu.Config.Name, entry.PrefixedName, entry.CacheName)
 			}
+		}
+	}
+
+	// Build the rate limit enforcer.
+	newEnforcer, err := ratelimit.New(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("building rate limit enforcer: %w", err)
+	}
+
+	// Build token counter when enabled in config.
+	var newCounter *tokencounter.Counter
+	if cfg.TokenCounting.Enabled {
+		newCounter, err = tokencounter.New(cfg.TokenCounting.Encoding)
+		if err != nil {
+			slog.Warn("token counting disabled: could not initialise tokenizer", "error", err)
 		}
 	}
 
@@ -259,6 +305,9 @@ func (m *Manager) Rebuild(ctx context.Context, cfg *config.ProxyConfig) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	m.counter = newCounter
+	m.enforcer = newEnforcer
+	m.rateLimitCfgs = cfg.RateLimits
 	m.applyRegistryLocked(newRegistry, groups)
 
 	m.groups = groups
@@ -319,6 +368,13 @@ func (m *Manager) applyRegistryLocked(newRegistry *pkgupstream.Registry, groups 
 			}
 			t := tool       // capture
 			gn := groupName // capture
+
+			// Capture rate limit name from the registry entry at build time.
+			var rlName string
+			if entry := newRegistry.EntryForTool(t.Name); entry != nil {
+				rlName = entry.RateLimit
+			}
+
 			srv.AddTool(t, func(callCtx context.Context, req *sdkmcp.CallToolRequest) (*sdkmcp.CallToolResult, error) {
 				// Extract W3C trace context from MCP _meta.traceparent (AC-28.4).
 				if tp, ok := req.Params.Meta["traceparent"].(string); ok && tp != "" {
@@ -342,6 +398,13 @@ func (m *Manager) applyRegistryLocked(newRegistry *pkgupstream.Registry, groups 
 				)
 				defer span.End()
 
+				// Rate limit check — before upstream dispatch.
+				if rlName != "" {
+					if result := m.checkRateLimit(callCtx, rlName, sessionID); result != nil {
+						return result, nil
+					}
+				}
+
 				start := time.Now()
 
 				args, parseErr := managerParseArguments(req.Params.Arguments)
@@ -362,6 +425,19 @@ func (m *Manager) applyRegistryLocked(newRegistry *pkgupstream.Registry, groups 
 				}
 				if dispErr != nil {
 					span.RecordError(dispErr)
+				}
+
+				// Record token count for successful results (no error, non-nil counter).
+				if dispErr == nil && result != nil {
+					m.mu.RLock()
+					ctr := m.counter
+					reg := m.registry
+					m.mu.RUnlock()
+					upstreamName := ""
+					if reg != nil {
+						upstreamName = reg.ToolUpstreamName(t.Name)
+					}
+					ctr.Record(callCtx, t.Name, upstreamName, result)
 				}
 
 				return result, dispErr
@@ -500,6 +576,76 @@ func validateUpstreamPrefixes(upstreams []config.UpstreamConfig) error {
 		seen[up.ToolPrefix] = up.Name
 	}
 	return nil
+}
+
+// checkRateLimit evaluates the named rate limit for the current request.
+// Returns a non-nil CallToolResult (IsError: true) when the limit is exceeded, nil when allowed.
+func (m *Manager) checkRateLimit(ctx context.Context, limitName, sessionID string) *sdkmcp.CallToolResult {
+	m.mu.RLock()
+	enf := m.enforcer
+	rlCfgs := m.rateLimitCfgs
+	m.mu.RUnlock()
+
+	if enf == nil {
+		return nil
+	}
+
+	cfg, ok := rlCfgs[limitName]
+	if !ok {
+		return nil
+	}
+
+	key := rateLimitKey(ctx, cfg.Source, limitName, sessionID)
+	remaining, reset, reached, err := enf.Allow(ctx, limitName, key)
+	if err != nil {
+		slog.Warn("rate limit check failed", "limit", limitName, "error", err)
+		return nil // allow on error to avoid false positives
+	}
+	if !reached {
+		return nil
+	}
+
+	msg := fmt.Sprintf(
+		"rate limit exceeded: limit=%s remaining=%d reset=%s",
+		limitName, remaining, reset.UTC().Format(time.RFC3339),
+	)
+	return &sdkmcp.CallToolResult{
+		IsError: true,
+		Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: msg}},
+	}
+}
+
+// rateLimitKey builds the counter key for the given source criterion.
+// - "user": authenticated subject, falling back to IP, then "anonymous"
+// - "ip": client IP from context, falling back to "unknown"
+// - "session": MCP session ID, falling back to "unknown"
+func rateLimitKey(ctx context.Context, source, limitName, sessionID string) string {
+	var part string
+	switch source {
+	case "user":
+		info := pkginbound.TokenInfoFromContext(ctx)
+		if info != nil && info.Subject != "" {
+			part = info.Subject
+		} else {
+			part = ratelimit.ClientIPFromContext(ctx)
+			if part == "" {
+				part = "anonymous"
+			}
+		}
+	case "ip":
+		part = ratelimit.ClientIPFromContext(ctx)
+		if part == "" {
+			part = "unknown"
+		}
+	case "session":
+		part = sessionID
+		if part == "" {
+			part = "unknown"
+		}
+	default:
+		part = "unknown"
+	}
+	return limitName + ":" + source + ":" + part
 }
 
 // managerParseArguments unmarshals tool call arguments into a map.

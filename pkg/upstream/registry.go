@@ -39,6 +39,10 @@ type RegistryEntry struct {
 	ValidationCfg  config.ValidationConfig
 	OperationNode  *yaml.Node   // YAML node for JSONPath group filter evaluation (nil for command/script tools)
 	Executor       ToolExecutor // set by builders; dispatches tool execution
+	// RateLimit is the name of a top-level rate_limits entry applied to this tool.
+	// Empty string means no rate limiting. Set by builders from the x-mcp-rate-limit
+	// overlay extension (per-tool override) or upstream-level rate_limit config (default).
+	RateLimit string
 	// UIHandler is the MCP resource handler that serves the tool's interactive HTML UI.
 	// Nil when no UI is configured. Set by HTTP builders when a ToolUIConfig is resolved.
 	UIHandler sdkmcp.ResourceHandler

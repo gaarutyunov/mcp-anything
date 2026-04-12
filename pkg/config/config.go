@@ -17,17 +17,59 @@ type PoolAcquirer interface {
 
 // ProxyConfig is the top-level configuration struct.
 type ProxyConfig struct {
-	Server      ServerConfig      `koanf:"server"`
-	Telemetry   TelemetryConfig   `koanf:"telemetry"`
-	Naming      NamingConfig      `koanf:"naming"`
-	Upstreams   []UpstreamConfig  `koanf:"upstreams"`
-	InboundAuth InboundAuthConfig `koanf:"inbound_auth"`
-	Groups      []GroupConfig     `koanf:"groups"`
-	Runtime     RuntimeConfig     `koanf:"runtime"`
+	Server         ServerConfig               `koanf:"server"`
+	Telemetry      TelemetryConfig            `koanf:"telemetry"`
+	Naming         NamingConfig               `koanf:"naming"`
+	Upstreams      []UpstreamConfig           `koanf:"upstreams"`
+	InboundAuth    InboundAuthConfig          `koanf:"inbound_auth"`
+	Groups         []GroupConfig              `koanf:"groups"`
+	Runtime        RuntimeConfig              `koanf:"runtime"`
+	TokenCounting  TokenCountingConfig        `koanf:"token_counting"`
+	RateLimits     map[string]RateLimitConfig `koanf:"rate_limits"`
+	RateLimitStore RateLimitStoreConfig       `koanf:"rate_limit_store"`
 	// Caches defines named cache configurations referenced by upstreams or per-tool overlays.
 	Caches map[string]CacheConfig `koanf:"caches"`
 	// CacheStore configures the cache backend. Defaults to the memory provider when absent.
 	CacheStore CacheStoreConfig `koanf:"cache_store"`
+}
+
+// RateLimitConfig defines a named rate limit policy.
+// Named policies are referenced by upstreams or per-tool overlays.
+type RateLimitConfig struct {
+	// Average is the number of requests allowed per Period.
+	Average int64 `koanf:"average"`
+	// Period is the time window for the rate limit.
+	Period time.Duration `koanf:"period"`
+	// Burst is the number of additional requests allowed above Average in a window.
+	// Total capacity = Average + Burst.
+	Burst int64 `koanf:"burst"`
+	// Source determines the counter key: "user" (authenticated subject),
+	// "ip" (remote address), or "session" (MCP session ID).
+	Source string `koanf:"source"` // "user" | "ip" | "session"
+}
+
+// RateLimitStoreConfig configures the backend store for rate limit counters.
+// When Redis is nil, an in-memory store is used.
+type RateLimitStoreConfig struct {
+	Redis *RedisStoreConfig `koanf:"redis"`
+}
+
+// RedisStoreConfig configures a Redis-backed rate limit store.
+type RedisStoreConfig struct {
+	Addr     string `koanf:"addr"`
+	Password string `koanf:"password"` // supports ${ENV_VAR} expansion
+}
+
+// TokenCountingConfig configures per-tool token counting on tool results.
+// When enabled, successful tool call results are tokenized and the count is
+// recorded as a Prometheus histogram (mcp_tool_result_tokens).
+// When absent or enabled: false, no tokenization occurs.
+type TokenCountingConfig struct {
+	// Enabled activates token counting. Default: false.
+	Enabled bool `koanf:"enabled"`
+	// Encoding selects the tiktoken BPE encoding used for tokenization.
+	// Supported values: "cl100k_base" (default), "o200k_base".
+	Encoding string `koanf:"encoding"`
 }
 
 // CacheConfig defines TTL and per-user key settings for a named cache.
@@ -275,6 +317,10 @@ type UpstreamConfig struct {
 	OutboundAuth             OutboundAuthConfig  `koanf:"outbound_auth"`
 	Commands                 []CommandConfig     `koanf:"commands"` // used by type: command only
 	Scripts                  []ScriptConfig      `koanf:"scripts"`  // used by type: script only
+	// RateLimit is the name of a top-level rate_limits entry to apply to every tool
+	// from this upstream. Per-tool x-mcp-rate-limit overlay extension overrides this.
+	// Empty string means no rate limiting.
+	RateLimit string `koanf:"rate_limit"`
 	// AppUI configures an optional interactive HTML UI for every tool in this upstream.
 	// Per-tool overlay extensions (x-mcp-ui-static, x-mcp-ui-script) take precedence.
 	AppUI *AppUIConfig `koanf:"app_ui"`

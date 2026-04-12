@@ -42,6 +42,10 @@ type RegistryEntry struct {
 	// UIHandler is the MCP resource handler that serves the tool's interactive HTML UI.
 	// Nil when no UI is configured. Set by HTTP builders when a ToolUIConfig is resolved.
 	UIHandler sdkmcp.ResourceHandler
+	// CacheName is the name of the top-level caches entry to apply for this tool.
+	// Empty string means no caching. Set by HTTP builders from the upstream default
+	// (UpstreamConfig.Cache) or per-tool x-mcp-cache overlay extension.
+	CacheName string
 }
 
 // ValidatedUpstream is the result of validating a single upstream configuration.
@@ -284,6 +288,12 @@ func NewFromEntries(
 	}
 
 	return r, nil
+}
+
+// EntryForTool returns the RegistryEntry for the given prefixed tool name,
+// or nil if the tool is unknown.
+func (r *Registry) EntryForTool(prefixedName string) *RegistryEntry {
+	return r.byPrefixedName[prefixedName]
 }
 
 // EntriesForUpstream returns all RegistryEntry objects for the named upstream.

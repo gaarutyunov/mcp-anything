@@ -6,6 +6,7 @@ require (
 	github.com/brianvoe/gofakeit/v6 v6.28.0
 	github.com/caddyserver/caddy/v2 v2.11.2
 	github.com/coreos/go-oidc/v3 v3.17.0
+	github.com/dgraph-io/ristretto v0.2.0
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/getkin/kin-openapi v0.134.0
@@ -20,6 +21,7 @@ require (
 	github.com/lucasjones/reggen v0.0.0-20200904144131-37ba4fa293bb
 	github.com/modelcontextprotocol/go-sdk v1.4.1
 	github.com/prometheus/client_golang v1.23.2
+	github.com/redis/go-redis/v9 v9.18.0
 	github.com/speakeasy-api/jsonpath v0.6.0
 	github.com/speakeasy-api/openapi-overlay v0.10.3
 	github.com/testcontainers/testcontainers-go v0.41.0
@@ -84,8 +86,8 @@ require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dgraph-io/badger v1.6.2 // indirect
 	github.com/dgraph-io/badger/v2 v2.2007.4 // indirect
-	github.com/dgraph-io/ristretto v0.2.0 // indirect
 	github.com/dgryski/go-farm v0.0.0-20200201041132-a6ae2369ad13 // indirect
+	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/distribution/reference v0.6.0 // indirect
 	github.com/dlclark/regexp2 v1.11.5 // indirect
 	github.com/docker/go-connections v0.6.0 // indirect
@@ -239,6 +241,7 @@ require (
 	go.opentelemetry.io/otel/sdk/log v0.16.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.9.0 // indirect
 	go.step.sm/crypto v0.76.2 // indirect
+	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/automaxprocs v1.6.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.27.1 // indirect

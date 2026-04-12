@@ -90,6 +90,7 @@ func (b *Builder) Build(ctx context.Context, cfg *config.UpstreamConfig, naming 
 			Validator:      vt.Validator,
 			ValidationCfg:  cfg.Validation,
 			OperationNode:  vt.OperationNode,
+			CacheName:      resolveCacheName(vt.Operation, cfg.Cache),
 		}
 		entry.Executor = &Executor{entry: entry}
 
@@ -131,6 +132,26 @@ func extractResponseFormat(op *openapi3.Operation) string {
 		return s
 	}
 	return "json"
+}
+
+// resolveCacheName determines the cache name for a tool by reading the x-mcp-cache
+// operation extension and falling back to the upstream-level default.
+// A per-operation extension of "" explicitly disables caching even when the upstream
+// has a default cache configured.
+func resolveCacheName(op *openapi3.Operation, upstreamDefault string) string {
+	if op == nil {
+		return upstreamDefault
+	}
+	val, ok := op.Extensions["x-mcp-cache"]
+	if !ok {
+		// No per-operation override; use upstream default.
+		return upstreamDefault
+	}
+	// Extension is present — use its value (empty string explicitly disables caching).
+	if s, ok := val.(string); ok {
+		return s
+	}
+	return upstreamDefault
 }
 
 // extractAuthRequired reads x-mcp-auth-required from an operation extension (default true).

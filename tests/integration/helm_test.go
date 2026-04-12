@@ -3,13 +3,17 @@
 package integration_test
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -48,10 +52,7 @@ const (
 // image to be pre-loaded into k3s. The test verifies that the CRDs and the
 // operator Deployment resource are created by the chart.
 func TestHelmChartInstall(t *testing.T) {
-	helmPath, err := exec.LookPath("helm")
-	if err != nil {
-		t.Skip("helm binary not found; install helm to run this test")
-	}
+	helmPath := ensureHelm(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), helmInstallTimeout)
 	defer cancel()
@@ -175,6 +176,89 @@ func resolveChartRef(ctx context.Context, t *testing.T, helmPath string) (ref, v
 	slog.Info("helm: chart pushed")
 
 	return fmt.Sprintf("oci://%s/mcp-anything", registryAddr), chartVer, reg
+}
+
+// ensureHelm returns the path to a helm binary. If helm is already on PATH it is
+// returned immediately. Otherwise it downloads the appropriate release from
+// get.helm.sh into a temp directory that is cleaned up when the test ends, so
+// the test never skips just because the CI runner lacks a pre-installed helm.
+func ensureHelm(t *testing.T) string {
+	t.Helper()
+
+	if p, err := exec.LookPath("helm"); err == nil {
+		return p
+	}
+
+	const helmVersion = "3.17.3"
+	goos := runtime.GOOS
+	goarch := runtime.GOARCH
+
+	archiveName := fmt.Sprintf("helm-v%s-%s-%s.tar.gz", helmVersion, goos, goarch)
+	dlURL := "https://get.helm.sh/" + archiveName
+	t.Logf("helm not found in PATH; downloading %s", dlURL)
+
+	dlCtx, dlCancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer dlCancel()
+
+	req, err := http.NewRequestWithContext(dlCtx, http.MethodGet, dlURL, nil)
+	if err != nil {
+		t.Fatalf("ensureHelm: build request: %v", err)
+	}
+	httpClient := &http.Client{Timeout: 3 * time.Minute}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		t.Fatalf("ensureHelm: download: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("ensureHelm: unexpected HTTP status %s", resp.Status)
+	}
+
+	tmpDir := t.TempDir()
+	helmBin := filepath.Join(tmpDir, "helm")
+	if err := extractHelmBinary(resp.Body, goos+"-"+goarch, helmBin); err != nil {
+		t.Fatalf("ensureHelm: extract: %v", err)
+	}
+	if err := os.Chmod(helmBin, 0o755); err != nil {
+		t.Fatalf("ensureHelm: chmod: %v", err)
+	}
+	t.Logf("helm installed at %s", helmBin)
+	return helmBin
+}
+
+// extractHelmBinary reads a .tar.gz archive and writes the "helm" binary from
+// the directory named prefix (e.g. "linux-amd64") to dst.
+func extractHelmBinary(r io.Reader, prefix, dst string) error {
+	gz, err := gzip.NewReader(r)
+	if err != nil {
+		return fmt.Errorf("gzip reader: %w", err)
+	}
+	defer gz.Close()
+
+	tr := tar.NewReader(gz)
+	target := prefix + "/helm"
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("tar next: %w", err)
+		}
+		if hdr.Name != target {
+			continue
+		}
+		f, err := os.Create(dst)
+		if err != nil {
+			return fmt.Errorf("create: %w", err)
+		}
+		if _, err := io.Copy(f, tr); err != nil { //nolint:gosec // size bounded by helm release
+			f.Close()
+			return fmt.Errorf("copy: %w", err)
+		}
+		return f.Close()
+	}
+	return fmt.Errorf("helm binary not found in archive (expected %q)", target)
 }
 
 // parseChartVersion extracts the version from a packaged chart filename.

@@ -47,7 +47,7 @@ const (
 //  6. Calls several Kraken market data tools and verifies the responses.
 func TestKrakenMarketDataE2E(t *testing.T) {
 	if globalK3s == nil {
-		t.Fatal("shared k3s cluster unavailable")
+		t.Skip("shared k3s cluster unavailable")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)

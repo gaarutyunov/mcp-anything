@@ -83,7 +83,7 @@ var (
 //	                    demo__get_item, and returns the final answer.
 func TestKagentRemoteMCPServerE2E(t *testing.T) {
 	if globalK3s == nil {
-		t.Fatal("shared k3s cluster unavailable")
+		t.Skip("shared k3s cluster unavailable")
 	}
 
 	proxyImage := getProxyImage(t)

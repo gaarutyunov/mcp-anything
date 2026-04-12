@@ -42,6 +42,7 @@ type Proxy struct {
 	telShutdown func(context.Context) error
 	pools       *pkgruntime.Registry
 	refreshers  []*pkghttp.Refresher
+	mcpHandlers map[string]http.Handler
 }
 
 // Option is a functional option for configuring a Proxy.
@@ -157,6 +158,9 @@ func New(ctx context.Context, cfg *pkgconfig.ProxyConfig, opts ...Option) (*Prox
 		readiness = pkgupstream.NewRefresherSet(hcs)
 	}
 
+	// Store handlers for external consumers (e.g. pkg/caddy Caddy module).
+	p.mcpHandlers = mcpHandlers
+
 	// Assemble the HTTP server.
 	p.srv = pkgserver.New(
 		p.cfg,
@@ -168,6 +172,23 @@ func New(ctx context.Context, cfg *pkgconfig.ProxyConfig, opts ...Option) (*Prox
 	)
 
 	return p, nil
+}
+
+// Handlers returns the MCP group HTTP handlers assembled by New().
+// Each key is a group endpoint path (e.g. "/mcp", "/mcp/readonly").
+// The returned map is safe to read concurrently but must not be mutated.
+func (p *Proxy) Handlers() map[string]http.Handler { return p.mcpHandlers }
+
+// StartBackground starts background tasks (config hot-reload watcher and spec
+// refreshers) without starting the HTTP server. Use this when embedding the proxy
+// into an external server (e.g. Caddy) that manages its own server lifecycle.
+func (p *Proxy) StartBackground(ctx context.Context) {
+	for _, r := range p.refreshers {
+		r.Start(ctx)
+	}
+	if p.loader != nil {
+		go p.loader.Watch(ctx)
+	}
 }
 
 // Start begins serving MCP requests. It starts background refreshers and the

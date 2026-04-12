@@ -58,6 +58,10 @@ type Manager struct {
 	// circuitBreakerSet holds the active circuit breakers for readiness checking.
 	// nil when no circuit breakers are configured. Updated in Rebuild under mu.
 	circuitBreakerSet *pkgcb.Set
+	// oauthStore and oauthCallbackReg are injected for oauth2_user_session strategy.
+	// Nil when no session_store is configured.
+	oauthStore       config.OAuthTokenStore
+	oauthCallbackReg config.OAuthCallbackRegistrar
 
 	// State needed for per-upstream incremental updates (background refresh).
 	groups         []config.GroupConfig
@@ -78,6 +82,15 @@ func NewManager(pools *runtime.Registry) *Manager {
 		upstreamByName: make(map[string]*upstreamState),
 		pools:          pools,
 	}
+}
+
+// SetOAuthConfig configures per-user OAuth session storage for the oauth2_user_session strategy.
+// Must be called before the first Rebuild when any upstream uses oauth2_user_session.
+func (m *Manager) SetOAuthConfig(store config.OAuthTokenStore, reg config.OAuthCallbackRegistrar) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.oauthStore = store
+	m.oauthCallbackReg = reg
 }
 
 // HTTPHandlers returns HTTP handlers for each group endpoint.
@@ -225,6 +238,9 @@ func (m *Manager) Rebuild(ctx context.Context, cfg *config.ProxyConfig) error {
 			cfgCopy.OutboundAuth.LuaAuthPool = m.pools.LuaAuth
 			cfgCopy.JSScriptPool = m.pools.JSScript
 		}
+		// Inject OAuth session config for oauth2_user_session strategy.
+		cfgCopy.OutboundAuth.OAuthTokenStore = m.oauthStore
+		cfgCopy.OutboundAuth.OAuthCallbackReg = m.oauthCallbackReg
 
 		vu, vuErr := pkgupstream.Build(ctx, &cfgCopy, &cfg.Naming)
 		if vuErr != nil {

@@ -13,6 +13,8 @@ package mcpanything
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -24,9 +26,11 @@ import (
 	pkginbound "github.com/gaarutyunov/mcp-anything/pkg/auth/inbound"
 	pkgconfig "github.com/gaarutyunov/mcp-anything/pkg/config"
 	pkgmcp "github.com/gaarutyunov/mcp-anything/pkg/mcp"
+	pkgoauthcallback "github.com/gaarutyunov/mcp-anything/pkg/oauth/callbackmux"
 	pkgratelimit "github.com/gaarutyunov/mcp-anything/pkg/ratelimit"
 	pkgruntime "github.com/gaarutyunov/mcp-anything/pkg/runtime"
 	pkgserver "github.com/gaarutyunov/mcp-anything/pkg/server"
+	pkgsession "github.com/gaarutyunov/mcp-anything/pkg/session"
 	pkgtelemetry "github.com/gaarutyunov/mcp-anything/pkg/telemetry"
 	pkgupstream "github.com/gaarutyunov/mcp-anything/pkg/upstream"
 	pkghttp "github.com/gaarutyunov/mcp-anything/pkg/upstream/http"
@@ -44,6 +48,7 @@ type Proxy struct {
 	pools       *pkgruntime.Registry
 	refreshers  []*pkghttp.Refresher
 	mcpHandlers map[string]http.Handler
+	oauthMux    *pkgoauthcallback.Mux
 }
 
 // Option is a functional option for configuring a Proxy.
@@ -94,6 +99,11 @@ func New(ctx context.Context, cfg *pkgconfig.ProxyConfig, opts ...Option) (*Prox
 
 	// Create the MCP manager.
 	p.manager = pkgmcp.NewManager(pools)
+
+	// Set up per-user OAuth session store when configured.
+	if err := p.buildSessionStore(ctx); err != nil {
+		return nil, err
+	}
 
 	// Initialise OpenTelemetry.
 	telCfg := &pkgtelemetry.Config{
@@ -179,6 +189,7 @@ func New(ctx context.Context, cfg *pkgconfig.ProxyConfig, opts ...Option) (*Prox
 		pkgtelemetry.ReloadMetricsHandler(),
 		promhttp.Handler(),
 		readiness,
+		p.oauthMux,
 	)
 
 	return p, nil
@@ -291,6 +302,46 @@ func (p *Proxy) buildAuth(ctx context.Context) (func(http.Handler) http.Handler,
 	}
 
 	return middleware, wellKnown, nil
+}
+
+// buildSessionStore creates the OAuth session store and callback mux when configured.
+func (p *Proxy) buildSessionStore(ctx context.Context) error {
+	cfg := &p.cfg.SessionStore
+	if cfg.Provider == "" {
+		// No session store configured; oauth2_user_session strategy will error at startup
+		// if any upstream tries to use it without a store.
+		return nil
+	}
+
+	store, err := pkgsession.New(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("session store: %w", err)
+	}
+
+	hmacKey := resolveHMACKey(cfg.HMACKey)
+	p.oauthMux = pkgoauthcallback.New(store, hmacKey)
+	p.manager.SetOAuthConfig(store, p.oauthMux)
+	slog.Info("session store configured", "provider", cfg.Provider)
+	return nil
+}
+
+// resolveHMACKey derives the 32-byte HMAC key from the configured string.
+// Uses SHA-256 of the expanded value so any length input is accepted.
+// If the string is empty, a random key is generated (states will not survive restarts).
+func resolveHMACKey(raw string) []byte {
+	expanded := os.ExpandEnv(raw)
+	if expanded == "" {
+		slog.Warn("session_store.hmac_key not configured; using random key (OAuth state will not survive proxy restarts)")
+		b := make([]byte, 32)
+		if _, err := rand.Read(b); err != nil {
+			// Fall back to SHA-256 of a fixed string if crypto/rand is unavailable.
+			h := sha256.Sum256([]byte("mcp-anything-ephemeral-hmac-key"))
+			return h[:]
+		}
+		return b
+	}
+	h := sha256.Sum256([]byte(expanded))
+	return h[:]
 }
 
 // buildRefreshers creates background spec refreshers for URL-based upstreams.

@@ -17,16 +17,35 @@ type PoolAcquirer interface {
 
 // ProxyConfig is the top-level configuration struct.
 type ProxyConfig struct {
-	Server         ServerConfig               `koanf:"server"`
-	Telemetry      TelemetryConfig            `koanf:"telemetry"`
-	Naming         NamingConfig               `koanf:"naming"`
-	Upstreams      []UpstreamConfig           `koanf:"upstreams"`
-	InboundAuth    InboundAuthConfig          `koanf:"inbound_auth"`
-	Groups         []GroupConfig              `koanf:"groups"`
-	Runtime        RuntimeConfig              `koanf:"runtime"`
-	TokenCounting  TokenCountingConfig        `koanf:"token_counting"`
-	RateLimits     map[string]RateLimitConfig `koanf:"rate_limits"`
-	RateLimitStore RateLimitStoreConfig       `koanf:"rate_limit_store"`
+	Server          ServerConfig                    `koanf:"server"`
+	Telemetry       TelemetryConfig                 `koanf:"telemetry"`
+	Naming          NamingConfig                    `koanf:"naming"`
+	Upstreams       []UpstreamConfig                `koanf:"upstreams"`
+	InboundAuth     InboundAuthConfig               `koanf:"inbound_auth"`
+	Groups          []GroupConfig                   `koanf:"groups"`
+	Runtime         RuntimeConfig                   `koanf:"runtime"`
+	TokenCounting   TokenCountingConfig             `koanf:"token_counting"`
+	RateLimits      map[string]RateLimitConfig      `koanf:"rate_limits"`
+	RateLimitStore  RateLimitStoreConfig            `koanf:"rate_limit_store"`
+	CircuitBreakers map[string]CircuitBreakerConfig `koanf:"circuit_breakers"`
+}
+
+// CircuitBreakerConfig defines a named circuit breaker policy.
+// Named policies are referenced per upstream via the circuit_breaker field.
+type CircuitBreakerConfig struct {
+	// Threshold is the error ratio at which the circuit opens (0.0–1.0).
+	// For example, 0.5 means the circuit opens when 50% or more requests fail.
+	Threshold float64 `koanf:"threshold"`
+	// MinRequests is the minimum number of requests required before the error
+	// ratio is evaluated. The circuit will not open until this many requests
+	// have been observed.
+	MinRequests uint32 `koanf:"min_requests"`
+	// FallbackDuration is how long the circuit stays open before transitioning
+	// to the half-open (recovering) state.
+	FallbackDuration time.Duration `koanf:"fallback_duration"`
+	// RecoveryDuration is the gradual ramp-up period in half-open state before
+	// the circuit fully closes (returns to normal operation).
+	RecoveryDuration time.Duration `koanf:"recovery_duration"`
 }
 
 // RateLimitConfig defines a named rate limit policy.
@@ -288,6 +307,10 @@ type UpstreamConfig struct {
 	// from this upstream. Per-tool x-mcp-rate-limit overlay extension overrides this.
 	// Empty string means no rate limiting.
 	RateLimit string `koanf:"rate_limit"`
+	// CircuitBreaker is the name of a top-level circuit_breakers entry to attach to
+	// this upstream. All tool calls for this upstream are wrapped with circuit breaking.
+	// Empty string means no circuit breaking.
+	CircuitBreaker string `koanf:"circuit_breaker"`
 	// AppUI configures an optional interactive HTML UI for every tool in this upstream.
 	// Per-tool overlay extensions (x-mcp-ui-static, x-mcp-ui-script) take precedence.
 	AppUI *AppUIConfig `koanf:"app_ui"`

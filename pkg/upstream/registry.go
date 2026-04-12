@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/speakeasy-api/jsonpath/pkg/jsonpath"
@@ -13,12 +14,30 @@ import (
 	"github.com/gaarutyunov/mcp-anything/pkg/config"
 )
 
+// ToolCallBreaker is an optional per-upstream circuit breaker.
+// When set on an Upstream, all tool calls for that upstream are wrapped with
+// circuit breaking logic. Nil means no circuit breaking is applied.
+type ToolCallBreaker interface {
+	// Execute wraps the given function with circuit breaker logic.
+	// Returns (zero, ErrOpenState) from gobreaker when the circuit is open.
+	Execute(req func() (*sdkmcp.CallToolResult, error)) (*sdkmcp.CallToolResult, error)
+	// IsOpen reports whether the circuit is currently in the open (fail-fast) state.
+	IsOpen() bool
+	// UpstreamName returns the name of the upstream this breaker protects.
+	UpstreamName() string
+	// EstimatedRecovery returns the estimated time when the circuit may transition
+	// from open to half-open. Returns zero time if the circuit is not open or the
+	// state change time is unknown.
+	EstimatedRecovery() time.Time
+}
+
 // Upstream holds the per-upstream HTTP routing state.
 type Upstream struct {
-	Name       string
-	ToolPrefix string
-	BaseURL    string
-	Client     *http.Client
+	Name           string
+	ToolPrefix     string
+	BaseURL        string
+	Client         *http.Client
+	CircuitBreaker ToolCallBreaker // nil when no circuit breaker is configured
 }
 
 // RegistryEntry associates a prefixed tool name with its upstream and runtime state.

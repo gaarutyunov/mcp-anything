@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/getkin/kin-openapi/openapi3filter"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/sony/gobreaker/v2"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 
@@ -22,6 +24,7 @@ import (
 	pkgtelemetry "github.com/gaarutyunov/mcp-anything/pkg/telemetry"
 	"github.com/gaarutyunov/mcp-anything/pkg/transform"
 	pkgupstream "github.com/gaarutyunov/mcp-anything/pkg/upstream"
+	pkgcb "github.com/gaarutyunov/mcp-anything/pkg/upstream/circuitbreaker"
 )
 
 // Executor executes an HTTP-backed tool by running the full request pipeline:
@@ -117,10 +120,69 @@ func (e *Executor) Execute(ctx context.Context, args map[string]any) (*sdkmcp.Ca
 
 	// Inject outbound auth — no-op for now; TASK-10 fills this in.
 
-	// Execute the upstream HTTP call.
+	// Dispatch: with or without circuit breaker.
+	cb := entry.Upstream.CircuitBreaker
+	if cb == nil {
+		// No circuit breaker — original flow.
+		result, _, dispErr := e.httpDispatchWithStatus(ctx, httpReq, reqInput, transforms, validator, toolAttrs)
+		return result, dispErr
+	}
+
+	// Circuit-breaker-wrapped flow.
+	result, cbErr := cb.Execute(func() (*sdkmcp.CallToolResult, error) {
+		res, statusCode, dispErr := e.httpDispatchWithStatus(ctx, httpReq, reqInput, transforms, validator, toolAttrs)
+		if dispErr != nil {
+			// Network error or I/O failure → count as circuit failure.
+			return nil, dispErr
+		}
+		if statusCode >= 500 {
+			// 5xx response → count as circuit failure but preserve the result
+			// so the LLM receives the actual error body.
+			return res, pkgcb.ErrUpstreamFailure
+		}
+		// 2xx or 4xx → not a circuit failure (upstream is healthy or request was invalid).
+		return res, nil
+	})
+
+	switch {
+	case errors.Is(cbErr, gobreaker.ErrOpenState), errors.Is(cbErr, gobreaker.ErrTooManyRequests):
+		// Circuit is open or half-open limit reached — fail fast without hitting upstream.
+		return openCircuitResult(cb), nil
+	case errors.Is(cbErr, pkgcb.ErrUpstreamFailure):
+		// 5xx was counted as a circuit failure; return the preserved error result to the LLM.
+		return result, nil
+	default:
+		return result, cbErr
+	}
+}
+
+// openCircuitResult builds the CallToolResult returned when a circuit breaker is open.
+func openCircuitResult(cb pkgupstream.ToolCallBreaker) *sdkmcp.CallToolResult {
+	msg := fmt.Sprintf("upstream %q is unavailable: circuit breaker is open", cb.UpstreamName())
+	if recovery := cb.EstimatedRecovery(); !recovery.IsZero() && recovery.After(time.Now()) {
+		msg += fmt.Sprintf(", estimated recovery at %s", recovery.UTC().Format(time.RFC3339))
+	}
+	return &sdkmcp.CallToolResult{
+		IsError: true,
+		Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: msg}},
+	}
+}
+
+// httpDispatchWithStatus executes the HTTP call and builds the MCP result.
+// It returns the result, the HTTP status code (0 on network/IO error), and any error.
+func (e *Executor) httpDispatchWithStatus(
+	ctx context.Context,
+	httpReq *nethttp.Request,
+	reqInput *openapi3filter.RequestValidationInput,
+	transforms *transform.CompiledTransforms,
+	validator *openapi.Validator,
+	toolAttrs metric.MeasurementOption,
+) (*sdkmcp.CallToolResult, int, error) {
+	entry := e.entry
+
 	resp, err := entry.Upstream.Client.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("executing HTTP request: %w", err)
+		return nil, 0, fmt.Errorf("executing HTTP request: %w", err)
 	}
 	defer func() {
 		if closeErr := resp.Body.Close(); closeErr != nil {
@@ -130,30 +192,31 @@ func (e *Executor) Execute(ctx context.Context, args map[string]any) (*sdkmcp.Ca
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("reading response body: %w", err)
+		return nil, 0, fmt.Errorf("reading response body: %w", err)
 	}
 
-	inSuccess := statusIn(entry.ValidationCfg.SuccessStatus, resp.StatusCode)
-	inError := statusIn(entry.ValidationCfg.ErrorStatus, resp.StatusCode)
+	statusCode := resp.StatusCode
+	inSuccess := statusIn(entry.ValidationCfg.SuccessStatus, statusCode)
+	inError := statusIn(entry.ValidationCfg.ErrorStatus, statusCode)
 
 	if !inSuccess && !inError {
 		result := &sdkmcp.CallToolResult{
 			IsError: true,
 			Content: []sdkmcp.Content{
-				&sdkmcp.TextContent{Text: fmt.Sprintf("unexpected HTTP %d", resp.StatusCode)},
+				&sdkmcp.TextContent{Text: fmt.Sprintf("unexpected HTTP %d", statusCode)},
 			},
 		}
 		if pkgtelemetry.ToolCallErrors != nil {
 			pkgtelemetry.ToolCallErrors.Add(ctx, 1, toolAttrs)
 		}
-		return result, nil
+		return result, statusCode, nil
 	}
 
 	contentType := resp.Header.Get("Content-Type")
 
 	if inError {
 		errStart := time.Now()
-		result := buildErrorResult(ctx, transforms, resp.StatusCode, contentType, body)
+		result := buildErrorResult(ctx, transforms, statusCode, contentType, body)
 		if pkgtelemetry.TransformDuration != nil {
 			pkgtelemetry.TransformDuration.Record(ctx, time.Since(errStart).Seconds(),
 				metric.WithAttributes(
@@ -165,7 +228,7 @@ func (e *Executor) Execute(ctx context.Context, args map[string]any) (*sdkmcp.Ca
 		if pkgtelemetry.ToolCallErrors != nil {
 			pkgtelemetry.ToolCallErrors.Add(ctx, 1, toolAttrs)
 		}
-		return result, nil
+		return result, statusCode, nil
 	}
 
 	// Success path: validate response if configured.
@@ -181,7 +244,7 @@ func (e *Executor) Execute(ctx context.Context, args map[string]any) (*sdkmcp.Ca
 				if pkgtelemetry.ToolCallErrors != nil {
 					pkgtelemetry.ToolCallErrors.Add(ctx, 1, toolAttrs)
 				}
-				return result, nil
+				return result, statusCode, nil
 			}
 			slog.Warn("response validation failed", "tool", entry.PrefixedName, "error", valErr)
 		}
@@ -197,7 +260,7 @@ func (e *Executor) Execute(ctx context.Context, args map[string]any) (*sdkmcp.Ca
 			),
 		)
 	}
-	return result, nil
+	return result, statusCode, nil
 }
 
 // buildErrorResult transforms an error response body and returns an error CallToolResult.

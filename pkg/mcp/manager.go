@@ -28,6 +28,7 @@ import (
 	pkgtelemetry "github.com/gaarutyunov/mcp-anything/pkg/telemetry"
 	"github.com/gaarutyunov/mcp-anything/pkg/tokencounter"
 	pkgupstream "github.com/gaarutyunov/mcp-anything/pkg/upstream"
+	pkgcb "github.com/gaarutyunov/mcp-anything/pkg/upstream/circuitbreaker"
 )
 
 // upstreamState holds the current per-upstream entries and spec YAML root,
@@ -52,6 +53,10 @@ type Manager struct {
 	// rateLimitCfgs holds the named rate limit configs for source key resolution.
 	// Updated in Rebuild; read under mu.
 	rateLimitCfgs map[string]config.RateLimitConfig
+
+	// circuitBreakerSet holds the active circuit breakers for readiness checking.
+	// nil when no circuit breakers are configured. Updated in Rebuild under mu.
+	circuitBreakerSet *pkgcb.Set
 
 	// State needed for per-upstream incremental updates (background refresh).
 	groups         []config.GroupConfig
@@ -151,6 +156,17 @@ func (m *Manager) Rebuild(ctx context.Context, cfg *config.ProxyConfig) error {
 		}
 	}
 
+	// Validate that circuit_breaker references on upstreams exist in circuit_breakers map.
+	for i := range cfg.Upstreams {
+		up := &cfg.Upstreams[i]
+		if !up.Enabled || up.CircuitBreaker == "" {
+			continue
+		}
+		if _, ok := cfg.CircuitBreakers[up.CircuitBreaker]; !ok {
+			return fmt.Errorf("upstream %q references unknown circuit_breaker %q", up.Name, up.CircuitBreaker)
+		}
+	}
+
 	// Validate each enabled upstream with its configured timeout.
 	var validatedUpstreams []*pkgupstream.ValidatedUpstream
 	for i := range cfg.Upstreams {
@@ -175,6 +191,33 @@ func (m *Manager) Rebuild(ctx context.Context, cfg *config.ProxyConfig) error {
 		slog.Info("upstream ready", "upstream", upCfg.Name, "tools", len(vu.Entries))
 
 		validatedUpstreams = append(validatedUpstreams, vu)
+	}
+
+	// Build circuit breakers for upstreams that reference a named policy.
+	// We set the breaker directly on the shared *Upstream pointer so the executor
+	// finds it at dispatch time without any extra lookup.
+	var cbBreakers []*pkgcb.Breaker
+	for _, vu := range validatedUpstreams {
+		upCfg := vu.Config
+		if upCfg.CircuitBreaker == "" {
+			continue
+		}
+		cbCfg := cfg.CircuitBreakers[upCfg.CircuitBreaker] // validated to exist above
+		b := pkgcb.New(upCfg.Name, cbCfg)
+		// All entries in this upstream share the same *Upstream pointer.
+		for _, entry := range vu.Entries {
+			if entry.Upstream != nil {
+				entry.Upstream.CircuitBreaker = b
+				break // set once; all entries share the pointer
+			}
+		}
+		cbBreakers = append(cbBreakers, b)
+	}
+
+	// Build circuit breaker set for readiness checking.
+	var newCBSet *pkgcb.Set
+	if len(cbBreakers) > 0 {
+		newCBSet = pkgcb.NewSet(cbBreakers)
 	}
 
 	// Build group config — synthesise a default group if none are configured.
@@ -239,6 +282,7 @@ func (m *Manager) Rebuild(ctx context.Context, cfg *config.ProxyConfig) error {
 	m.counter = newCounter
 	m.enforcer = newEnforcer
 	m.rateLimitCfgs = cfg.RateLimits
+	m.circuitBreakerSet = newCBSet
 	m.applyRegistryLocked(newRegistry, groups)
 
 	m.groups = groups
@@ -542,6 +586,19 @@ func (m *Manager) checkRateLimit(ctx context.Context, limitName, sessionID strin
 		IsError: true,
 		Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: msg}},
 	}
+}
+
+// IsCircuitBreakerReady reports whether all upstream circuit breakers are in a
+// non-open state. Returns true (ready) when no circuit breakers are configured.
+// Safe to call concurrently; reads the current set under m.mu.
+func (m *Manager) IsCircuitBreakerReady() (bool, string) {
+	m.mu.RLock()
+	cbs := m.circuitBreakerSet
+	m.mu.RUnlock()
+	if cbs == nil {
+		return true, ""
+	}
+	return cbs.IsReady()
 }
 
 // rateLimitKey builds the counter key for the given source criterion.

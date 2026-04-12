@@ -28,6 +28,10 @@ type ProxyConfig struct {
 	RateLimits     map[string]RateLimitConfig `koanf:"rate_limits"`
 	RateLimitStore RateLimitStoreConfig       `koanf:"rate_limit_store"`
 	ToolSearch     *ToolSearchConfig          `koanf:"tool_search"`
+	// Caches defines named cache configurations referenced by upstreams or per-tool overlays.
+	Caches map[string]CacheConfig `koanf:"caches"`
+	// CacheStore configures the cache backend. Defaults to the memory provider when absent.
+	CacheStore CacheStoreConfig `koanf:"cache_store"`
 }
 
 // RateLimitConfig defines a named rate limit policy.
@@ -161,6 +165,31 @@ type AzureOpenAIEmbedConfig struct {
 type HugotEmbedConfig struct {
 	ModelPath    string `koanf:"model_path"`    // path to directory containing model files
 	OnnxFilename string `koanf:"onnx_filename"` // .onnx filename within ModelPath; default "model.onnx"
+}
+
+// CacheConfig defines TTL and per-user key settings for a named cache.
+type CacheConfig struct {
+	// TTL is how long a cached result remains valid.
+	TTL time.Duration `koanf:"ttl"`
+	// PerUser, when true, includes the authenticated subject in the cache key so
+	// different users with identical arguments get separate cache entries.
+	PerUser bool `koanf:"per_user"`
+}
+
+// CacheStoreConfig configures the cache store backend.
+type CacheStoreConfig struct {
+	// Provider selects the store backend. Supported values: "memory", "redis".
+	// Defaults to "memory" when empty.
+	Provider string            `koanf:"provider"`
+	Redis    *RedisCacheConfig `koanf:"redis"`
+}
+
+// RedisCacheConfig holds connection settings for the Redis cache store.
+type RedisCacheConfig struct {
+	// Addr is the Redis server address, e.g. "redis:6379".
+	Addr string `koanf:"addr"`
+	// Password is the Redis AUTH password. Supports ${ENV_VAR} expansion.
+	Password string `koanf:"password"`
 }
 
 // RuntimeConfig controls the bounded pools for concurrent script runtime instances.
@@ -362,11 +391,15 @@ type ToolUIConfig struct {
 
 // UpstreamConfig describes a single upstream, either HTTP API or command-backed tools.
 type UpstreamConfig struct {
-	Name                     string              `koanf:"name"`
-	Enabled                  bool                `koanf:"enabled"`
-	ToolPrefix               string              `koanf:"tool_prefix"`
-	Type                     string              `koanf:"type"`     // "http" (default) | "command"
-	BaseURL                  string              `koanf:"base_url"` // used by type: http only
+	Name       string `koanf:"name"`
+	Enabled    bool   `koanf:"enabled"`
+	ToolPrefix string `koanf:"tool_prefix"`
+	Type       string `koanf:"type"`     // "http" (default) | "command"
+	BaseURL    string `koanf:"base_url"` // used by type: http only
+	// Cache is the name of a top-level caches entry to apply as the default for all tools
+	// in this upstream. Empty means no caching. Per-tool x-mcp-cache overlay extensions
+	// take precedence over this upstream-level default.
+	Cache                    string              `koanf:"cache"`
 	Timeout                  time.Duration       `koanf:"timeout"`
 	TLSSkipVerify            bool                `koanf:"tls_skip_verify"` // Deprecated: use transport.tls.insecure_skip_verify
 	Headers                  map[string]string   `koanf:"headers"`

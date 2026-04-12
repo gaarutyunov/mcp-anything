@@ -37,13 +37,16 @@ type Snapshot struct {
 	cachedOverlayBytes []byte
 }
 
-// RegistryManager is implemented by the MCP Manager to receive upstream updates
-// from background refresh goroutines.
-type RegistryManager interface {
-	// UpdateUpstream atomically replaces the tools for one upstream in the registry.
-	UpdateUpstream(upstreamName string, entries []*pkgupstream.RegistryEntry, specYAMLRoot *yaml.Node) error
-	// RemoveUpstream removes all tools for one upstream from the registry.
-	RemoveUpstream(upstreamName string)
+func init() {
+	pkgupstream.RegisterRefresherFactory(func(
+		ctx context.Context,
+		cfg *config.UpstreamConfig,
+		naming *config.NamingConfig,
+		manager pkgupstream.RegistryManager,
+		pools *runtime.Registry,
+	) (pkgupstream.Refresher, error) {
+		return NewRefresher(ctx, cfg, naming, manager, pools)
+	})
 }
 
 // Refresher manages the lifecycle of background spec refresh for one upstream.
@@ -51,7 +54,7 @@ type Refresher struct {
 	cfg      *config.UpstreamConfig
 	naming   *config.NamingConfig
 	current  atomic.Pointer[Snapshot]
-	manager  RegistryManager
+	manager  pkgupstream.RegistryManager
 	failures atomic.Int32
 	// degraded is true after RemoveUpstream is called and false again after
 	// a successful refresh re-registers the upstream. IsHealthy uses this
@@ -64,7 +67,7 @@ type Refresher struct {
 
 // NewRefresher creates a Refresher with an initial snapshot loaded synchronously.
 // Returns an error if the initial load fails.
-func NewRefresher(ctx context.Context, cfg *config.UpstreamConfig, naming *config.NamingConfig, manager RegistryManager, pools *runtime.Registry) (*Refresher, error) {
+func NewRefresher(ctx context.Context, cfg *config.UpstreamConfig, naming *config.NamingConfig, manager pkgupstream.RegistryManager, pools *runtime.Registry) (*Refresher, error) {
 	r := &Refresher{
 		cfg:     cfg,
 		naming:  naming,

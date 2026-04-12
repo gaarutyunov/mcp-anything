@@ -1,4 +1,4 @@
-.PHONY: build build-operator lint vet test integration check clean helm-lint helm-package helm-push
+.PHONY: all build build-operator lint vet test integration treeshake check clean helm-lint helm-package helm-push
 
 BINARY := bin/proxy
 OPERATOR_BINARY := bin/operator
@@ -8,6 +8,8 @@ INTEGRATION_TIMEOUT := 600s
 HELM_CHART_DIR := charts/mcp-anything
 HELM_DIST_DIR := dist
 HELM_REGISTRY ?= oci://ghcr.io/gaarutyunov
+
+all: check
 
 build:
 	go build -o $(BINARY) ./cmd/proxy
@@ -27,7 +29,10 @@ test:
 integration:
 	go test $(GOFLAGS) -tags integration -count=1 -timeout $(INTEGRATION_TIMEOUT) ./tests/integration/...
 
-check: lint vet test build build-operator
+treeshake:
+	go test -tags treeshake -count=1 ./tests/treeshake/...
+
+check: lint vet test build build-operator treeshake
 
 clean:
 	rm -rf bin/

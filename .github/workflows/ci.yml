@@ -28,19 +28,13 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@v7
+      - uses: golangci/golangci-lint-action@v9
         with:
+          install-only: true
           version: v2.7.2
 
-      - name: go vet
-        run: go vet ./...
-
-      - name: Unit tests
-        run: go test -race -count=1 ./...
-
-      - name: Build
-        run: go build ./...
+      - name: check
+        run: make check
 
   push-helm-chart:
     name: Push Helm Chart (OCI)

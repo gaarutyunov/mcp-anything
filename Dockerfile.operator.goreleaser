@@ -1,0 +1,10 @@
+FROM alpine:3.21
+RUN apk add --no-cache ca-certificates \
+    && addgroup -S operator \
+    && adduser -S -G operator operator
+ARG TARGETOS
+ARG TARGETARCH
+COPY ${TARGETOS}/${TARGETARCH}/operator /usr/local/bin/operator
+RUN chown operator:operator /usr/local/bin/operator
+USER operator:operator
+ENTRYPOINT ["operator"]

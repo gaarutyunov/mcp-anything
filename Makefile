@@ -1,9 +1,13 @@
-.PHONY: build build-operator lint vet test integration check clean
+.PHONY: build build-operator lint vet test integration check clean helm-lint helm-package helm-push
 
 BINARY := bin/proxy
 OPERATOR_BINARY := bin/operator
 GOFLAGS := -race
 INTEGRATION_TIMEOUT := 600s
+
+HELM_CHART_DIR := charts/mcp-anything
+HELM_DIST_DIR := dist
+HELM_REGISTRY ?= oci://ghcr.io/gaarutyunov
 
 build:
 	go build -o $(BINARY) ./cmd/proxy
@@ -27,3 +31,13 @@ check: lint vet test build build-operator
 
 clean:
 	rm -rf bin/
+
+helm-lint:
+	helm lint $(HELM_CHART_DIR)
+
+helm-package:
+	mkdir -p $(HELM_DIST_DIR)
+	helm package $(HELM_CHART_DIR) --destination $(HELM_DIST_DIR)
+
+helm-push: helm-package
+	helm push $(HELM_DIST_DIR)/mcp-anything-*.tgz $(HELM_REGISTRY)

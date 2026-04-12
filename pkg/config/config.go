@@ -67,6 +67,7 @@ type TokenCountingConfig struct {
 	// Encoding selects the tiktoken BPE encoding used for tokenization.
 	// Supported values: "cl100k_base" (default), "o200k_base".
 	Encoding string `koanf:"encoding"`
+}
 
 // ToolSearchConfig configures semantic tool search using a vector index.
 // When enabled, tools/list returns only search_tools; actual tools remain callable.

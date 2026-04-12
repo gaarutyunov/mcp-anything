@@ -12,4 +12,5 @@ import (
 	_ "github.com/gaarutyunov/mcp-anything/pkg/auth/outbound/lua"
 	_ "github.com/gaarutyunov/mcp-anything/pkg/auth/outbound/none"
 	_ "github.com/gaarutyunov/mcp-anything/pkg/auth/outbound/oauth2"
+	_ "github.com/gaarutyunov/mcp-anything/pkg/auth/outbound/oauth2usersession"
 )

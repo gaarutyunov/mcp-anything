@@ -22,6 +22,9 @@ import (
 
 	// Register all rate limit stores (in-memory and Redis).
 	_ "github.com/gaarutyunov/mcp-anything/pkg/ratelimit/all"
+
+	// Register all session store providers (memory, postgres, redis).
+	_ "github.com/gaarutyunov/mcp-anything/pkg/session/all"
 )
 
 // Set by goreleaser ldflags.

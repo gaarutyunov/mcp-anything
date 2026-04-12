@@ -23,6 +23,12 @@ type ReadinessChecker interface {
 	IsReady() (ready bool, reason string)
 }
 
+// OAuthCallbackHandler handles OAuth2 authorization callback requests.
+// Implemented by pkg/oauth/callbackmux.Mux.
+type OAuthCallbackHandler interface {
+	HandleCallback(w http.ResponseWriter, r *http.Request, upstreamName string)
+}
+
 // Server wraps the net/http server and manages its lifecycle.
 type Server struct {
 	cfg        *config.ProxyConfig
@@ -35,7 +41,8 @@ type Server struct {
 // reloadMetrics is an optional handler for the GET /metrics/reload endpoint; pass nil to skip.
 // prometheusMetrics is an optional handler for the GET /metrics endpoint (Prometheus scrape); pass nil to skip.
 // readiness is an optional checker for /readyz; pass nil to always return 200 OK.
-func New(cfg *config.ProxyConfig, mcpHandlers map[string]http.Handler, wellKnown http.HandlerFunc, reloadMetrics http.HandlerFunc, prometheusMetrics http.Handler, readiness ReadinessChecker) *Server {
+// oauthCallback is an optional handler for GET /oauth/callback/{upstreamName}; pass nil to skip.
+func New(cfg *config.ProxyConfig, mcpHandlers map[string]http.Handler, wellKnown http.HandlerFunc, reloadMetrics http.HandlerFunc, prometheusMetrics http.Handler, readiness ReadinessChecker, oauthCallback OAuthCallbackHandler) *Server {
 	r := chi.NewRouter()
 
 	// Health endpoints.
@@ -67,6 +74,13 @@ func New(cfg *config.ProxyConfig, mcpHandlers map[string]http.Handler, wellKnown
 	// Well-known OAuth metadata endpoint (always public, mounted before auth middleware).
 	if wellKnown != nil {
 		r.Get("/.well-known/oauth-protected-resource", wellKnown)
+	}
+
+	// OAuth2 callback endpoint (always public, mounted before auth middleware).
+	if oauthCallback != nil {
+		r.Get("/oauth/callback/{upstreamName}", func(w http.ResponseWriter, r *http.Request) {
+			oauthCallback.HandleCallback(w, r, chi.URLParam(r, "upstreamName"))
+		})
 	}
 
 	// Mount MCP handlers wrapped with OTel server instrumentation.

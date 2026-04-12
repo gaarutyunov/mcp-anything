@@ -12,6 +12,7 @@ concurrency:
 
 env:
   GOWORK: off
+  OPERATOR_IMAGE: ghcr.io/${{ github.repository }}-operator:sha-${{ github.sha }}
   PROXY_IMAGE: ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
   CADDY_IMAGE: ghcr.io/${{ github.repository }}:caddy-sha-${{ github.sha }}
 
@@ -88,10 +89,34 @@ jobs:
           push: true
           tags: ${{ env.CADDY_IMAGE }}
 
+  build-operator-image:
+    name: Build & Push Operator Image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.operator
+          push: true
+          tags: ${{ env.OPERATOR_IMAGE }}
+
   integration-test:
     name: Integration Tests
     runs-on: ubuntu-latest
-    needs: [lint-and-test, build-image, build-caddy-image]
+    needs: [lint-and-test, build-image, build-caddy-image, build-operator-image]
     steps:
       - uses: actions/checkout@v4
 

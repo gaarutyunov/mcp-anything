@@ -24,6 +24,7 @@ import (
 	pkginbound "github.com/gaarutyunov/mcp-anything/pkg/auth/inbound"
 	pkgconfig "github.com/gaarutyunov/mcp-anything/pkg/config"
 	pkgmcp "github.com/gaarutyunov/mcp-anything/pkg/mcp"
+	pkgratelimit "github.com/gaarutyunov/mcp-anything/pkg/ratelimit"
 	pkgruntime "github.com/gaarutyunov/mcp-anything/pkg/runtime"
 	pkgserver "github.com/gaarutyunov/mcp-anything/pkg/server"
 	pkgtelemetry "github.com/gaarutyunov/mcp-anything/pkg/telemetry"
@@ -131,7 +132,7 @@ func New(ctx context.Context, cfg *pkgconfig.ProxyConfig, opts ...Option) (*Prox
 		return nil, err
 	}
 
-	// Wrap MCP handlers with optional auth middleware.
+	// Wrap MCP handlers with optional auth middleware and IP extraction for rate limiting.
 	rawHandlers := p.manager.HTTPHandlers()
 	mcpHandlers := make(map[string]http.Handler, len(rawHandlers))
 	for endpoint, handler := range rawHandlers {
@@ -139,6 +140,9 @@ func New(ctx context.Context, cfg *pkgconfig.ProxyConfig, opts ...Option) (*Prox
 		if authMiddleware != nil {
 			h = authMiddleware(h)
 		}
+		// Always wrap with ClientIPMiddleware so that source: ip rate limits work
+		// even when no auth is configured. Middleware is lightweight (single header read).
+		h = pkgratelimit.ClientIPMiddleware(h)
 		mcpHandlers[endpoint] = h
 		slog.Info("mounted group", "endpoint", endpoint)
 	}

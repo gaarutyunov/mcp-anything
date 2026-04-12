@@ -17,18 +17,18 @@ type PoolAcquirer interface {
 
 // ProxyConfig is the top-level configuration struct.
 type ProxyConfig struct {
-	Server          ServerConfig                    `koanf:"server"`
-	Telemetry       TelemetryConfig                 `koanf:"telemetry"`
-	Naming          NamingConfig                    `koanf:"naming"`
-	Upstreams       []UpstreamConfig                `koanf:"upstreams"`
-	InboundAuth     InboundAuthConfig               `koanf:"inbound_auth"`
-	Groups          []GroupConfig                   `koanf:"groups"`
-	Runtime         RuntimeConfig                   `koanf:"runtime"`
-	TokenCounting   TokenCountingConfig             `koanf:"token_counting"`
-	RateLimits      map[string]RateLimitConfig      `koanf:"rate_limits"`
-	RateLimitStore  RateLimitStoreConfig            `koanf:"rate_limit_store"`
+	Server         ServerConfig               `koanf:"server"`
+	Telemetry      TelemetryConfig            `koanf:"telemetry"`
+	Naming         NamingConfig               `koanf:"naming"`
+	Upstreams      []UpstreamConfig           `koanf:"upstreams"`
+	InboundAuth    InboundAuthConfig          `koanf:"inbound_auth"`
+	Groups         []GroupConfig              `koanf:"groups"`
+	Runtime        RuntimeConfig              `koanf:"runtime"`
+	TokenCounting  TokenCountingConfig        `koanf:"token_counting"`
+	RateLimits     map[string]RateLimitConfig `koanf:"rate_limits"`
+	RateLimitStore RateLimitStoreConfig       `koanf:"rate_limit_store"`
 	// Caches defines named cache configurations referenced by upstreams or per-tool overlays.
-	Caches     map[string]CacheConfig          `koanf:"caches"`
+	Caches map[string]CacheConfig `koanf:"caches"`
 	// CacheStore configures the cache backend. Defaults to the memory provider when absent.
 	CacheStore      CacheStoreConfig                `koanf:"cache_store"`
 	CircuitBreakers map[string]CircuitBreakerConfig `koanf:"circuit_breakers"`

@@ -64,6 +64,7 @@ func (b *Builder) Build(_ context.Context, cfg *config.UpstreamConfig, naming *c
 			MCPTool:      st.MCPTool,
 			Transforms:   st.Transforms,
 			AuthRequired: true,
+			RateLimit:    cfg.RateLimit,
 			Executor:     &Executor{toolName: st.PrefixedName, scriptDef: st.Def},
 		})
 	}

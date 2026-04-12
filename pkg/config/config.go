@@ -17,14 +17,43 @@ type PoolAcquirer interface {
 
 // ProxyConfig is the top-level configuration struct.
 type ProxyConfig struct {
-	Server        ServerConfig        `koanf:"server"`
-	Telemetry     TelemetryConfig     `koanf:"telemetry"`
-	Naming        NamingConfig        `koanf:"naming"`
-	Upstreams     []UpstreamConfig    `koanf:"upstreams"`
-	InboundAuth   InboundAuthConfig   `koanf:"inbound_auth"`
-	Groups        []GroupConfig       `koanf:"groups"`
-	Runtime       RuntimeConfig       `koanf:"runtime"`
-	TokenCounting TokenCountingConfig `koanf:"token_counting"`
+	Server         ServerConfig               `koanf:"server"`
+	Telemetry      TelemetryConfig            `koanf:"telemetry"`
+	Naming         NamingConfig               `koanf:"naming"`
+	Upstreams      []UpstreamConfig           `koanf:"upstreams"`
+	InboundAuth    InboundAuthConfig          `koanf:"inbound_auth"`
+	Groups         []GroupConfig              `koanf:"groups"`
+	Runtime        RuntimeConfig              `koanf:"runtime"`
+	TokenCounting  TokenCountingConfig        `koanf:"token_counting"`
+	RateLimits     map[string]RateLimitConfig `koanf:"rate_limits"`
+	RateLimitStore RateLimitStoreConfig       `koanf:"rate_limit_store"`
+}
+
+// RateLimitConfig defines a named rate limit policy.
+// Named policies are referenced by upstreams or per-tool overlays.
+type RateLimitConfig struct {
+	// Average is the number of requests allowed per Period.
+	Average int64 `koanf:"average"`
+	// Period is the time window for the rate limit.
+	Period time.Duration `koanf:"period"`
+	// Burst is the number of additional requests allowed above Average in a window.
+	// Total capacity = Average + Burst.
+	Burst int64 `koanf:"burst"`
+	// Source determines the counter key: "user" (authenticated subject),
+	// "ip" (remote address), or "session" (MCP session ID).
+	Source string `koanf:"source"` // "user" | "ip" | "session"
+}
+
+// RateLimitStoreConfig configures the backend store for rate limit counters.
+// When Redis is nil, an in-memory store is used.
+type RateLimitStoreConfig struct {
+	Redis *RedisStoreConfig `koanf:"redis"`
+}
+
+// RedisStoreConfig configures a Redis-backed rate limit store.
+type RedisStoreConfig struct {
+	Addr     string `koanf:"addr"`
+	Password string `koanf:"password"` // supports ${ENV_VAR} expansion
 }
 
 // TokenCountingConfig configures per-tool token counting on tool results.
@@ -255,6 +284,10 @@ type UpstreamConfig struct {
 	OutboundAuth             OutboundAuthConfig  `koanf:"outbound_auth"`
 	Commands                 []CommandConfig     `koanf:"commands"` // used by type: command only
 	Scripts                  []ScriptConfig      `koanf:"scripts"`  // used by type: script only
+	// RateLimit is the name of a top-level rate_limits entry to apply to every tool
+	// from this upstream. Per-tool x-mcp-rate-limit overlay extension overrides this.
+	// Empty string means no rate limiting.
+	RateLimit string `koanf:"rate_limit"`
 	// AppUI configures an optional interactive HTML UI for every tool in this upstream.
 	// Per-tool overlay extensions (x-mcp-ui-static, x-mcp-ui-script) take precedence.
 	AppUI *AppUIConfig `koanf:"app_ui"`

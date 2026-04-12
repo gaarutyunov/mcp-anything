@@ -19,6 +19,9 @@ import (
 
 	// Register all inbound auth strategies.
 	_ "github.com/gaarutyunov/mcp-anything/pkg/auth/inbound/all"
+
+	// Register all rate limit stores (in-memory and Redis).
+	_ "github.com/gaarutyunov/mcp-anything/pkg/ratelimit/all"
 )
 
 // Set by goreleaser ldflags.

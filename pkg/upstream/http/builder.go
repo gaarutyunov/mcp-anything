@@ -77,6 +77,11 @@ func (b *Builder) Build(ctx context.Context, cfg *config.UpstreamConfig, naming 
 		if !authRequired {
 			slog.Info("public operation (auth not required)", "tool", vt.PrefixedName)
 		}
+		// Per-tool x-mcp-rate-limit overrides the upstream default; empty falls back to cfg.RateLimit.
+		rateLimit := extractRateLimit(vt.Operation)
+		if rateLimit == "" {
+			rateLimit = cfg.RateLimit
+		}
 		entry := &pkgupstream.RegistryEntry{
 			PrefixedName:   vt.PrefixedName,
 			OriginalName:   vt.OriginalName,
@@ -90,6 +95,7 @@ func (b *Builder) Build(ctx context.Context, cfg *config.UpstreamConfig, naming 
 			Validator:      vt.Validator,
 			ValidationCfg:  cfg.Validation,
 			OperationNode:  vt.OperationNode,
+			RateLimit:      rateLimit,
 		}
 		entry.Executor = &Executor{entry: entry}
 
@@ -131,6 +137,22 @@ func extractResponseFormat(op *openapi3.Operation) string {
 		return s
 	}
 	return "json"
+}
+
+// extractRateLimit reads x-mcp-rate-limit from an operation extension.
+// Returns empty string when the extension is absent or not a non-empty string.
+func extractRateLimit(op *openapi3.Operation) string {
+	if op == nil {
+		return ""
+	}
+	val, ok := op.Extensions["x-mcp-rate-limit"]
+	if !ok {
+		return ""
+	}
+	if s, ok := val.(string); ok {
+		return strings.TrimSpace(s)
+	}
+	return ""
 }
 
 // extractAuthRequired reads x-mcp-auth-required from an operation extension (default true).

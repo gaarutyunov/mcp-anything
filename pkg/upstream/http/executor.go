@@ -191,9 +191,9 @@ func (e *Executor) httpDispatchWithStatus(
 				Content: []sdkmcp.Content{
 					&sdkmcp.TextContent{Text: "Authorization required. Please visit the following URL to grant access:\n" + authErr.AuthURL},
 				},
-			}, nil
+			}, 0, nil
 		}
-		return nil, fmt.Errorf("executing HTTP request: %w", err)
+		return nil, 0, fmt.Errorf("executing HTTP request: %w", err)
 	}
 	defer func() {
 		if closeErr := resp.Body.Close(); closeErr != nil {

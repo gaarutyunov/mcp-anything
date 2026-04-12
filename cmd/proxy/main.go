@@ -11,6 +11,9 @@ import (
 
 	"github.com/gaarutyunov/mcp-anything/pkg/mcpanything"
 
+	// Register all cache store backends.
+	_ "github.com/gaarutyunov/mcp-anything/pkg/cache/all"
+
 	// Register all upstream builders.
 	_ "github.com/gaarutyunov/mcp-anything/pkg/upstream/all"
 

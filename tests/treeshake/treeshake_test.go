@@ -53,6 +53,37 @@ func main() {}
 	}
 }
 
+// TestMemoryCacheOnly_TreeShake verifies that importing pkg/cache/memory does NOT
+// pull in the redis/go-redis package (which is only needed by pkg/cache/redis).
+func TestMemoryCacheOnly_TreeShake(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	repoRoot := findRepoRoot(t)
+
+	writeFile(t, filepath.Join(dir, "go.mod"), "module treeshaketest\n\ngo 1.21\n\nrequire github.com/gaarutyunov/mcp-anything v0.0.0\n\nreplace github.com/gaarutyunov/mcp-anything => "+repoRoot+"\n")
+	writeFile(t, filepath.Join(dir, "main.go"), `package main
+
+import (
+	_ "github.com/gaarutyunov/mcp-anything/pkg/cache/memory"
+)
+
+func main() {}
+`)
+
+	runGoCmd(t, dir, "mod", "tidy")
+
+	gosum := readFile(t, filepath.Join(dir, "go.sum"))
+	forbidden := []string{
+		"redis/go-redis",
+	}
+	for _, pkg := range forbidden {
+		if strings.Contains(gosum, pkg) {
+			t.Errorf("tree-shaking failure: cache/memory pulls in forbidden dep %q", pkg)
+		}
+	}
+}
+
 // TestHTTPBearer_TreeShake verifies that importing pkg/upstream/http and
 // pkg/auth/outbound/bearer does NOT pull in Lua or JavaScript runtime deps.
 func TestHTTPBearer_TreeShake(t *testing.T) {

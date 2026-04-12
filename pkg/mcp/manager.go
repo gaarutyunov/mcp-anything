@@ -22,6 +22,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	pkginbound "github.com/gaarutyunov/mcp-anything/pkg/auth/inbound"
+	pkgcache "github.com/gaarutyunov/mcp-anything/pkg/cache"
 	"github.com/gaarutyunov/mcp-anything/pkg/config"
 	"github.com/gaarutyunov/mcp-anything/pkg/ratelimit"
 	"github.com/gaarutyunov/mcp-anything/pkg/runtime"
@@ -62,6 +63,10 @@ type Manager struct {
 	groups         []config.GroupConfig
 	namingCfg      *config.NamingConfig
 	upstreamByName map[string]*upstreamState // latest state per upstream name
+
+	// Cache state — populated by Rebuild when caches are configured.
+	store        pkgcache.Store
+	cacheConfigs map[string]config.CacheConfig
 }
 
 // NewManager creates a Manager with no active servers.
@@ -123,16 +128,53 @@ func (m *Manager) ToolUpstreamName(toolName string) string {
 }
 
 // DispatchForGroup dispatches a tool call for the named group using the current registry.
+// When caching is configured for the tool, the result is served from cache on a hit
+// and stored on a miss. Error results (IsError: true) are never cached.
 func (m *Manager) DispatchForGroup(ctx context.Context, groupName, toolName string, args map[string]any) (*sdkmcp.CallToolResult, error) {
 	m.mu.RLock()
 	reg := m.registry
+	store := m.store
+	cacheConfigs := m.cacheConfigs
 	m.mu.RUnlock()
+
 	if reg == nil {
 		return &sdkmcp.CallToolResult{
 			IsError: true,
 			Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: "no config loaded"}},
 		}, nil
 	}
+
+	// Cache check: skip if no store is configured or the tool has no cache config.
+	if store != nil {
+		entry := reg.EntryForTool(toolName)
+		if entry != nil && entry.CacheName != "" {
+			if cacheCfg, ok := cacheConfigs[entry.CacheName]; ok {
+				// Determine authenticated subject for per-user keys.
+				subject := ""
+				if cacheCfg.PerUser {
+					if ti := pkginbound.TokenInfoFromContext(ctx); ti != nil {
+						subject = ti.Subject
+					}
+				}
+				key, keyErr := pkgcache.ComputeKey(toolName, args, cacheCfg.PerUser, subject)
+				if keyErr != nil {
+					slog.Warn("cache key computation failed; skipping cache", "tool", toolName, "error", keyErr)
+				} else {
+					if cached, hit := store.Get(ctx, key); hit {
+						return cached, nil
+					}
+					result, dispErr := reg.DispatchForGroup(ctx, groupName, toolName, args)
+					if dispErr == nil && result != nil && !result.IsError {
+						if setErr := store.Set(ctx, key, result, cacheCfg.TTL); setErr != nil {
+							slog.Warn("cache store failed; result not cached", "tool", toolName, "error", setErr)
+						}
+					}
+					return result, dispErr
+				}
+			}
+		}
+	}
+
 	return reg.DispatchForGroup(ctx, groupName, toolName, args)
 }
 
@@ -226,6 +268,19 @@ func (m *Manager) Rebuild(ctx context.Context, cfg *config.ProxyConfig) error {
 		}
 	}
 
+	// Validate that all cache names referenced by tools exist in the top-level caches map.
+	for _, vu := range validatedUpstreams {
+		for _, entry := range vu.Entries {
+			if entry.CacheName == "" {
+				continue
+			}
+			if _, ok := cfg.Caches[entry.CacheName]; !ok {
+				return fmt.Errorf("upstream %q tool %q references unknown cache %q — define it under the top-level \"caches\" key",
+					vu.Config.Name, entry.PrefixedName, entry.CacheName)
+			}
+		}
+	}
+
 	// Build the rate limit enforcer.
 	newEnforcer, err := ratelimit.New(ctx, cfg)
 	if err != nil {
@@ -239,6 +294,20 @@ func (m *Manager) Rebuild(ctx context.Context, cfg *config.ProxyConfig) error {
 		if err != nil {
 			slog.Warn("token counting disabled: could not initialise tokenizer", "error", err)
 		}
+	}
+
+	// Initialise the cache store when caches are configured.
+	var newStore pkgcache.Store
+	if len(cfg.Caches) > 0 {
+		storeCfg := cfg.CacheStore
+		if storeCfg.Provider == "" {
+			storeCfg.Provider = "memory"
+		}
+		newStore, err = pkgcache.New(ctx, &storeCfg)
+		if err != nil {
+			return fmt.Errorf("initialising cache store: %w", err)
+		}
+		slog.Info("cache store initialised", "provider", storeCfg.Provider, "named_caches", len(cfg.Caches))
 	}
 
 	// Build per-upstream state map from the new registry.
@@ -261,6 +330,8 @@ func (m *Manager) Rebuild(ctx context.Context, cfg *config.ProxyConfig) error {
 	m.groups = groups
 	m.namingCfg = &cfg.Naming
 	m.upstreamByName = newUpstreamByName
+	m.store = newStore
+	m.cacheConfigs = cfg.Caches
 	return nil
 }
 

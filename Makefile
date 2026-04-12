@@ -1,4 +1,4 @@
-.PHONY: build build-operator lint vet test integration check clean
+.PHONY: build build-operator lint vet test integration treeshake check clean
 
 BINARY := bin/proxy
 OPERATOR_BINARY := bin/operator
@@ -23,7 +23,10 @@ test:
 integration:
 	go test $(GOFLAGS) -tags integration -count=1 -timeout $(INTEGRATION_TIMEOUT) ./tests/integration/...
 
-check: lint vet test build build-operator
+treeshake:
+	go test -tags treeshake -count=1 ./tests/treeshake/...
+
+check: lint vet test build build-operator treeshake
 
 clean:
 	rm -rf bin/

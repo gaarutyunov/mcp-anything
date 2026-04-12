@@ -11,5 +11,6 @@ package all
 import (
 	_ "github.com/gaarutyunov/mcp-anything/pkg/upstream/command"
 	_ "github.com/gaarutyunov/mcp-anything/pkg/upstream/http"
+	_ "github.com/gaarutyunov/mcp-anything/pkg/upstream/http/withui"
 	_ "github.com/gaarutyunov/mcp-anything/pkg/upstream/script"
 )

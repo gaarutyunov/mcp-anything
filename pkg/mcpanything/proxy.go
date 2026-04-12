@@ -33,7 +33,6 @@ import (
 	pkgsession "github.com/gaarutyunov/mcp-anything/pkg/session"
 	pkgtelemetry "github.com/gaarutyunov/mcp-anything/pkg/telemetry"
 	pkgupstream "github.com/gaarutyunov/mcp-anything/pkg/upstream"
-	pkghttp "github.com/gaarutyunov/mcp-anything/pkg/upstream/http"
 )
 
 // Proxy is the assembled mcp-anything proxy. It holds the MCP manager, HTTP
@@ -46,7 +45,7 @@ type Proxy struct {
 	loader      *pkgconfig.Loader
 	telShutdown func(context.Context) error
 	pools       *pkgruntime.Registry
-	refreshers  []*pkghttp.Refresher
+	refreshers  []pkgupstream.Refresher
 	mcpHandlers map[string]http.Handler
 	oauthMux    *pkgoauthcallback.Mux
 }
@@ -354,7 +353,7 @@ func (p *Proxy) buildRefreshers(ctx context.Context) error {
 		if !strings.HasPrefix(upCfg.OpenAPI.Source, "http") {
 			continue
 		}
-		refresher, err := pkghttp.NewRefresher(ctx, upCfg, &p.cfg.Naming, p.manager, p.pools)
+		refresher, err := pkgupstream.NewRefresher(ctx, upCfg, &p.cfg.Naming, p.manager, p.pools)
 		if err != nil {
 			return fmt.Errorf("creating refresher for %q: %w", upCfg.Name, err)
 		}

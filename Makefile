@@ -1,4 +1,4 @@
-.PHONY: build build-operator lint vet test integration e2e check clean helm-lint helm-package helm-push
+.PHONY: all build build-operator lint vet test integration treeshake check clean helm-lint helm-package helm-push
 
 BINARY := bin/proxy
 OPERATOR_BINARY := bin/operator
@@ -10,6 +10,8 @@ E2E_RUN_FLAG = $(if $(E2E_TEST),-run $(E2E_TEST),)
 HELM_CHART_DIR := charts/mcp-anything
 HELM_DIST_DIR := dist
 HELM_REGISTRY ?= oci://ghcr.io/gaarutyunov
+
+all: check
 
 build:
 	go build -o $(BINARY) ./cmd/proxy
@@ -32,7 +34,10 @@ integration:
 e2e:
 	go test $(GOFLAGS) -tags e2e -count=1 -timeout $(INTEGRATION_TIMEOUT) $(E2E_RUN_FLAG) ./tests/e2e/...
 
-check: lint vet test build build-operator
+treeshake:
+	go test -tags treeshake -count=1 ./tests/treeshake/...
+
+check: lint vet test build build-operator treeshake
 
 clean:
 	rm -rf bin/

@@ -1,0 +1,20 @@
+server:
+  port: 8080
+
+naming:
+  separator: "__"
+
+telemetry:
+  service_name: mcp-anything
+  service_version: v0.0.0-local
+
+upstreams:
+  - name: kraken
+    tool_prefix: kraken
+    base_url: https://api.kraken.com
+    timeout: 15s
+    openapi:
+      source: spec.yaml
+      version: "3.0"
+    overlay:
+      source: overlay.yaml

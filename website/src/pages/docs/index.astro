@@ -15,21 +15,15 @@ import DocsLayout from '../../layouts/DocsLayout.astro';
   <p>Any MCP-compatible client (Claude, Cursor, etc.) connects to <code>http://localhost:8080/mcp</code> and immediately has access to all configured tools.</p>
 
   <h2>Quick start — Kraken Market Data</h2>
-  <p>The Kraken cryptocurrency exchange offers a public REST API with no authentication required. The repo includes a ready-to-use OpenAPI spec and overlay.</p>
-  <p><strong>1. Install</strong></p>
-  <pre><code>go install github.com/gaarutyunov/mcp-anything/cmd/proxy@latest</code></pre>
-  <p><strong>2. Create config.yaml</strong></p>
-  <pre><code>upstreams:
-  - name: kraken
-    type: http
-    tool_prefix: kraken
-    base_url: https://api.kraken.com
-    openapi:
-      source: deploy/examples/kraken/spec.yaml
-    overlay:
-      source: deploy/examples/kraken/overlay.yaml</code></pre>
-  <p><strong>3. Run the proxy</strong></p>
-  <pre><code>proxy --config config.yaml</code></pre>
+  <p>The Kraken cryptocurrency exchange offers a public REST API with no authentication required. Download the example config files and start the proxy:</p>
+  <p><strong>1. Download config, spec, and overlay</strong></p>
+  <pre><code>mkdir -p kraken && cd kraken
+curl -sLO https://raw.githubusercontent.com/gaarutyunov/mcp-anything/main/deploy/examples/kraken/config.yaml
+curl -sLO https://raw.githubusercontent.com/gaarutyunov/mcp-anything/main/deploy/examples/kraken/spec.yaml
+curl -sLO https://raw.githubusercontent.com/gaarutyunov/mcp-anything/main/deploy/examples/kraken/overlay.yaml</code></pre>
+  <p><strong>2. Install and run</strong></p>
+  <pre><code>go install github.com/gaarutyunov/mcp-anything/cmd/proxy@latest
+CONFIG_PATH=config.yaml proxy</code></pre>
   <p>Your MCP client now has five tools:</p>
   <table>
     <thead><tr><th>Tool</th><th>Description</th></tr></thead>
@@ -61,7 +55,8 @@ import DocsLayout from '../../layouts/DocsLayout.astro';
 
   <h2>Docker</h2>
   <pre><code>docker run -p 8080:8080 \
-  -v $(pwd)/config.yaml:/etc/mcp-anything/config.yaml \
+  -v $(pwd):/etc/mcp-anything \
+  -w /etc/mcp-anything \
   ghcr.io/gaarutyunov/mcp-anything:latest</code></pre>
 
   <h2>What's next</h2>

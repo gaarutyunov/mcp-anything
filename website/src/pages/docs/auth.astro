@@ -1,0 +1,159 @@
+---
+import DocsLayout from '../../layouts/DocsLayout.astro';
+---
+
+<DocsLayout
+  title="Authentication"
+  description="Inbound auth (MCP clients → proxy) and outbound auth (proxy → upstream APIs). JWT, OAuth2, API key, introspection, Lua, and JavaScript."
+  current="auth"
+>
+  <h1>Authentication</h1>
+  <p class="lead">The proxy handles two independent auth directions: <strong>inbound</strong> — validating tokens from MCP clients — and <strong>outbound</strong> — attaching credentials to upstream API requests.</p>
+
+  <h2>Inbound auth</h2>
+  <p>Inbound auth protects your MCP endpoint. Configure it per-group:</p>
+  <pre><code>groups:
+  - name: default
+    endpoint: /mcp
+    upstreams: [kraken]
+    inbound_auth:
+      strategy: jwt
+      jwt:
+        issuer: https://auth.example.com
+        jwks_url: https://auth.example.com/.well-known/jwks.json
+        audience: mcp-anything</code></pre>
+
+  <h3>JWT</h3>
+  <p>Validates OIDC JWTs. JWKS keys are auto-rotated on expiry.</p>
+  <pre><code>inbound_auth:
+  strategy: jwt
+  jwt:
+    issuer: https://auth.example.com
+    jwks_url: https://auth.example.com/.well-known/jwks.json
+    audience: my-mcp-proxy          # optional, validates aud claim
+    algorithms: [RS256, ES256]      # optional, defaults to RS256</code></pre>
+
+  <h3>Token introspection</h3>
+  <p>Validates tokens via an OIDC introspection endpoint. Suitable for opaque tokens.</p>
+  <pre><code>inbound_auth:
+  strategy: introspection
+  introspection:
+    endpoint: https://auth.example.com/oauth/introspect
+    client_id: $&#123;INTROSPECTION_CLIENT_ID&#125;
+    client_secret: $&#123;INTROSPECTION_CLIENT_SECRET&#125;</code></pre>
+
+  <h3>API key</h3>
+  <p>Validates a static key from a request header.</p>
+  <pre><code>inbound_auth:
+  strategy: apikey
+  apikey:
+    header: X-API-Key
+    value: $&#123;API_KEY&#125;</code></pre>
+
+  <h3>Lua</h3>
+  <p>Custom validation logic in a Lua script. Receives the request headers and must return a boolean.</p>
+  <pre><code>inbound_auth:
+  strategy: lua
+  lua:
+    source: scripts/validate_token.lua</code></pre>
+  <pre><code>-- scripts/validate_token.lua
+local token = headers["Authorization"]
+if not token then return false end
+-- custom validation logic
+return token:sub(1, 7) == "Bearer " and #token > 20</code></pre>
+
+  <h3>JavaScript (Sobek)</h3>
+  <p>Custom validation logic in a sandboxed ECMAScript runtime (Grafana Sobek). Receives the request headers as a plain object and must return a boolean.</p>
+  <pre><code>inbound_auth:
+  strategy: js
+  js:
+    source: scripts/validate_token.js</code></pre>
+  <pre><code>// scripts/validate_token.js
+const token = headers["Authorization"] ?? "";
+if (!token.startsWith("Bearer ")) return false;
+// custom HMAC or structural check
+return token.length > 20;</code></pre>
+
+  <h3>None</h3>
+  <pre><code>inbound_auth:
+  strategy: none</code></pre>
+  <p>No authentication. Use this for development or for public endpoints.</p>
+
+  <h2>Outbound auth</h2>
+  <p>Outbound auth injects credentials into requests the proxy makes to upstream APIs. Configure it per-upstream:</p>
+  <pre><code>upstreams:
+  - name: myapi
+    type: http
+    tool_prefix: api
+    base_url: https://api.example.com
+    openapi:
+      source: https://api.example.com/openapi.yaml
+    outbound_auth:
+      strategy: oauth2_client_credentials
+      oauth2_client_credentials:
+        token_url: https://auth.example.com/oauth/token
+        client_id: $&#123;CLIENT_ID&#125;
+        client_secret: $&#123;CLIENT_SECRET&#125;
+        scopes: [read:data, write:data]</code></pre>
+
+  <h3>Bearer token</h3>
+  <p>Injects a static Bearer token from an environment variable.</p>
+  <pre><code>outbound_auth:
+  strategy: bearer
+  bearer:
+    token: $&#123;API_TOKEN&#125;</code></pre>
+
+  <h3>OAuth2 Client Credentials</h3>
+  <p>Performs the OAuth2 CC flow and caches the token until it expires, then refreshes automatically.</p>
+  <pre><code>outbound_auth:
+  strategy: oauth2_client_credentials
+  oauth2_client_credentials:
+    token_url: https://auth.example.com/oauth/token
+    client_id: $&#123;CLIENT_ID&#125;
+    client_secret: $&#123;CLIENT_SECRET&#125;
+    scopes: [read, write]</code></pre>
+
+  <h3>API key</h3>
+  <p>Injects an API key as a header or query parameter.</p>
+  <pre><code>outbound_auth:
+  strategy: api_key
+  api_key:
+    header: X-API-Key        # or use: query: api_key
+    value: $&#123;UPSTREAM_KEY&#125;</code></pre>
+
+  <h3>Lua</h3>
+  <p>Custom token acquisition — useful for non-standard auth schemes.</p>
+  <pre><code>outbound_auth:
+  strategy: lua
+  lua:
+    source: scripts/get_token.lua</code></pre>
+
+  <h3>JavaScript (Sobek)</h3>
+  <p>Token acquisition in a sandboxed ECMAScript runtime. The script must return a string that is used as the <code>Authorization</code> header value.</p>
+  <pre><code>outbound_auth:
+  strategy: js
+  js:
+    source: scripts/get_token.js</code></pre>
+  <pre><code>// scripts/get_token.js
+const resp = ctx.fetch("https://auth.example.com/token", &#123;
+  method: "POST",
+  body: JSON.stringify(&#123; client_id: ctx.env.CLIENT_ID, client_secret: ctx.env.CLIENT_SECRET &#125;),
+  headers: &#123; "Content-Type": "application/json" &#125;,
+&#125;);
+return "Bearer " + resp.json().access_token;</code></pre>
+
+  <h2>Per-operation bypass</h2>
+  <p>Set <code>x-mcp-auth-required: false</code> on an operation via an overlay to skip outbound auth for that operation. Useful for public endpoints within an otherwise authenticated upstream.</p>
+  <pre><code>- target: "$.paths[\"/public/status\"].get"
+  update:
+    x-mcp-auth-required: false</code></pre>
+
+  <h2>Secret references</h2>
+  <p>All config fields that reference secrets use <code>$&#123;ENV_VAR&#125;</code> syntax. The proxy expands these at startup from the process environment. Secret values are never logged.</p>
+
+  <h2>See also</h2>
+  <ul>
+    <li><a href="/docs/groups">Tool Groups</a> — per-group inbound auth configuration</li>
+    <li><a href="/docs/overlays">OpenAPI Overlays</a> — per-operation auth bypass</li>
+  </ul>
+</DocsLayout>

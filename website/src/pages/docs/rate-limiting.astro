@@ -1,0 +1,65 @@
+---
+import DocsLayout from '../../layouts/DocsLayout.astro';
+---
+
+<DocsLayout
+  title="Rate Limiting"
+  description="Token-bucket rate limiting per MCP tool with configurable sources (IP, user, session) and burst allowances."
+  current="rate-limiting"
+>
+  <h1>Rate Limiting</h1>
+  <p class="lead">The proxy enforces per-tool rate limits using a token-bucket algorithm. Limits can be keyed by client IP, authenticated user, or MCP session ID — independently for each tool.</p>
+
+  <h2>Configuration</h2>
+  <p>Rate limiting is configured per-upstream under <code>rate_limit</code>. Each entry targets one tool (by name or glob) and defines the bucket parameters:</p>
+  <pre><code>upstreams:
+  - name: myapi
+    type: http
+    tool_prefix: api
+    base_url: https://api.example.com
+    openapi:
+      source: spec.yaml
+    rate_limit:
+      - tool: "*"                 # applies to all tools in this upstream
+        rate: 60                  # tokens per interval
+        interval: 1m              # refill interval
+        burst: 10                 # maximum burst above steady rate
+        source: user              # key by: ip | user | session | global</code></pre>
+
+  <h2>Limit sources</h2>
+  <table>
+    <thead><tr><th>Source</th><th>Key used</th><th>When to use</th></tr></thead>
+    <tbody>
+      <tr><td><code>ip</code></td><td>Client IP address</td><td>Unauthenticated endpoints; coarse throttling</td></tr>
+      <tr><td><code>user</code></td><td>JWT <code>sub</code> claim or API key identity</td><td>Per-user quotas on authenticated endpoints</td></tr>
+      <tr><td><code>session</code></td><td>MCP session ID</td><td>Isolate AI agent sessions from each other</td></tr>
+      <tr><td><code>global</code></td><td>Shared across all callers</td><td>Protect an upstream with a hard cap</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Per-tool overrides</h2>
+  <p>Use the tool name (with prefix) or a glob to apply limits selectively. More specific patterns take precedence over wildcards:</p>
+  <pre><code>rate_limit:
+  - tool: "*"
+    rate: 100
+    interval: 1m
+    source: user
+  - tool: "api__export_data"      # tighter limit for expensive operation
+    rate: 5
+    interval: 1m
+    burst: 2
+    source: user</code></pre>
+
+  <h2>Rate limit responses</h2>
+  <p>When a tool call exceeds its limit the proxy returns an MCP error with code <code>-32029</code> (rate limit exceeded) and a <code>Retry-After</code> hint in seconds. The MCP client receives a structured error — it is never silently dropped.</p>
+
+  <h2>Metrics</h2>
+  <p>Rate limit decisions are emitted as OpenTelemetry metrics under the <code>mcp.ratelimit.*</code> namespace. The <code>mcp.ratelimit.rejected</code> counter is labelled by tool name and source key. See <a href="/docs/telemetry">OpenTelemetry</a> for the full metrics reference.</p>
+
+  <h2>See also</h2>
+  <ul>
+    <li><a href="/docs/circuit-breaking">Circuit Breaking</a> — upstream failure protection</li>
+    <li><a href="/docs/telemetry">OpenTelemetry</a> — metrics and traces</li>
+    <li><a href="/docs/auth">Authentication</a> — user identity for <code>user</code>-keyed limits</li>
+  </ul>
+</DocsLayout>

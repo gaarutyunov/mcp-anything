@@ -1,0 +1,396 @@
+---
+import '../styles/global.css';
+
+interface Props {
+  title: string;
+  description: string;
+  current: string;
+}
+
+const { title, description, current } = Astro.props;
+const canonicalURL = new URL(Astro.url.pathname, Astro.site);
+
+const nav = [
+  {
+    group: 'Getting Started',
+    items: [
+      { slug: '', label: 'Introduction' },
+    ],
+  },
+  {
+    group: 'Providers',
+    items: [
+      { slug: 'openapi', label: 'HTTP APIs (OpenAPI)' },
+      { slug: 'commands', label: 'Shell Commands' },
+      { slug: 'scripts', label: 'JavaScript Scripts' },
+    ],
+  },
+  {
+    group: 'Configuration',
+    items: [
+      { slug: 'routing', label: 'Multi-Upstream Routing' },
+      { slug: 'overlays', label: 'OpenAPI Overlays' },
+      { slug: 'groups', label: 'Tool Groups' },
+      { slug: 'config', label: 'Config Reference' },
+    ],
+  },
+  {
+    group: 'Authentication',
+    items: [
+      { slug: 'auth', label: 'Inbound & Outbound Auth' },
+      { slug: 'oauth2-sessions', label: 'Per-User OAuth2 Sessions' },
+    ],
+  },
+  {
+    group: 'Operations',
+    items: [
+      { slug: 'hot-reload', label: 'Hot-Reload & Spec Refresh' },
+      { slug: 'telemetry', label: 'OpenTelemetry' },
+      { slug: 'rate-limiting', label: 'Rate Limiting' },
+      { slug: 'circuit-breaking', label: 'Circuit Breaking' },
+      { slug: 'caching', label: 'Tool Result Caching' },
+      { slug: 'token-counting', label: 'Token Counting' },
+    ],
+  },
+  {
+    group: 'Discovery',
+    items: [
+      { slug: 'search', label: 'Semantic Tool Search' },
+      { slug: 'ui', label: 'MCP Apps' },
+    ],
+  },
+  {
+    group: 'Deployment',
+    items: [
+      { slug: 'kubernetes', label: 'Kubernetes & Helm' },
+      { slug: 'transport', label: 'Gateway Transport' },
+      { slug: 'caddy', label: 'Caddy Module' },
+    ],
+  },
+  {
+    group: 'Extending',
+    items: [
+      { slug: 'sdk', label: 'Go SDK' },
+    ],
+  },
+];
+
+function href(slug: string) {
+  return slug === '' ? '/docs' : `/docs/${slug}`;
+}
+
+function isActive(slug: string) {
+  return slug === current;
+}
+---
+
+<!doctype html>
+<html lang="en" class="scroll-smooth">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="canonical" href={canonicalURL} />
+    <meta name="description" content={description} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content={canonicalURL} />
+    <meta property="og:site_name" content="mcp-anything" />
+    <meta name="generator" content={Astro.generator} />
+    <title>{title} — mcp-anything</title>
+    <!-- Prevent FOUC -->
+    <script is:inline>
+      (function() {
+        const saved = localStorage.getItem('theme');
+        if (saved === 'dark' || (!saved && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+          document.documentElement.classList.add('dark');
+        }
+      })();
+    </script>
+  </head>
+  <body class="bg-white text-neutral-900 antialiased font-sans dark:bg-neutral-950 dark:text-neutral-100">
+
+    <!-- Top Nav -->
+    <nav class="sticky top-0 z-50 w-full border-b border-neutral-200 bg-white/80 backdrop-blur-sm dark:border-neutral-800 dark:bg-neutral-950/80">
+      <div class="flex h-14 items-center justify-between px-6">
+        <div class="flex items-center gap-6">
+          <!-- Mobile sidebar toggle -->
+          <button
+            id="sidebar-toggle"
+            type="button"
+            class="flex h-8 w-8 items-center justify-center rounded-md text-neutral-500 transition hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100 lg:hidden"
+            aria-label="Toggle sidebar"
+          >
+            <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16"/></svg>
+          </button>
+          <a href="/" class="flex items-center gap-2 text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+            <svg class="h-5 w-5" viewBox="0 0 180 180" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect width="180" height="180" rx="24" class="fill-neutral-900 dark:fill-neutral-100"/>
+              <mask id="doc-nav-m" style="mask-type:luminance" maskUnits="userSpaceOnUse" x="7" y="7" width="166" height="166"><path d="M173 7H7V173H173V7Z" fill="white"/></mask>
+              <g mask="url(#doc-nav-m)">
+                <path d="M23.6 85.25L86.2 22.65C94.85 14.01 108.86 14.01 117.5 22.65C126.15 31.29 126.15 45.31 117.5 53.95L70.23 101.23" class="stroke-white dark:stroke-neutral-900" stroke-width="11.07" stroke-linecap="round"/>
+                <path d="M70.88 100.58L117.5 53.95C126.15 45.31 140.16 45.31 148.81 53.95L149.13 54.28C157.78 62.92 157.78 76.94 149.13 85.58L92.51 142.2C89.63 145.08 89.63 149.75 92.51 152.63L104.14 164.26" class="stroke-white dark:stroke-neutral-900" stroke-width="11.07" stroke-linecap="round"/>
+                <path d="M101.85 38.3L55.55 84.6C46.91 93.24 46.91 107.26 55.55 115.9C64.2 124.55 78.21 124.55 86.85 115.9L133.15 69.6" class="stroke-white dark:stroke-neutral-900" stroke-width="11.07" stroke-linecap="round"/>
+              </g>
+              <g transform="translate(140, 140)" class="stroke-white dark:stroke-neutral-900" stroke-width="7" stroke-linecap="round">
+                <line x1="0" y1="-14" x2="0" y2="14"/><line x1="-12.12" y1="-7" x2="12.12" y2="7"/><line x1="-12.12" y1="7" x2="12.12" y2="-7"/>
+              </g>
+            </svg>
+            mcp-anything
+          </a>
+          <span class="hidden text-neutral-300 dark:text-neutral-600 sm:block">/</span>
+          <span class="hidden text-sm text-neutral-500 dark:text-neutral-400 sm:block">Docs</span>
+        </div>
+        <div class="flex items-center gap-4">
+          <a
+            href="https://github.com/gaarutyunov/mcp-anything"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="flex items-center gap-1.5 text-sm text-neutral-500 transition hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
+          >
+            <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+            GitHub
+          </a>
+          <button
+            id="theme-toggle"
+            type="button"
+            class="flex h-8 w-8 items-center justify-center rounded-md text-neutral-500 transition hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+            aria-label="Toggle theme"
+          >
+            <svg class="hidden h-4 w-4 dark:block" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3v2.25m6.364.386-1.591 1.591M21 12h-2.25m-.386 6.364-1.591-1.591M12 18.75V21m-4.773-4.227-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0Z"/></svg>
+            <svg class="block h-4 w-4 dark:hidden" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21.752 15.002A9.72 9.72 0 0 1 18 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 0 0 3 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 0 0 9.002-5.998Z"/></svg>
+          </button>
+        </div>
+      </div>
+    </nav>
+
+    <div class="flex">
+      <!-- Sidebar overlay (mobile) -->
+      <div id="sidebar-overlay" class="fixed inset-0 z-40 bg-black/30 hidden lg:hidden" aria-hidden="true"></div>
+
+      <!-- Sidebar -->
+      <aside
+        id="sidebar"
+        class="fixed top-14 bottom-0 left-0 z-40 w-64 translate-x-[-100%] overflow-y-auto border-r border-neutral-200 bg-white px-4 py-6 transition-transform duration-200 dark:border-neutral-800 dark:bg-neutral-950 lg:sticky lg:h-[calc(100vh-3.5rem)] lg:translate-x-0"
+      >
+        {nav.map((group) => (
+          <div class="mb-6">
+            <p class="mb-1.5 px-2 text-xs font-semibold uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
+              {group.group}
+            </p>
+            {group.items.map((item) => (
+              <a
+                href={href(item.slug)}
+                class:list={[
+                  'flex items-center rounded-md px-2 py-1.5 text-sm transition',
+                  isActive(item.slug)
+                    ? 'bg-neutral-100 font-medium text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100'
+                    : 'text-neutral-600 hover:bg-neutral-50 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-900 dark:hover:text-neutral-100',
+                ]}
+              >
+                {item.label}
+              </a>
+            ))}
+          </div>
+        ))}
+      </aside>
+
+      <!-- Main content -->
+      <main class="min-w-0 flex-1 px-6 py-10 lg:px-10 lg:py-12">
+        <article class="mx-auto max-w-2xl">
+          <slot />
+        </article>
+      </main>
+    </div>
+
+    <script>
+      // Theme toggle
+      document.getElementById('theme-toggle')?.addEventListener('click', () => {
+        const isDark = document.documentElement.classList.toggle('dark');
+        localStorage.setItem('theme', isDark ? 'dark' : 'light');
+      });
+
+      // Mobile sidebar
+      const sidebar = document.getElementById('sidebar');
+      const overlay = document.getElementById('sidebar-overlay');
+      const sidebarToggle = document.getElementById('sidebar-toggle');
+
+      function openSidebar() {
+        sidebar?.classList.remove('translate-x-[-100%]');
+        overlay?.classList.remove('hidden');
+        document.body.style.overflow = 'hidden';
+      }
+
+      function closeSidebar() {
+        sidebar?.classList.add('translate-x-[-100%]');
+        overlay?.classList.add('hidden');
+        document.body.style.overflow = '';
+      }
+
+      sidebarToggle?.addEventListener('click', openSidebar);
+      overlay?.addEventListener('click', closeSidebar);
+    </script>
+  </body>
+</html>
+
+<style>
+  /* Prose styles for docs content */
+  article :global(h1) {
+    font-size: 1.875rem;
+    font-weight: 700;
+    letter-spacing: -0.025em;
+    color: var(--color-neutral-900, #171717);
+    margin-bottom: 0.75rem;
+    line-height: 1.2;
+  }
+  article :global(h2) {
+    font-size: 1.25rem;
+    font-weight: 600;
+    letter-spacing: -0.015em;
+    color: var(--color-neutral-900, #171717);
+    margin-top: 2.5rem;
+    margin-bottom: 0.75rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid #e5e5e5;
+  }
+  article :global(h3) {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--color-neutral-900, #171717);
+    margin-top: 1.75rem;
+    margin-bottom: 0.5rem;
+  }
+  article :global(p) {
+    font-size: 0.9375rem;
+    line-height: 1.7;
+    color: #525252;
+    margin-bottom: 1rem;
+  }
+  article :global(ul), article :global(ol) {
+    margin-bottom: 1rem;
+    padding-left: 1.5rem;
+  }
+  article :global(li) {
+    font-size: 0.9375rem;
+    line-height: 1.7;
+    color: #525252;
+    margin-bottom: 0.25rem;
+  }
+  article :global(li > ul), article :global(li > ol) {
+    margin-top: 0.25rem;
+    margin-bottom: 0.25rem;
+  }
+  article :global(code):not(pre code) {
+    font-family: ui-monospace, 'Cascadia Code', monospace;
+    font-size: 0.8125rem;
+    background: #f5f5f5;
+    color: #171717;
+    padding: 0.125rem 0.375rem;
+    border-radius: 0.25rem;
+    border: 1px solid #e5e5e5;
+  }
+  article :global(pre) {
+    background: #fafafa;
+    border: 1px solid #e5e5e5;
+    border-radius: 0.5rem;
+    padding: 1rem 1.25rem;
+    overflow-x: auto;
+    margin-bottom: 1.25rem;
+    font-family: ui-monospace, 'Cascadia Code', monospace;
+    font-size: 0.8125rem;
+    line-height: 1.6;
+    color: #404040;
+  }
+  article :global(pre code) {
+    background: none;
+    border: none;
+    padding: 0;
+    font-size: inherit;
+    color: inherit;
+  }
+  article :global(table) {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+    margin-bottom: 1.25rem;
+  }
+  article :global(th) {
+    text-align: left;
+    font-weight: 600;
+    color: #171717;
+    border-bottom: 1px solid #e5e5e5;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.8125rem;
+  }
+  article :global(td) {
+    color: #525252;
+    border-bottom: 1px solid #f5f5f5;
+    padding: 0.5rem 0.75rem;
+    vertical-align: top;
+  }
+  article :global(a) {
+    color: #171717;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  article :global(a:hover) {
+    color: #000;
+  }
+  article :global(blockquote) {
+    border-left: 3px solid #e5e5e5;
+    padding-left: 1rem;
+    margin-left: 0;
+    margin-bottom: 1rem;
+    color: #737373;
+    font-size: 0.9375rem;
+  }
+  article :global(.lead) {
+    font-size: 1.0625rem;
+    color: #737373;
+    margin-bottom: 2rem;
+    line-height: 1.6;
+  }
+
+  /* Dark mode */
+  .dark article :global(h1),
+  .dark article :global(h2),
+  .dark article :global(h3) {
+    color: #f5f5f5;
+  }
+  .dark article :global(h2) {
+    border-bottom-color: #262626;
+  }
+  .dark article :global(p),
+  .dark article :global(li) {
+    color: #a3a3a3;
+  }
+  .dark article :global(code):not(pre code) {
+    background: #1a1a1a;
+    color: #e5e5e5;
+    border-color: #262626;
+  }
+  .dark article :global(pre) {
+    background: #0f0f0f;
+    border-color: #262626;
+    color: #d4d4d4;
+  }
+  .dark article :global(th) {
+    color: #e5e5e5;
+    border-bottom-color: #262626;
+  }
+  .dark article :global(td) {
+    color: #a3a3a3;
+    border-bottom-color: #1a1a1a;
+  }
+  .dark article :global(a) {
+    color: #e5e5e5;
+  }
+  .dark article :global(blockquote) {
+    border-left-color: #404040;
+    color: #737373;
+  }
+  .dark article :global(.lead) {
+    color: #737373;
+  }
+</style>

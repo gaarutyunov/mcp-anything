@@ -1,0 +1,59 @@
+---
+import DocsLayout from '../../layouts/DocsLayout.astro';
+---
+
+<DocsLayout
+  title="Tool Result Caching"
+  description="Cache MCP tool responses with configurable TTL, per-user isolation, and automatic invalidation on spec refresh."
+  current="caching"
+>
+  <h1>Tool Result Caching</h1>
+  <p class="lead">Tool result caching stores upstream responses in memory and serves them directly for repeat calls within the TTL window — reducing latency and upstream API load for read-heavy tool sets.</p>
+
+  <h2>Configuration</h2>
+  <p>Caching is configured per-upstream. All tools in the upstream share the cache store unless overridden per-tool via an overlay.</p>
+  <pre><code>upstreams:
+  - name: myapi
+    type: http
+    tool_prefix: api
+    base_url: https://api.example.com
+    openapi:
+      source: spec.yaml
+    cache:
+      enabled: true
+      ttl: 60s          # how long to keep a cached result
+      per_user: false   # if true, cache is keyed per authenticated user
+      max_size: 1000    # maximum number of entries (LRU eviction)</code></pre>
+
+  <h2>Per-tool TTL override</h2>
+  <p>Override TTL for individual operations using the <code>x-mcp-cache-ttl</code> extension in an overlay:</p>
+  <pre><code># overlay.yaml
+- target: "$.paths[\"/ticker\"].get"
+  update:
+    x-mcp-cache-ttl: 5s       # high-frequency data: cache only briefly
+
+- target: "$.paths[\"/instruments\"].get"
+  update:
+    x-mcp-cache-ttl: 1h       # slow-changing reference data: cache longer</code></pre>
+
+  <h2>Disabling cache for a tool</h2>
+  <pre><code>- target: "$.paths[\"/account/balance\"].get"
+  update:
+    x-mcp-cache-ttl: 0        # 0 disables caching for this operation</code></pre>
+
+  <h2>Per-user caching</h2>
+  <p>When <code>per_user: true</code> the cache key includes the authenticated user's identity (JWT <code>sub</code> claim or API key identity). Users never see each other's cached data. This requires inbound auth to be configured. See <a href="/docs/auth">Authentication</a>.</p>
+
+  <h2>Cache invalidation</h2>
+  <p>Entries expire after their TTL. The entire cache for an upstream is flushed whenever the upstream's OpenAPI spec is refreshed (background spec refresh) or when the proxy hot-reloads its config.</p>
+
+  <h2>Metrics</h2>
+  <p>Cache hits and misses are tracked under <code>mcp.cache.hits</code> and <code>mcp.cache.misses</code> OpenTelemetry counters, labelled by tool name. See <a href="/docs/telemetry">OpenTelemetry</a>.</p>
+
+  <h2>See also</h2>
+  <ul>
+    <li><a href="/docs/overlays">OpenAPI Overlays</a> — per-operation cache TTL</li>
+    <li><a href="/docs/hot-reload">Hot-Reload &amp; Spec Refresh</a> — triggers cache invalidation</li>
+    <li><a href="/docs/token-counting">Token Counting</a> — monitor response sizes</li>
+  </ul>
+</DocsLayout>

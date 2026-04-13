@@ -1,0 +1,82 @@
+---
+import DocsLayout from '../../layouts/DocsLayout.astro';
+---
+
+<DocsLayout
+  title="MCP Apps"
+  description="Return interactive HTML interfaces from OpenAPI-generated tools that render inside the MCP host (Claude Desktop, VS Code, etc.) — no separate web app required."
+  current="ui"
+>
+  <h1>MCP Apps</h1>
+  <p class="lead"><a href="https://modelcontextprotocol.io/extensions/apps/overview" target="_blank" rel="noopener noreferrer">MCP Apps</a> are interactive HTML UIs that render directly inside the MCP host — Claude Desktop, VS Code Copilot, or any other supporting client. Instead of returning plain text, a tool can return a <code>ui://</code> resource containing an HTML page that the host sandboxes and displays in the conversation.</p>
+
+  <h2>How it works with mcp-anything</h2>
+  <p>mcp-anything implements the MCP Apps extension so that OpenAPI-generated tools can declare a UI resource. When the host calls the tool, it receives both the structured data and a pointer to an interactive interface:</p>
+  <ol>
+    <li>The tool description includes <code>_meta.ui.resourceUri</code> pointing to a <code>ui://</code> resource registered on the proxy.</li>
+    <li>The host fetches the <code>ui://</code> resource — an HTML page bundled with its CSS and JavaScript.</li>
+    <li>The host renders the HTML in a sandboxed iframe inside the conversation.</li>
+    <li>The app communicates back to the MCP server (and through it to upstream APIs) via postMessage JSON-RPC.</li>
+  </ol>
+
+  <h2>Configuration</h2>
+  <p>Attach a UI resource to any OpenAPI operation via an overlay:</p>
+  <pre><code># overlay.yaml
+- target: "$.paths[\"/analytics/revenue\"].get"
+  update:
+    x-mcp-app:
+      resource: ui://revenue-dashboard    # ui:// resource name
+      source: apps/revenue/index.html     # bundled HTML file to serve</code></pre>
+
+  <p>The proxy registers the HTML file as a <code>ui://revenue-dashboard</code> resource. The tool description is updated automatically to include the <code>_meta.ui.resourceUri</code> field the host expects.</p>
+
+  <h2>Passing tool results to the app</h2>
+  <p>The upstream API response is injected into the app as the initial tool result. Your HTML receives it via the standard MCP Apps <code>ui/initialize</code> message:</p>
+  <pre><code>// Inside your bundled app JavaScript
+import &#123; App &#125; from "@modelcontextprotocol/ext-apps";
+
+const app = new App();
+app.onToolResult((result) => &#123;
+  renderChart(result.content[0].text); // JSON from the upstream API
+&#125;);</code></pre>
+
+  <h2>Calling tools from the app</h2>
+  <p>The app can call any MCP tool on the proxy through the host's postMessage channel — including other OpenAPI tools, shell commands, or scripts:</p>
+  <pre><code>const fresh = await app.callTool("api__get_revenue", &#123;
+  start_date: "2026-01-01",
+  end_date: "2026-03-31",
+  granularity: "monthly",
+&#125;);
+renderChart(JSON.parse(fresh.content[0].text));</code></pre>
+
+  <h2>Content Security Policy</h2>
+  <p>Declare external origins the app needs in the overlay:</p>
+  <pre><code>x-mcp-app:
+  resource: ui://revenue-dashboard
+  source: apps/revenue/index.html
+  csp:
+    script-src:
+      - https://cdn.jsdelivr.net
+    connect-src:
+      - https://fonts.googleapis.com</code></pre>
+
+  <h2>Supported clients</h2>
+  <p>MCP Apps is an <a href="https://modelcontextprotocol.io/extensions/apps/overview" target="_blank" rel="noopener noreferrer">official MCP extension</a>. Hosts that support it include Claude Desktop, Claude (web), VS Code GitHub Copilot, Goose, Postman, and MCPJam. Hosts that do not support the extension ignore the <code>_meta.ui</code> field and display the tool result as plain text — the tool remains fully functional.</p>
+
+  <h2>Use cases</h2>
+  <ul>
+    <li><strong>Data dashboards</strong> — charts and tables that update when the user drills down</li>
+    <li><strong>Configuration forms</strong> — multi-field forms with validation sent back to the upstream API</li>
+    <li><strong>Rich media viewers</strong> — PDF, 3D model, image, or video viewers embedded in the conversation</li>
+    <li><strong>Real-time monitors</strong> — live metric dashboards that poll tools for fresh data</li>
+    <li><strong>Multi-step workflows</strong> — approval queues, code review interfaces, issue triagers</li>
+  </ul>
+
+  <h2>See also</h2>
+  <ul>
+    <li><a href="https://modelcontextprotocol.io/extensions/apps/overview" target="_blank" rel="noopener noreferrer">MCP Apps specification</a></li>
+    <li><a href="/docs/overlays">OpenAPI Overlays</a> — attach <code>x-mcp-app</code> to operations</li>
+    <li><a href="/docs/scripts">JavaScript Scripts</a> — custom tool logic in the same runtime</li>
+    <li><a href="/docs/groups">Tool Groups</a> — scope which tools an app can reach</li>
+  </ul>
+</DocsLayout>

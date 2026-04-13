@@ -1,0 +1,86 @@
+---
+import DocsLayout from '../../layouts/DocsLayout.astro';
+---
+
+<DocsLayout
+  title="Tool Groups"
+  description="Serve different tool subsets at different MCP endpoints using JSONPath filters. Create read-only, premium, or role-based views from the same upstreams."
+  current="groups"
+>
+  <h1>Tool Groups</h1>
+  <p class="lead">Groups let you expose different subsets of your upstreams at different MCP endpoints — all from the same running proxy. Use them to create read-only, tiered, or role-based views.</p>
+
+  <h2>Basic configuration</h2>
+  <pre><code>groups:
+  - name: all
+    endpoint: /mcp
+    upstreams: [kraken, cluster, ops]
+
+  - name: market
+    endpoint: /mcp/market
+    upstreams: [kraken]</code></pre>
+  <p>Each group has a unique <code>endpoint</code> path. MCP clients connect to their assigned endpoint and see only the tools from the listed upstreams.</p>
+
+  <h2>JSONPath filters</h2>
+  <p>The <code>filter</code> field is a JSONPath expression evaluated against each operation in the OpenAPI spec. Only operations that match the filter are included in the group's tools. Non-HTTP upstreams (command, script) are not filtered.</p>
+
+  <h3>Read-only group</h3>
+  <pre><code>groups:
+  - name: readonly
+    endpoint: /mcp/readonly
+    upstreams: [kraken]
+    filter: "$.paths.*[?(@['x-mcp-safe'] == true)]"</code></pre>
+  <p>This includes only operations where <code>x-mcp-safe: true</code> is set in the spec or overlay.</p>
+
+  <h3>Tier-based group</h3>
+  <pre><code>groups:
+  - name: premium
+    endpoint: /mcp/premium
+    upstreams: [myapi]
+    filter: "$.paths.*[?(@['x-mcp-tier'] == 'premium')]"</code></pre>
+
+  <h3>GET-only (all GET operations)</h3>
+  <pre><code>groups:
+  - name: get-only
+    endpoint: /mcp/get
+    upstreams: [myapi]
+    filter: "$.paths.*.get"</code></pre>
+
+  <h2>Group-level auth</h2>
+  <p>Combine groups with inbound auth to create access-controlled endpoints. Configure <code>inbound_auth</code> on each group independently:</p>
+  <pre><code>groups:
+  - name: public
+    endpoint: /mcp/public
+    upstreams: [kraken]
+    # no inbound_auth — open access
+
+  - name: internal
+    endpoint: /mcp/internal
+    upstreams: [kraken, cluster]
+    inbound_auth:
+      strategy: jwt
+      jwt:
+        issuer: https://auth.example.com
+        jwks_url: https://auth.example.com/.well-known/jwks.json</code></pre>
+
+  <h2>Transport per group</h2>
+  <p>Each group can specify which MCP transports to enable:</p>
+  <pre><code>groups:
+  - name: streaming
+    endpoint: /mcp
+    upstreams: [kraken]
+    transport:
+      - streamable-http
+      - sse</code></pre>
+  <p>Supported transports: <code>streamable-http</code>, <code>sse</code>.</p>
+
+  <h2>Default group</h2>
+  <p>If no <code>groups</code> are defined, the proxy creates a default group at <code>/mcp</code> that includes all upstreams with no filter.</p>
+
+  <h2>See also</h2>
+  <ul>
+    <li><a href="/docs/overlays">OpenAPI Overlays</a> — set <code>x-mcp-safe</code> and <code>x-mcp-tier</code> on operations</li>
+    <li><a href="/docs/auth">Authentication</a> — per-group inbound auth strategies</li>
+    <li><a href="/docs/routing">Multi-Upstream Routing</a> — configure multiple upstreams</li>
+  </ul>
+</DocsLayout>

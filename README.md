@@ -37,19 +37,38 @@ docker run -v $(pwd)/config.yaml:/etc/mcp-anything/config.yaml \
   ghcr.io/gaarutyunov/mcp-anything:latest
 ```
 
-### Minimal config
+### Connect to Kraken Market Data
+
+The Kraken cryptocurrency exchange exposes a public REST API — no API key required. A ready-to-use OpenAPI spec and overlay are included in [deploy/examples/kraken/](deploy/examples/kraken/).
 
 ```yaml
+# config.yaml
 upstreams:
-  - name: petstore
+  - name: kraken
     type: http
-    tool_prefix: pets
-    base_url: https://petstore.swagger.io/v2
+    tool_prefix: kraken
+    base_url: https://api.kraken.com
     openapi:
-      source: https://petstore.swagger.io/v2/swagger.json
+      source: deploy/examples/kraken/spec.yaml
+    overlay:
+      source: deploy/examples/kraken/overlay.yaml
 ```
 
-This exposes every operation in the Petstore API as an MCP tool. Connect any MCP client to `http://localhost:8080/mcp`.
+```bash
+proxy --config config.yaml
+```
+
+Connect any MCP client to `http://localhost:8080/mcp`. Five tools are now available:
+
+| Tool | Description |
+|------|-------------|
+| `kraken__get_system_status` | Exchange status and server time |
+| `kraken__get_ticker` | Real-time ask/bid/last price for any pair (e.g. `XBTUSD`) |
+| `kraken__get_ohlc` | OHLC candlestick data at any interval |
+| `kraken__get_order_book` | Live order book with top 5 bid/ask levels |
+| `kraken__get_recent_trades` | Most recent 10 public trades |
+
+The overlay in [deploy/examples/kraken/overlay.yaml](deploy/examples/kraken/overlay.yaml) applies jq transforms that flatten Kraken's nested response format into clean named fields — no client-side parsing required.
 
 ## Configuration
 
@@ -65,23 +84,18 @@ server:
     - sse
 
 upstreams:
-  - name: petstore
+  # HTTP upstream backed by an OpenAPI spec
+  - name: kraken
     type: http
-    tool_prefix: pets
-    base_url: https://api.petstore.io/v2
+    tool_prefix: kraken
+    base_url: https://api.kraken.com
     openapi:
-      source: /etc/mcp-anything/specs/petstore.yaml
+      source: deploy/examples/kraken/spec.yaml
       refresh_interval: 5m
     overlay:
-      source: /etc/mcp-anything/overlays/petstore.yaml
-    outbound_auth:
-      strategy: oauth2_client_credentials
-      oauth2_client_credentials:
-        token_url: https://idp.example.com/oauth/token
-        client_id: ${CLIENT_ID}
-        client_secret: ${CLIENT_SECRET}
-        scopes: [read:pets, write:pets]
+      source: deploy/examples/kraken/overlay.yaml
 
+  # Shell command upstream — wraps any CLI tool
   - name: cluster
     type: command
     tool_prefix: k8s
@@ -95,6 +109,7 @@ upstreams:
             required: true
         timeout: 30s
 
+  # JavaScript script upstream — custom logic in Sobek runtime
   - name: custom
     type: script
     tool_prefix: ops
@@ -107,53 +122,63 @@ upstreams:
             type: string
         timeout: 10s
 
+# Serve different tool sets at different endpoints
 groups:
   - name: all
     endpoint: /mcp
-    upstreams: [petstore, cluster, custom]
+    upstreams: [kraken, cluster, custom]
 
-  - name: readonly
-    endpoint: /mcp/readonly
-    upstreams: [petstore]
-    filter: "$.paths.*.get[?(@['x-mcp-safe'] == true)]"
+  - name: market
+    endpoint: /mcp/market
+    upstreams: [kraken]
+    filter: "$.paths[?(@['x-mcp-safe'] == true)]"
 ```
 
-See [deploy/example/](deploy/example/) for a complete example with auth, overlays, and groups.
+See [deploy/examples/](deploy/examples/) for complete examples including Kubernetes CRDs and Helm values.
 
 ## OpenAPI Overlays
 
-Customize how operations are exposed as MCP tools without modifying the original spec:
+Customize how operations are exposed as MCP tools without modifying the original spec. The [Kraken overlay](deploy/examples/kraken/overlay.yaml) shows realistic use:
 
 ```yaml
 overlay: 1.0.0
 info:
-  title: Petstore overlay
+  title: Kraken Market Data Overlay
   version: 1.0.0
+x-speakeasy-jsonpath: rfc9535
+
 actions:
-  # Remove internal endpoints
-  - target: $.paths['/internal/metrics']
-    remove: true
-
-  # Disable an operation
-  - target: $.paths['/pets/{petId}'].delete
+  # Override tool name and flatten Kraken's nested result wrapper with jq
+  - target: "$.paths[\"/0/public/Ticker\"].get"
     update:
-      x-mcp-enabled: false
+      x-mcp-tool-name: get_ticker
+      description: >
+        Get current ticker information for a trading pair (e.g. XBTUSD, ETHUSD).
+        Returns ask, bid, last price, 24h volume, VWAP, high, low, and trade count.
+      x-mcp-response-transform: >
+        .result | to_entries[0] | {
+          pair: .key,
+          ask: .value.a[0],
+          bid: .value.b[0],
+          lastPrice: .value.c[0],
+          volume24h: .value.v[1],
+          vwap24h: .value.p[1],
+          high24h: .value.h[1],
+          low24h: .value.l[1],
+          trades24h: .value.t[1],
+          openingPrice: .value.o
+        }
 
-  # Skip auth for public endpoints
-  - target: $.paths['/health'].get
+  # Limit order book depth to top 5 levels
+  - target: "$.paths[\"/0/public/Depth\"].get"
     update:
-      x-mcp-auth-required: false
-
-  # Override tool name and mark as safe
-  - target: $.paths['/pets'].get
-    update:
-      x-mcp-tool-name: list_pets
-      x-mcp-safe: true
-
-  # Binary response format
-  - target: $.paths['/pets/{petId}/photo'].get
-    update:
-      x-mcp-response-format: image
+      x-mcp-tool-name: get_order_book
+      x-mcp-response-transform: >
+        .result | to_entries[0] | {
+          pair: .key,
+          asks: .value.asks[:5],
+          bids: .value.bids[:5]
+        }
 ```
 
 ### x-mcp extensions
@@ -177,7 +202,7 @@ actions:
 | Strategy | Description |
 |----------|-------------|
 | `jwt` | OIDC JWT validation with JWKS auto-rotation |
-| `introspection` | Token introspection via OIDC server |
+| `introspection` | Token introspection via OIDC discovery endpoint |
 | `apikey` | Static API key from a custom header |
 | `lua` | Custom validation logic in Lua |
 | `none` | No authentication |
@@ -186,10 +211,10 @@ actions:
 
 | Strategy | Description |
 |----------|-------------|
-| `bearer` | Static Bearer token from environment |
-| `oauth2_client_credentials` | OAuth2 CC flow with token caching |
+| `bearer` | Static Bearer token from environment variable |
+| `oauth2_client_credentials` | OAuth2 CC flow with automatic token caching and refresh |
 | `api_key` | API key header injection |
-| `lua` | Custom token acquisition in Lua |
+| `lua` | Custom token acquisition logic in Lua |
 
 Per-upstream overrides and per-operation bypass (`x-mcp-auth-required: false`) are supported.
 
@@ -201,13 +226,14 @@ MCP Client ──→ mcp-anything proxy ──→ HTTP API (OpenAPI)
                                   ──→ JavaScript script
 ```
 
-The proxy is a single stateless binary. On startup it loads the config, fetches OpenAPI specs, applies overlays, generates MCP tools, compiles jq transforms, and validates everything with dry-run. At runtime it handles MCP protocol, routes tool calls to the right upstream, manages auth, and validates requests/responses.
+The proxy is a single stateless binary. On startup it loads the config, fetches OpenAPI specs, applies overlays, generates MCP tools, compiles jq transforms, and validates everything with dry-run. At runtime it handles the MCP protocol, routes tool calls to the right upstream, manages auth, and validates requests and responses.
 
 Key design properties:
 - **Stateless** — no shared mutable state; each request is self-contained
 - **Atomic hot-reload** — config changes don't drop in-flight requests
 - **Overlay-as-configuration** — all per-operation behavior via OpenAPI Overlay extensions
 - **Uniform pipeline** — auto-generated and manual tools use identical code paths
+- **Double-underscore namespacing** — tool names follow `{prefix}__{operation}` convention
 
 ## Deployment
 
@@ -221,7 +247,7 @@ docker run -p 8080:8080 \
 
 ### Kubernetes
 
-The proxy is designed for Kubernetes. Mount config as a ConfigMap, specs and overlays as separate ConfigMaps for independent update cycles:
+The proxy is designed for Kubernetes. Mount config, specs, and overlays as separate ConfigMaps for independent update cycles:
 
 ```yaml
 apiVersion: apps/v1
@@ -245,6 +271,8 @@ spec:
           configMap:
             name: mcp-anything-config
 ```
+
+Use the `MCPProxy` and `MCPUpstream` CRDs with the included Helm chart for production deployments. See [deploy/examples/kraken/](deploy/examples/kraken/) for a complete Kubernetes example including CRD manifests and Helm values.
 
 ## Development
 

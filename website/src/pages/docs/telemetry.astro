@@ -1,0 +1,99 @@
+---
+import DocsLayout from '../../layouts/DocsLayout.astro';
+---
+
+<DocsLayout
+  title="OpenTelemetry"
+  description="OTLP traces with MCP-specific span attributes, Prometheus metrics, and W3C Trace Context propagation."
+  current="telemetry"
+>
+  <h1>OpenTelemetry</h1>
+  <p class="lead">The proxy emits OTLP traces, Prometheus metrics, and structured logs. W3C Trace Context is propagated to upstream APIs so distributed traces span your entire stack.</p>
+
+  <h2>Configuration</h2>
+  <pre><code>telemetry:
+  enabled: true
+  service_name: mcp-anything
+  service_version: 1.0.0
+
+  traces:
+    exporter: otlp
+    endpoint: https://otel-collector.internal:4318  # OTLP HTTP
+    insecure: false
+    headers:
+      Authorization: Bearer $&#123;OTEL_TOKEN&#125;
+
+  metrics:
+    exporter: prometheus
+    path: /metrics    # Prometheus scrape endpoint
+    port: 9090</code></pre>
+
+  <h2>Traces</h2>
+  <p>Each MCP tool call produces a trace with spans covering the full request lifecycle:</p>
+  <ul>
+    <li>MCP protocol handling (request parsing, tool lookup)</li>
+    <li>Auth validation (inbound and outbound)</li>
+    <li>Request transform (jq expression)</li>
+    <li>Upstream HTTP call</li>
+    <li>Response transform (jq expression)</li>
+  </ul>
+
+  <h3>MCP-specific span attributes</h3>
+  <table>
+    <thead><tr><th>Attribute</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>mcp.tool.name</code></td><td>Full tool name (e.g. <code>kraken__get_ticker</code>)</td></tr>
+      <tr><td><code>mcp.tool.upstream</code></td><td>Upstream name</td></tr>
+      <tr><td><code>mcp.transport</code></td><td><code>streamable-http</code> or <code>sse</code></td></tr>
+      <tr><td><code>http.upstream.url</code></td><td>URL of the upstream request</td></tr>
+      <tr><td><code>http.upstream.status_code</code></td><td>HTTP status from upstream</td></tr>
+    </tbody>
+  </table>
+
+  <h3>W3C Trace Context propagation</h3>
+  <p>The proxy injects <code>traceparent</code> and <code>tracestate</code> headers into upstream HTTP requests. If the upstream is also instrumented with OTel, traces from the MCP client through to the upstream API appear as a single distributed trace.</p>
+
+  <h2>Metrics</h2>
+  <p>When the Prometheus exporter is enabled, metrics are available at the configured path:</p>
+  <table>
+    <thead><tr><th>Metric</th><th>Type</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>mcp_tool_calls_total</code></td><td>Counter</td><td>Total tool calls by tool name and status</td></tr>
+      <tr><td><code>mcp_tool_call_duration_seconds</code></td><td>Histogram</td><td>Tool call latency distribution</td></tr>
+      <tr><td><code>mcp_upstream_requests_total</code></td><td>Counter</td><td>HTTP requests to upstreams</td></tr>
+      <tr><td><code>mcp_upstream_request_duration_seconds</code></td><td>Histogram</td><td>Upstream HTTP latency</td></tr>
+      <tr><td><code>mcp_active_connections</code></td><td>Gauge</td><td>Active MCP client connections</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Trace exporters</h2>
+  <table>
+    <thead><tr><th>Exporter</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>otlp</code></td><td>OTLP over HTTP (default port 4318)</td></tr>
+      <tr><td><code>stdout</code></td><td>Print traces to stdout (development)</td></tr>
+      <tr><td><code>noop</code></td><td>Discard all traces</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Metric exporters</h2>
+  <table>
+    <thead><tr><th>Exporter</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>prometheus</code></td><td>Prometheus scrape endpoint</td></tr>
+      <tr><td><code>otlp</code></td><td>Push metrics via OTLP</td></tr>
+      <tr><td><code>stdout</code></td><td>Print metrics to stdout (development)</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Structured logging</h2>
+  <p>The proxy logs via Go's <code>slog</code> package in JSON format. Log level is configurable:</p>
+  <pre><code>telemetry:
+  log_level: info    # debug, info, warn, error</code></pre>
+  <p>Secret values (tokens, credentials) are never logged. Config fields that reference <code>$&#123;ENV_VAR&#125;</code> secrets show the variable reference, not the expanded value.</p>
+
+  <h2>See also</h2>
+  <ul>
+    <li><a href="/docs/kubernetes">Kubernetes</a> — configuring OTel collector sidecars</li>
+  </ul>
+</DocsLayout>

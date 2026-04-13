@@ -1,0 +1,88 @@
+---
+import DocsLayout from '../../layouts/DocsLayout.astro';
+---
+
+<DocsLayout
+  title="Multi-Upstream Routing"
+  description="Proxy multiple HTTP, command, and script backends from a single mcp-anything instance with prefix-based tool namespacing."
+  current="routing"
+>
+  <h1>Multi-Upstream Routing</h1>
+  <p class="lead">A single proxy instance can aggregate tools from multiple backends — HTTP APIs, CLI commands, and JavaScript scripts — served through one MCP endpoint.</p>
+
+  <h2>How it works</h2>
+  <p>Each upstream declares a <code>tool_prefix</code>. Tool names follow the pattern <code>&#123;prefix&#125;__&#123;operation&#125;</code>, using a double-underscore separator. This ensures tools from different upstreams never collide.</p>
+  <pre><code>upstreams:
+  - name: kraken
+    type: http
+    tool_prefix: kraken            # → kraken__get_ticker, kraken__get_ohlc, ...
+    base_url: https://api.kraken.com
+    openapi:
+      source: deploy/examples/kraken/spec.yaml
+
+  - name: cluster
+    type: command
+    tool_prefix: k8s               # → k8s__get_pods, k8s__get_logs, ...
+    tools:
+      - name: get_pods
+        command: kubectl get pods -n &#123;&#123;namespace&#125;&#125; -o json
+        args:
+          namespace:
+            type: string
+            required: true
+
+  - name: ops
+    type: script
+    tool_prefix: ops               # → ops__health_check, ...
+    tools:
+      - name: health_check
+        source: scripts/health_check.js
+        args:
+          service:
+            type: string</code></pre>
+
+  <h2>Tool name collision handling</h2>
+  <p>If two upstreams would produce identical tool names after prefixing, a numeric suffix (<code>_2</code>, <code>_3</code>) is appended to the later upstream's tools. Use distinct <code>tool_prefix</code> values or <code>x-mcp-tool-name</code> overlays to avoid this.</p>
+
+  <h2>Upstream types</h2>
+  <table>
+    <thead><tr><th>Type</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>http</code></td><td>REST API backed by an OpenAPI 3.0 spec</td></tr>
+      <tr><td><code>command</code></td><td>Shell command with template argument interpolation</td></tr>
+      <tr><td><code>script</code></td><td>JavaScript file running in a Sobek sandbox</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Groups</h2>
+  <p>Use <a href="/docs/groups">Tool Groups</a> to expose different subsets of upstreams at different MCP endpoints from the same proxy instance:</p>
+  <pre><code>groups:
+  - name: all
+    endpoint: /mcp
+    upstreams: [kraken, cluster, ops]
+
+  - name: market-only
+    endpoint: /mcp/market
+    upstreams: [kraken]</code></pre>
+
+  <h2>Independent refresh cycles</h2>
+  <p>Each HTTP upstream can have its own <code>refresh_interval</code>. When a spec is re-fetched and parsed, the upstream's tools are updated atomically without affecting other upstreams or dropping in-flight requests.</p>
+  <pre><code>upstreams:
+  - name: fast-api
+    type: http
+    openapi:
+      source: https://api.example.com/openapi.yaml
+      refresh_interval: 1m     # refresh every minute
+
+  - name: stable-api
+    type: http
+    openapi:
+      source: https://stable.example.com/openapi.yaml
+      refresh_interval: 1h     # refresh hourly</code></pre>
+
+  <h2>See also</h2>
+  <ul>
+    <li><a href="/docs/groups">Tool Groups</a> — filter and segment upstreams into separate endpoints</li>
+    <li><a href="/docs/hot-reload">Hot-Reload &amp; Spec Refresh</a> — how config and spec updates are applied</li>
+  </ul>
+</DocsLayout>

@@ -1,0 +1,124 @@
+---
+import DocsLayout from '../../layouts/DocsLayout.astro';
+---
+
+<DocsLayout
+  title="OpenAPI Overlays"
+  description="Customize tool names, descriptions, jq transforms, and behavior via RFC 9535 JSONPath overlays without modifying the original spec."
+  current="overlays"
+>
+  <h1>OpenAPI Overlays</h1>
+  <p class="lead">Overlays let you customize how operations are exposed as MCP tools without touching the original OpenAPI spec. They follow the <a href="https://spec.openapis.org/overlay/v1.0.0" target="_blank" rel="noopener noreferrer">OpenAPI Overlay 1.0</a> format using RFC 9535 JSONPath targeting.</p>
+
+  <h2>Structure</h2>
+  <pre><code>overlay: 1.0.0
+info:
+  title: My Overlay
+  version: 1.0.0
+x-speakeasy-jsonpath: rfc9535      # required for RFC 9535 semantics
+
+actions:
+  - target: "$.paths[\"/pets\"].get"   # JSONPath targeting the operation
+    update:                             # merge these properties
+      x-mcp-tool-name: list_pets
+      x-mcp-safe: true
+
+  - target: "$.paths[\"/internal/metrics\"]"
+    remove: true                        # or remove the node entirely</code></pre>
+
+  <h2>Configuring an overlay</h2>
+  <pre><code>upstreams:
+  - name: kraken
+    type: http
+    tool_prefix: kraken
+    base_url: https://api.kraken.com
+    openapi:
+      source: deploy/examples/kraken/spec.yaml
+    overlay:
+      source: deploy/examples/kraken/overlay.yaml   # local path or URL</code></pre>
+
+  <h2>Common use cases</h2>
+
+  <h3>Override tool name</h3>
+  <pre><code>- target: "$.paths[\"/0/public/Ticker\"].get"
+  update:
+    x-mcp-tool-name: get_ticker</code></pre>
+
+  <h3>Improve tool description</h3>
+  <pre><code>- target: "$.paths[\"/0/public/Ticker\"].get"
+  update:
+    description: >
+      Get real-time ticker for any trading pair (e.g. XBTUSD).
+      Returns ask, bid, last price, 24h volume, VWAP, high, and low.</code></pre>
+
+  <h3>Flatten nested response with jq</h3>
+  <pre><code>- target: "$.paths[\"/0/public/Ticker\"].get"
+  update:
+    x-mcp-response-transform: >
+      .result | to_entries[0] | &#123;
+        pair: .key,
+        ask: .value.a[0],
+        bid: .value.b[0],
+        lastPrice: .value.c[0],
+        volume24h: .value.v[1]
+      &#125;</code></pre>
+
+  <h3>Disable an operation</h3>
+  <pre><code>- target: "$.paths[\"/admin/reset\"].post"
+  update:
+    x-mcp-enabled: false</code></pre>
+
+  <h3>Remove a path entirely</h3>
+  <pre><code>- target: "$.paths[\"/internal/debug\"]"
+  remove: true</code></pre>
+
+  <h3>Mark operations as safe (read-only)</h3>
+  <pre><code># Mark all GET operations as safe
+- target: "$.paths.*.get"
+  update:
+    x-mcp-safe: true</code></pre>
+
+  <h3>Skip auth for public endpoints</h3>
+  <pre><code>- target: "$.paths[\"/public/status\"].get"
+  update:
+    x-mcp-auth-required: false</code></pre>
+
+  <h3>Handle binary responses</h3>
+  <pre><code>- target: "$.paths[\"/images/&#123;id&#125;\"].get"
+  update:
+    x-mcp-response-format: image</code></pre>
+
+  <h2>Full x-mcp extension reference</h2>
+  <table>
+    <thead><tr><th>Extension</th><th>Type</th><th>Default</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td><code>x-mcp-enabled</code></td><td>bool</td><td><code>true</code></td><td>Include operation as a tool</td></tr>
+      <tr><td><code>x-mcp-tool-name</code></td><td>string</td><td>derived</td><td>Override generated tool name</td></tr>
+      <tr><td><code>x-mcp-auth-required</code></td><td>bool</td><td><code>true</code></td><td>Per-operation auth bypass</td></tr>
+      <tr><td><code>x-mcp-safe</code></td><td>bool</td><td><code>false</code></td><td>Mark as read-only for group filters</td></tr>
+      <tr><td><code>x-mcp-response-format</code></td><td>string</td><td><code>json</code></td><td><code>json</code> | <code>text</code> | <code>image</code> | <code>audio</code> | <code>binary</code> | <code>auto</code></td></tr>
+      <tr><td><code>x-mcp-request-transform</code></td><td>string</td><td>generated</td><td>jq expression applied to request body</td></tr>
+      <tr><td><code>x-mcp-response-transform</code></td><td>string</td><td><code>.</code></td><td>jq expression applied to response body</td></tr>
+      <tr><td><code>x-mcp-error-transform</code></td><td>string</td><td>default</td><td>jq expression for error responses</td></tr>
+      <tr><td><code>x-mcp-tier</code></td><td>string</td><td>—</td><td>Arbitrary label for JSONPath group filters</td></tr>
+    </tbody>
+  </table>
+
+  <h2>JSONPath targeting tips</h2>
+  <ul>
+    <li>Target a specific operation: <code>$.paths["/pets/&#123;id&#125;"].get</code></li>
+    <li>Target all operations on a path: <code>$.paths["/pets/&#123;id&#125;"].*</code></li>
+    <li>Target all GET operations: <code>$.paths.*.get</code></li>
+    <li>Target all operations: <code>$.paths.*.*</code></li>
+    <li>Filter by extension: <code>$.paths.*[?(@['x-internal'] == true)]</code></li>
+  </ul>
+
+  <h2>Real-world example — Kraken</h2>
+  <p>The full overlay used by the Kraken example is at <a href="https://github.com/gaarutyunov/mcp-anything/blob/main/deploy/examples/kraken/overlay.yaml" target="_blank" rel="noopener noreferrer">deploy/examples/kraken/overlay.yaml</a>. It renames five operations and adds jq transforms that extract and rename fields from Kraken's compact array format.</p>
+
+  <h2>See also</h2>
+  <ul>
+    <li><a href="/docs/openapi">HTTP APIs</a> — x-mcp extensions applied by overlays</li>
+    <li><a href="/docs/groups">Tool Groups</a> — filter tools using <code>x-mcp-safe</code> and <code>x-mcp-tier</code></li>
+  </ul>
+</DocsLayout>

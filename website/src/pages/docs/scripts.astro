@@ -1,0 +1,107 @@
+---
+import DocsLayout from '../../layouts/DocsLayout.astro';
+---
+
+<DocsLayout
+  title="JavaScript Scripts"
+  description="Custom tool logic in a sandboxed Sobek JavaScript runtime with ctx.fetch(), ctx.env, and ctx.log()."
+  current="scripts"
+>
+  <h1>JavaScript Scripts</h1>
+  <p class="lead">Write custom MCP tools in JavaScript. Scripts run in a sandboxed <a href="https://github.com/grafana/sobek" target="_blank" rel="noopener noreferrer">Sobek</a> runtime — no Node.js, no npm, no filesystem access by default.</p>
+
+  <h2>Configuration</h2>
+  <pre><code>upstreams:
+  - name: custom
+    type: script
+    tool_prefix: ops
+    tools:
+      - name: health_check
+        description: Check service health across regions
+        source: scripts/health_check.js
+        args:
+          service:
+            type: string
+            description: Service name
+            required: true
+          region:
+            type: string
+            description: AWS region
+            default: us-east-1
+        timeout: 10s</code></pre>
+
+  <h2>Script context</h2>
+  <p>Scripts receive a <code>ctx</code> object and an <code>args</code> object containing the typed arguments declared in the config.</p>
+  <pre><code>// scripts/health_check.js
+
+const url = `https://$&#123;args.service&#125;.internal/$&#123;args.region&#125;/health`;
+
+const resp = await ctx.fetch(url, &#123;
+  method: 'GET',
+  headers: &#123; 'X-Service': args.service &#125;,
+&#125;);
+
+if (!resp.ok) &#123;
+  return &#123; status: 'unhealthy', code: resp.status &#125;;
+&#125;
+
+const body = await resp.json();
+return &#123; status: 'healthy', ...body &#125;;</code></pre>
+
+  <h2>Available APIs</h2>
+  <table>
+    <thead><tr><th>API</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>ctx.fetch(url, options)</code></td><td>HTTP client — same signature as the Web Fetch API. Returns a Response.</td></tr>
+      <tr><td><code>ctx.env(name)</code></td><td>Read an environment variable by name. Returns string or null.</td></tr>
+      <tr><td><code>ctx.log(message, ...args)</code></td><td>Write to the proxy's structured logger (slog). Appears in proxy logs.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Return value</h2>
+  <p>Return any JSON-serializable value. Objects, arrays, strings, and numbers are all valid. The return value becomes the tool result sent to the MCP client.</p>
+  <p>Throw an <code>Error</code> to signal a tool failure. The error message is forwarded to the client.</p>
+  <pre><code>// Return an object
+return &#123; price: 42.0, currency: 'USD' &#125;;
+
+// Return an array
+return items.map(i => (&#123; id: i.id, name: i.name &#125;));
+
+// Signal an error
+throw new Error('Service unavailable: ' + resp.status);</code></pre>
+
+  <h2>Async/await</h2>
+  <p>Scripts are executed as async functions. <code>await</code> is supported for <code>ctx.fetch()</code> and any Promise-returning expression.</p>
+
+  <h2>Timeout</h2>
+  <p>The <code>timeout</code> field limits total script execution time including any <code>ctx.fetch()</code> calls. Scripts that exceed the timeout are interrupted and an error is returned.</p>
+
+  <h2>Security sandbox</h2>
+  <p>The Sobek runtime does not expose Node.js globals, filesystem access, or process manipulation. Scripts can only:</p>
+  <ul>
+    <li>Read arguments passed in via <code>args</code></li>
+    <li>Make HTTP calls via <code>ctx.fetch()</code></li>
+    <li>Read env vars explicitly via <code>ctx.env()</code></li>
+    <li>Log via <code>ctx.log()</code></li>
+    <li>Use standard ECMAScript built-ins (JSON, Date, Math, etc.)</li>
+  </ul>
+
+  <h2>Example: multi-service aggregation</h2>
+  <pre><code>// Fetch from multiple services in parallel and aggregate
+const [prices, inventory] = await Promise.all([
+  ctx.fetch('https://prices.internal/api/current').then(r => r.json()),
+  ctx.fetch('https://inventory.internal/api/stock').then(r => r.json()),
+]);
+
+return prices.items.map(item => (&#123;
+  sku: item.sku,
+  price: item.price,
+  inStock: inventory[item.sku] > 0,
+&#125;));</code></pre>
+
+  <h2>See also</h2>
+  <ul>
+    <li><a href="/docs/commands">Shell Commands</a> — simpler option for wrapping CLI tools</li>
+    <li><a href="/docs/auth">Authentication</a> — pass auth tokens to <code>ctx.fetch()</code> via <code>ctx.env()</code></li>
+  </ul>
+</DocsLayout>

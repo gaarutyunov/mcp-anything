@@ -1,0 +1,94 @@
+---
+import DocsLayout from '../../layouts/DocsLayout.astro';
+---
+
+<DocsLayout
+  title="Gateway Transport"
+  description="Connection pooling, mTLS, HTTP/2, TLS session caching, and SOCKS5 proxy for production-grade upstream connectivity."
+  current="transport"
+>
+  <h1>Gateway Transport</h1>
+  <p class="lead">The proxy's HTTP client for upstream connections supports connection pooling, mTLS, HTTP/2, TLS session caching, and SOCKS5 proxy — configurable per-upstream.</p>
+
+  <h2>Configuration</h2>
+  <pre><code>upstreams:
+  - name: myapi
+    type: http
+    tool_prefix: api
+    base_url: https://api.internal
+    openapi:
+      source: https://api.internal/openapi.yaml
+    transport:
+      timeout: 30s
+      max_idle_conns: 100
+      max_idle_conns_per_host: 10
+      idle_conn_timeout: 90s
+      tls:
+        ca_cert: /etc/certs/ca.crt
+        client_cert: /etc/certs/client.crt
+        client_key: /etc/certs/client.key
+        insecure_skip_verify: false
+      http2: true</code></pre>
+
+  <h2>Connection pooling</h2>
+  <table>
+    <thead><tr><th>Field</th><th>Default</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>max_idle_conns</code></td><td>100</td><td>Maximum idle connections across all hosts</td></tr>
+      <tr><td><code>max_idle_conns_per_host</code></td><td>10</td><td>Maximum idle connections per host</td></tr>
+      <tr><td><code>idle_conn_timeout</code></td><td>90s</td><td>How long idle connections are kept open</td></tr>
+      <tr><td><code>timeout</code></td><td>30s</td><td>Total request timeout (including response body read)</td></tr>
+    </tbody>
+  </table>
+
+  <h2>TLS / mTLS</h2>
+  <p>Configure per-upstream TLS for one-way TLS or mutual TLS (mTLS):</p>
+  <pre><code>transport:
+  tls:
+    ca_cert: /etc/certs/ca.crt        # custom CA for upstream
+    client_cert: /etc/certs/client.crt # mTLS client cert
+    client_key: /etc/certs/client.key  # mTLS client key
+    server_name: api.internal          # override SNI
+    insecure_skip_verify: false        # never set true in production</code></pre>
+  <p>Certificate files are read at startup. Rotate certs by updating the files and triggering a config reload — no restart required.</p>
+
+  <h2>HTTP/2</h2>
+  <pre><code>transport:
+  http2: true    # enable HTTP/2 for this upstream (default: false)</code></pre>
+  <p>HTTP/2 is negotiated via ALPN. The upstream must support it.</p>
+
+  <h2>TLS session caching</h2>
+  <p>TLS session tickets are cached automatically when HTTP/2 or persistent connections are used. This reduces TLS handshake overhead for high-throughput upstreams.</p>
+
+  <h2>SOCKS5 proxy</h2>
+  <pre><code>transport:
+  proxy:
+    url: socks5://proxy.internal:1080
+    username: $&#123;PROXY_USER&#125;
+    password: $&#123;PROXY_PASS&#125;</code></pre>
+  <p>All upstream connections for this upstream will be routed through the SOCKS5 proxy.</p>
+
+  <h2>Per-upstream defaults</h2>
+  <p>Each upstream has its own independent HTTP client. Transport settings from one upstream do not affect others.</p>
+
+  <h2>MCP transports</h2>
+  <p>The proxy itself also exposes MCP over two transports (configured under <code>server</code>):</p>
+  <table>
+    <thead><tr><th>Transport</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>streamable-http</code></td><td>HTTP with streaming responses (MCP default)</td></tr>
+      <tr><td><code>sse</code></td><td>Server-Sent Events for clients that prefer SSE</td></tr>
+    </tbody>
+  </table>
+  <pre><code>server:
+  port: 8080
+  transport:
+    - streamable-http
+    - sse</code></pre>
+
+  <h2>See also</h2>
+  <ul>
+    <li><a href="/docs/auth">Authentication</a> — outbound auth (separate from TLS)</li>
+    <li><a href="/docs/kubernetes">Kubernetes</a> — mounting TLS certs as Secrets</li>
+  </ul>
+</DocsLayout>

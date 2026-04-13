@@ -1,0 +1,244 @@
+---
+import DocsLayout from '../../layouts/DocsLayout.astro';
+---
+
+<DocsLayout
+  title="Configuration Reference"
+  description="Complete reference for all mcp-anything configuration fields. Single YAML file with environment variable expansion."
+  current="config"
+>
+  <h1>Configuration Reference</h1>
+  <p class="lead">A single YAML file defines everything. Environment variables are expanded with <code>$&#123;VAR&#125;</code> syntax. All secret fields must use this syntax — values are never logged.</p>
+
+  <h2>Top-level structure</h2>
+  <pre><code>server: ...
+upstreams: [...]
+groups: [...]
+telemetry: ...</code></pre>
+
+  <h2>server</h2>
+  <pre><code>server:
+  port: 8080                  # MCP server port (default: 8080)
+  host: 0.0.0.0               # bind address (default: 0.0.0.0)
+  read_timeout: 30s           # HTTP read timeout
+  write_timeout: 60s          # HTTP write timeout
+  idle_timeout: 120s          # keep-alive idle timeout
+  transport:                  # enabled MCP transports
+    - streamable-http         # default
+    - sse</code></pre>
+
+  <h2>upstreams[]</h2>
+
+  <h3>Common fields (all types)</h3>
+  <pre><code>- name: myapi           # unique identifier
+  type: http            # http | command | script
+  tool_prefix: api      # prefix for tool names → api__tool_name
+  description: ""       # optional upstream description</code></pre>
+
+  <h3>type: http</h3>
+  <pre><code>  base_url: https://api.example.com
+  openapi:
+    source: /path/to/spec.yaml    # file path or https:// URL
+    refresh_interval: 5m          # optional; omit to disable refresh
+  overlay:
+    source: /path/to/overlay.yaml # optional; file path or https:// URL
+  outbound_auth: ...              # see Authentication
+  transport: ...                  # see Gateway Transport</code></pre>
+
+  <h3>type: command</h3>
+  <pre><code>  tools:
+    - name: my_tool
+      description: What this tool does
+      command: mybin --flag &#123;&#123;arg&#125;&#125;
+      args:
+        arg:
+          type: string          # string | integer | number | boolean | array
+          description: ""
+          required: false
+          default: ""
+          enum: []
+      timeout: 30s</code></pre>
+
+  <h3>type: script</h3>
+  <pre><code>  tools:
+    - name: my_tool
+      description: What this tool does
+      source: scripts/my_tool.js   # path to JavaScript file
+      args:
+        arg:
+          type: string
+          required: false
+      timeout: 10s</code></pre>
+
+  <h2>outbound_auth</h2>
+  <pre><code># Bearer token
+outbound_auth:
+  strategy: bearer
+  bearer:
+    token: $&#123;API_TOKEN&#125;
+
+# OAuth2 Client Credentials
+outbound_auth:
+  strategy: oauth2_client_credentials
+  oauth2_client_credentials:
+    token_url: https://auth.example.com/oauth/token
+    client_id: $&#123;CLIENT_ID&#125;
+    client_secret: $&#123;CLIENT_SECRET&#125;
+    scopes: [read, write]
+
+# API key header
+outbound_auth:
+  strategy: api_key
+  api_key:
+    header: X-API-Key
+    value: $&#123;KEY&#125;
+
+# Lua
+outbound_auth:
+  strategy: lua
+  lua:
+    source: scripts/get_token.lua</code></pre>
+
+  <h2>transport (per-upstream)</h2>
+  <pre><code>transport:
+  timeout: 30s
+  max_idle_conns: 100
+  max_idle_conns_per_host: 10
+  idle_conn_timeout: 90s
+  http2: false
+  tls:
+    ca_cert: /etc/certs/ca.crt
+    client_cert: /etc/certs/client.crt
+    client_key: /etc/certs/client.key
+    server_name: ""
+    insecure_skip_verify: false
+  proxy:
+    url: socks5://proxy.internal:1080
+    username: $&#123;PROXY_USER&#125;
+    password: $&#123;PROXY_PASS&#125;</code></pre>
+
+  <h2>groups[]</h2>
+  <pre><code>groups:
+  - name: all               # group identifier
+    endpoint: /mcp          # MCP endpoint path
+    upstreams: [api, k8s]   # upstream names to include
+    filter: ""              # optional JSONPath filter for HTTP upstreams
+    transport:              # optional; inherits server.transport if omitted
+      - streamable-http
+    inbound_auth: ...       # optional; see Authentication</code></pre>
+
+  <h2>inbound_auth</h2>
+  <pre><code># JWT
+inbound_auth:
+  strategy: jwt
+  jwt:
+    issuer: https://auth.example.com
+    jwks_url: https://auth.example.com/.well-known/jwks.json
+    audience: my-proxy
+    algorithms: [RS256]
+
+# Token introspection
+inbound_auth:
+  strategy: introspection
+  introspection:
+    endpoint: https://auth.example.com/oauth/introspect
+    client_id: $&#123;CLIENT_ID&#125;
+    client_secret: $&#123;CLIENT_SECRET&#125;
+
+# API key
+inbound_auth:
+  strategy: apikey
+  apikey:
+    header: X-API-Key
+    value: $&#123;API_KEY&#125;
+
+# Lua
+inbound_auth:
+  strategy: lua
+  lua:
+    source: scripts/validate.lua
+
+# None
+inbound_auth:
+  strategy: none</code></pre>
+
+  <h2>telemetry</h2>
+  <pre><code>telemetry:
+  enabled: true
+  service_name: mcp-anything
+  service_version: ""
+  log_level: info            # debug | info | warn | error
+  traces:
+    exporter: otlp           # otlp | stdout | noop
+    endpoint: https://otel-collector:4318
+    insecure: false
+    headers:
+      Authorization: Bearer $&#123;OTEL_TOKEN&#125;
+  metrics:
+    exporter: prometheus     # prometheus | otlp | stdout
+    path: /metrics
+    port: 9090</code></pre>
+
+  <h2>Environment variable expansion</h2>
+  <p>Any value in the config can reference environment variables with <code>$&#123;VAR_NAME&#125;</code>. Variables are expanded at load time. Unset variables are expanded to empty string.</p>
+  <pre><code>upstreams:
+  - name: myapi
+    outbound_auth:
+      strategy: bearer
+      bearer:
+        token: $&#123;MY_API_TOKEN&#125;   # reads MY_API_TOKEN from environment</code></pre>
+
+  <h2>Complete example</h2>
+  <pre><code>server:
+  port: 8080
+  transport: [streamable-http, sse]
+
+upstreams:
+  - name: kraken
+    type: http
+    tool_prefix: kraken
+    base_url: https://api.kraken.com
+    openapi:
+      source: /etc/mcp-anything/specs/kraken.yaml
+      refresh_interval: 5m
+    overlay:
+      source: /etc/mcp-anything/overlays/kraken.yaml
+
+  - name: cluster
+    type: command
+    tool_prefix: k8s
+    tools:
+      - name: get_pods
+        description: List pods in a namespace
+        command: kubectl get pods -n &#123;&#123;namespace&#125;&#125; -o json
+        args:
+          namespace:
+            type: string
+            required: true
+        timeout: 30s
+
+groups:
+  - name: default
+    endpoint: /mcp
+    upstreams: [kraken, cluster]
+
+  - name: market
+    endpoint: /mcp/market
+    upstreams: [kraken]
+    inbound_auth:
+      strategy: jwt
+      jwt:
+        issuer: https://auth.example.com
+        jwks_url: https://auth.example.com/.well-known/jwks.json
+
+telemetry:
+  enabled: true
+  service_name: mcp-anything
+  traces:
+    exporter: otlp
+    endpoint: https://otel-collector:4318
+  metrics:
+    exporter: prometheus
+    path: /metrics
+    port: 9090</code></pre>
+</DocsLayout>

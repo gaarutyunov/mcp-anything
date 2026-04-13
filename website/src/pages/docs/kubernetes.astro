@@ -1,0 +1,151 @@
+---
+import DocsLayout from '../../layouts/DocsLayout.astro';
+---
+
+<DocsLayout
+  title="Kubernetes & Helm"
+  description="MCPProxy and MCPUpstream CRDs, annotation-based auto-discovery, ConfigMap mounting, and the included Helm chart."
+  current="kubernetes"
+>
+  <h1>Kubernetes &amp; Helm</h1>
+  <p class="lead">mcp-anything is designed for Kubernetes. It ships with a Helm chart, <code>MCPProxy</code> and <code>MCPUpstream</code> CRDs, and an operator for declarative management.</p>
+
+  <h2>Deployment — Helm</h2>
+  <p>The quickest path to production is the included Helm chart:</p>
+  <pre><code>helm install mcp-anything ./charts/mcp-anything \
+  --namespace mcp \
+  --create-namespace \
+  -f deploy/examples/kraken/helm-values.yaml</code></pre>
+
+  <h2>Deployment — plain Kubernetes</h2>
+  <p>Mount the config as a ConfigMap and mount specs/overlays as separate ConfigMaps so they can be updated independently:</p>
+  <pre><code>apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mcp-config
+data:
+  config.yaml: |
+    upstreams:
+      - name: kraken
+        type: http
+        tool_prefix: kraken
+        base_url: https://api.kraken.com
+        openapi:
+          source: /etc/mcp-anything/specs/spec.yaml
+        overlay:
+          source: /etc/mcp-anything/overlays/overlay.yaml
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-anything
+spec:
+  replicas: 2
+  template:
+    spec:
+      containers:
+        - name: proxy
+          image: ghcr.io/gaarutyunov/mcp-anything:latest
+          ports:
+            - containerPort: 8080
+              name: mcp
+            - containerPort: 9090
+              name: metrics
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8080
+          volumeMounts:
+            - name: config
+              mountPath: /etc/mcp-anything/config.yaml
+              subPath: config.yaml
+            - name: specs
+              mountPath: /etc/mcp-anything/specs
+            - name: overlays
+              mountPath: /etc/mcp-anything/overlays
+      volumes:
+        - name: config
+          configMap:
+            name: mcp-config
+        - name: specs
+          configMap:
+            name: mcp-specs
+        - name: overlays
+          configMap:
+            name: mcp-overlays</code></pre>
+
+  <h2>Kubernetes Operator</h2>
+  <p>The operator watches <code>MCPProxy</code> and <code>MCPUpstream</code> custom resources and manages proxy deployments declaratively.</p>
+  <pre><code>apiVersion: mcp.gaarutyunov.github.io/v1alpha1
+kind: MCPUpstream
+metadata:
+  name: kraken
+spec:
+  type: http
+  toolPrefix: kraken
+  baseUrl: https://api.kraken.com
+  openapi:
+    source: /etc/mcp-anything/specs/spec.yaml
+  overlay:
+    source: /etc/mcp-anything/overlays/overlay.yaml</code></pre>
+  <pre><code>apiVersion: mcp.gaarutyunov.github.io/v1alpha1
+kind: MCPProxy
+metadata:
+  name: market-proxy
+spec:
+  upstreamSelector:
+    matchLabels:
+      app: market-data
+  server:
+    port: 8080
+    transport:
+      - streamable-http
+      - sse
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi</code></pre>
+
+  <h3>Install the operator</h3>
+  <pre><code>helm install mcp-operator ./charts/mcp-anything \
+  --set operator.enabled=true \
+  --namespace mcp-system \
+  --create-namespace</code></pre>
+
+  <h2>ConfigMap hot-reload</h2>
+  <p>Kubernetes updates ConfigMaps by atomically replacing a symlink. The proxy's fsnotify watcher detects this and reloads config and specs without restarting. There is no need for a restart annotation or a rolling update just to push a config change.</p>
+
+  <h2>RBAC</h2>
+  <p>The Helm chart creates a minimal <code>ServiceAccount</code> and <code>ClusterRole</code> for the operator:</p>
+  <pre><code># Required operator permissions
+rules:
+  - apiGroups: [mcp.gaarutyunov.github.io]
+    resources: [mcpproxies, mcpupstreams]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [apps]
+    resources: [deployments]
+    verbs: [get, list, watch, create, update, patch]</code></pre>
+
+  <h2>Health probes</h2>
+  <table>
+    <thead><tr><th>Path</th><th>Use as</th></tr></thead>
+    <tbody>
+      <tr><td><code>GET /healthz</code></td><td>livenessProbe</td></tr>
+      <tr><td><code>GET /readyz</code></td><td>readinessProbe</td></tr>
+    </tbody>
+  </table>
+
+  <h2>See also</h2>
+  <ul>
+    <li><a href="/docs/hot-reload">Hot-Reload &amp; Spec Refresh</a> — how ConfigMap updates are detected</li>
+    <li><a href="/docs/telemetry">OpenTelemetry</a> — metrics scraping in Kubernetes</li>
+    <li><a href="/docs/transport">Gateway Transport</a> — mTLS and connection pooling for production upstreams</li>
+  </ul>
+</DocsLayout>

@@ -1,0 +1,64 @@
+---
+import DocsLayout from '../../layouts/DocsLayout.astro';
+---
+
+<DocsLayout
+  title="Caddy Module"
+  description="Embed mcp-anything as a native Caddy HTTP handler using the xcaddy build system. No separate proxy process required."
+  current="caddy"
+>
+  <h1>Caddy Module</h1>
+  <p class="lead">The Caddy module lets you run mcp-anything as a native Caddy directive — no standalone proxy binary, no separate sidecar. Caddy handles TLS, routing, and access logging; mcp-anything handles MCP tool generation.</p>
+
+  <h2>Build a Caddy binary with the module</h2>
+  <p>Use <a href="https://github.com/caddyserver/xcaddy" target="_blank" rel="noopener noreferrer">xcaddy</a> to compile a custom Caddy binary that includes the mcp-anything handler:</p>
+  <pre><code>xcaddy build \
+  --with github.com/gaarutyunov/mcp-anything/caddy</code></pre>
+  <p>Or use the pre-built Docker image that ships with the module already embedded:</p>
+  <pre><code>docker pull ghcr.io/gaarutyunov/mcp-anything-caddy:latest</code></pre>
+
+  <h2>Caddyfile configuration</h2>
+  <pre><code>:443 &#123;
+  tls /etc/tls/cert.pem /etc/tls/key.pem
+
+  route /mcp* &#123;
+    mcp_anything &#123;
+      config /etc/mcp-anything/config.yaml
+    &#125;
+  &#125;
+
+  # All other routes handled by Caddy as normal
+  reverse_proxy /api/* backend:8080
+&#125;</code></pre>
+
+  <h2>JSON config (Caddy API)</h2>
+  <p>If you manage Caddy via its admin API, the handler can be configured in JSON:</p>
+  <pre><code>&#123;
+  "handler": "mcp_anything",
+  "config": "/etc/mcp-anything/config.yaml"
+&#125;</code></pre>
+
+  <h2>Hot-reload</h2>
+  <p>The mcp-anything config inside Caddy supports the same fsnotify-based hot-reload as the standalone binary. A <code>caddy reload</code> also triggers a full config reload.</p>
+
+  <h2>TLS</h2>
+  <p>Caddy manages TLS automatically (ACME/Let's Encrypt). The mcp-anything module does not need separate TLS configuration — it inherits Caddy's listener. The <a href="/docs/transport">Gateway Transport</a> TLS settings still apply to outbound connections from the proxy to upstream APIs.</p>
+
+  <h2>Differences from the standalone binary</h2>
+  <table>
+    <thead><tr><th>Feature</th><th>Standalone binary</th><th>Caddy module</th></tr></thead>
+    <tbody>
+      <tr><td>TLS termination</td><td>Manual or via a reverse proxy</td><td>Automatic (ACME)</td></tr>
+      <tr><td>Multiple MCP endpoints</td><td><code>groups[].endpoint</code></td><td><code>route</code> blocks in Caddyfile</td></tr>
+      <tr><td>Access logs</td><td><code>log/slog</code> structured JSON</td><td>Caddy access log format</td></tr>
+      <tr><td>Process management</td><td>systemd / Docker</td><td>Caddy's own process</td></tr>
+    </tbody>
+  </table>
+
+  <h2>See also</h2>
+  <ul>
+    <li><a href="/docs/transport">Gateway Transport</a> — outbound TLS and connection pooling</li>
+    <li><a href="/docs/hot-reload">Hot-Reload</a> — config reloading inside the module</li>
+    <li><a href="/docs/sdk">Go SDK</a> — embedding the proxy in other Go HTTP servers</li>
+  </ul>
+</DocsLayout>

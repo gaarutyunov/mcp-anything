@@ -1,0 +1,69 @@
+---
+import DocsLayout from '../../layouts/DocsLayout.astro';
+---
+
+<DocsLayout
+  title="Per-User OAuth2 Sessions"
+  description="Store and manage per-user upstream OAuth2 tokens in Postgres or Redis, enabling user-scoped authorization flows across MCP sessions."
+  current="oauth2-sessions"
+>
+  <h1>Per-User OAuth2 Sessions</h1>
+  <p class="lead">Standard outbound OAuth2 Client Credentials grants a single machine identity for all users. Per-user OAuth2 sessions instead store individual user tokens — obtained via Authorization Code flow — so each user accesses the upstream API with their own identity and permissions.</p>
+
+  <h2>When to use this</h2>
+  <ul>
+    <li>The upstream API enforces per-user scopes or data isolation</li>
+    <li>Audit logs on the upstream must show individual user identities</li>
+    <li>Users need to grant the proxy access to their own upstream accounts (e.g. GitHub, Google)</li>
+  </ul>
+
+  <h2>Configuration</h2>
+  <pre><code>upstreams:
+  - name: github
+    type: http
+    tool_prefix: gh
+    base_url: https://api.github.com
+    openapi:
+      source: https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.yaml
+    outbound_auth:
+      strategy: oauth2_user_session
+      oauth2_user_session:
+        authorization_url: https://github.com/login/oauth/authorize
+        token_url: https://github.com/login/oauth/access_token
+        client_id: $&#123;GITHUB_CLIENT_ID&#125;
+        client_secret: $&#123;GITHUB_CLIENT_SECRET&#125;
+        scopes: [repo, read:user]
+        redirect_url: https://my-proxy.example.com/oauth2/callback
+        session_store:
+          backend: postgres           # postgres | redis
+          dsn: $&#123;SESSION_STORE_DSN&#125;
+
+session_server:
+  enabled: true
+  base_url: https://my-proxy.example.com   # used to build redirect URLs</code></pre>
+
+  <h2>Session stores</h2>
+  <table>
+    <thead><tr><th>Backend</th><th>DSN format</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td><code>postgres</code></td><td><code>postgres://user:pass@host/db</code></td><td>Tokens survive proxy restarts; suitable for production</td></tr>
+      <tr><td><code>redis</code></td><td><code>redis://host:6379/0</code></td><td>Fast; tokens lost if Redis is flushed without persistence</td></tr>
+      <tr><td><code>memory</code></td><td>—</td><td>No config required; tokens lost on restart — development only</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Authorization flow</h2>
+  <p>When an unauthenticated user calls a tool that requires a user session, the proxy returns an MCP error with a <code>login_url</code> field pointing to the upstream's OAuth2 authorization endpoint. The user visits that URL, grants access, and is redirected back to the proxy's callback endpoint. Subsequent tool calls from that user automatically use their stored token.</p>
+
+  <h2>Token refresh</h2>
+  <p>If the upstream provides a <code>refresh_token</code> the proxy will automatically refresh the access token before it expires. Refresh failures surface as MCP errors with a new <code>login_url</code>, prompting the user to re-authorize.</p>
+
+  <h2>User identity</h2>
+  <p>The user is identified by the JWT <code>sub</code> claim from inbound auth. Inbound auth must be configured when using per-user sessions. See <a href="/docs/auth">Authentication</a>.</p>
+
+  <h2>See also</h2>
+  <ul>
+    <li><a href="/docs/auth">Authentication</a> — inbound auth (required) and other outbound strategies</li>
+    <li><a href="/docs/groups">Tool Groups</a> — per-group session configuration</li>
+  </ul>
+</DocsLayout>

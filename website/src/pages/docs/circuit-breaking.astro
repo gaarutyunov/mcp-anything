@@ -1,0 +1,61 @@
+---
+import DocsLayout from '../../layouts/DocsLayout.astro';
+---
+
+<DocsLayout
+  title="Circuit Breaking"
+  description="Per-upstream circuit breaker that prevents cascading failures when an upstream API becomes unavailable."
+  current="circuit-breaking"
+>
+  <h1>Circuit Breaking</h1>
+  <p class="lead">The proxy wraps each upstream in a circuit breaker. When an upstream starts failing consistently, the breaker opens and subsequent calls fail fast — protecting the upstream from being hammered and the MCP client from waiting on timeouts.</p>
+
+  <h2>How it works</h2>
+  <p>The circuit breaker has three states:</p>
+  <ul>
+    <li><strong>Closed</strong> — requests flow normally. Failures are counted in a rolling window.</li>
+    <li><strong>Open</strong> — requests fail immediately without reaching the upstream. After the <code>timeout</code> the breaker moves to half-open.</li>
+    <li><strong>Half-open</strong> — a probe request is sent. Success closes the breaker; failure reopens it.</li>
+  </ul>
+
+  <h2>Configuration</h2>
+  <pre><code>upstreams:
+  - name: myapi
+    type: http
+    tool_prefix: api
+    base_url: https://api.example.com
+    openapi:
+      source: spec.yaml
+    circuit_breaker:
+      threshold: 5          # failures before opening (within the window)
+      window: 30s           # rolling window size
+      timeout: 10s          # how long to stay open before probing
+      success_threshold: 2  # consecutive successes needed to close from half-open</code></pre>
+
+  <h2>Configuration fields</h2>
+  <table>
+    <thead><tr><th>Field</th><th>Default</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>threshold</code></td><td><code>5</code></td><td>Number of failures in <code>window</code> that trip the breaker</td></tr>
+      <tr><td><code>window</code></td><td><code>60s</code></td><td>Rolling time window for counting failures</td></tr>
+      <tr><td><code>timeout</code></td><td><code>30s</code></td><td>How long the breaker stays open before allowing a probe</td></tr>
+      <tr><td><code>success_threshold</code></td><td><code>1</code></td><td>Consecutive successes in half-open state before closing</td></tr>
+    </tbody>
+  </table>
+
+  <h2>What counts as a failure</h2>
+  <p>By default, any HTTP 5xx response or a connection error increments the failure counter. HTTP 4xx responses are not counted — they indicate a client error, not an upstream outage.</p>
+
+  <h2>MCP error when open</h2>
+  <p>When the breaker is open, tool calls return an MCP error with code <code>-32030</code> (upstream unavailable). The error message includes the upstream name and an estimate of when the next probe will fire.</p>
+
+  <h2>Metrics</h2>
+  <p>State transitions are emitted as OpenTelemetry events on the active trace span and as counters under <code>mcp.circuit_breaker.*</code>. The <code>mcp.circuit_breaker.state</code> gauge tracks the current state (0 = closed, 1 = half-open, 2 = open) per upstream. See <a href="/docs/telemetry">OpenTelemetry</a>.</p>
+
+  <h2>See also</h2>
+  <ul>
+    <li><a href="/docs/rate-limiting">Rate Limiting</a> — throttle individual tools</li>
+    <li><a href="/docs/transport">Gateway Transport</a> — connection pooling and TLS settings</li>
+    <li><a href="/docs/telemetry">OpenTelemetry</a> — metrics and traces</li>
+  </ul>
+</DocsLayout>

@@ -1,0 +1,57 @@
+---
+import DocsLayout from '../../layouts/DocsLayout.astro';
+---
+
+<DocsLayout
+  title="Semantic Tool Search"
+  description="AI-powered tool discovery via an in-process chromem-go vector index. MCP clients can find the right tool by description rather than exact name."
+  current="search"
+>
+  <h1>Semantic Tool Search</h1>
+  <p class="lead">When hundreds of tools are registered, finding the right one by name becomes impractical. The proxy can build an in-process vector index using <a href="https://github.com/philippgille/chromem-go" target="_blank" rel="noopener noreferrer">chromem-go</a> so MCP clients can search tools by natural-language description.</p>
+
+  <h2>How it works</h2>
+  <p>At startup the proxy embeds each tool's name, description, and parameter descriptions into a vector index. When an MCP client calls the synthetic <code>search_tools</code> tool with a query, the proxy performs a cosine-similarity search and returns the most relevant tool definitions — not results, just the schemas so the client can decide which tool to call next.</p>
+
+  <h2>Configuration</h2>
+  <pre><code>search:
+  enabled: true
+  embedding:
+    provider: openai               # openai | local
+    model: text-embedding-3-small  # OpenAI embedding model
+    api_key: $&#123;OPENAI_API_KEY&#125;
+  top_k: 5                         # number of results to return</code></pre>
+
+  <h3>Local embeddings (no external API)</h3>
+  <p>Use the <code>local</code> provider to run embeddings in-process with no outbound calls. This uses a built-in lightweight model and is suitable for smaller tool sets.</p>
+  <pre><code>search:
+  enabled: true
+  embedding:
+    provider: local
+  top_k: 10</code></pre>
+
+  <h2>The search_tools tool</h2>
+  <p>When search is enabled a special tool named <code>search_tools</code> is registered at the group level. MCP clients call it like any other tool:</p>
+  <pre><code># MCP tool call (JSON-RPC)
+&#123;
+  "name": "search_tools",
+  "arguments": &#123;
+    "query": "get current price of a cryptocurrency",
+    "top_k": 3
+  &#125;
+&#125;</code></pre>
+  <p>The response is a list of matching tool schemas (name, description, inputSchema) ranked by similarity score. The client then calls the best match directly.</p>
+
+  <h2>Index refresh</h2>
+  <p>The index is rebuilt whenever the tool registry changes — on hot-reload or background spec refresh. Rebuilds are atomic: the old index serves requests until the new one is ready.</p>
+
+  <h2>Groups</h2>
+  <p>Each group gets its own index scoped to its tool set. A group with a read-only subset only finds read-only tools. See <a href="/docs/groups">Tool Groups</a>.</p>
+
+  <h2>See also</h2>
+  <ul>
+    <li><a href="/docs/groups">Tool Groups</a> — scope search to a subset of tools</li>
+    <li><a href="/docs/hot-reload">Hot-Reload</a> — index rebuilt on config change</li>
+    <li><a href="/docs/sdk">Go SDK</a> — register a custom embedding provider</li>
+  </ul>
+</DocsLayout>

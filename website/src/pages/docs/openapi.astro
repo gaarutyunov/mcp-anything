@@ -1,0 +1,101 @@
+---
+import DocsLayout from '../../layouts/DocsLayout.astro';
+---
+
+<DocsLayout
+  title="HTTP APIs (OpenAPI)"
+  description="Auto-generate MCP tools from OpenAPI 3.0 specs with input schemas, jq transforms, and dry-run validation."
+  current="openapi"
+>
+  <h1>HTTP APIs (OpenAPI)</h1>
+  <p class="lead">Point the proxy at any OpenAPI 3.0 spec and it auto-generates MCP tools — one per enabled operation — with typed input schemas, jq response transforms, and config-time dry-run validation.</p>
+
+  <h2>Configuration</h2>
+  <pre><code>upstreams:
+  - name: kraken
+    type: http
+    tool_prefix: kraken
+    base_url: https://api.kraken.com
+    openapi:
+      source: deploy/examples/kraken/spec.yaml   # path or URL
+      refresh_interval: 5m                        # re-fetch spec periodically
+    overlay:
+      source: deploy/examples/kraken/overlay.yaml # optional customization</code></pre>
+
+  <p>The <code>source</code> field accepts a local file path or a remote URL (<code>https://</code>). Remote specs are fetched with ETag/conditional GET to minimize bandwidth on refresh.</p>
+
+  <h2>Tool naming</h2>
+  <p>Tool names are derived from the <code>operationId</code> in the spec, slugified and prefixed with the upstream's <code>tool_prefix</code>:</p>
+  <table>
+    <thead><tr><th>operationId</th><th>tool_prefix</th><th>Tool name</th></tr></thead>
+    <tbody>
+      <tr><td><code>getSystemStatus</code></td><td><code>kraken</code></td><td><code>kraken__get_system_status</code></td></tr>
+      <tr><td><code>getTicker</code></td><td><code>kraken</code></td><td><code>kraken__get_ticker</code></td></tr>
+      <tr><td><code>listPets</code></td><td><code>pets</code></td><td><code>pets__list_pets</code></td></tr>
+    </tbody>
+  </table>
+  <p>Names can be overridden with <code>x-mcp-tool-name</code> in an overlay. When multiple upstreams would produce the same tool name, a numeric suffix is appended automatically.</p>
+
+  <h2>Input schema generation</h2>
+  <p>The proxy builds MCP tool input schemas from OpenAPI parameter definitions:</p>
+  <ul>
+    <li>Path parameters, query parameters, and request body fields become tool arguments</li>
+    <li>Types, descriptions, enums, formats, and <code>required</code> flags are preserved</li>
+    <li>Synthetic examples are generated from <code>example</code>, <code>default</code>, <code>enum</code>, or format-specific patterns (e.g. <code>date</code>, <code>uuid</code>)</li>
+  </ul>
+
+  <h2>Response transforms</h2>
+  <p>jq expressions transform API responses before they are returned to the MCP client. The default transform is <code>.</code> (passthrough). Set <code>x-mcp-response-transform</code> in an overlay to customize:</p>
+  <pre><code># Flatten Kraken's nested result wrapper
+x-mcp-response-transform: >
+  .result | to_entries[0] | &#123;
+    pair: .key,
+    ask: .value.a[0],
+    bid: .value.b[0],
+    lastPrice: .value.c[0]
+  &#125;</code></pre>
+  <p>Request bodies can also be transformed with <code>x-mcp-request-transform</code>. Error responses use <code>x-mcp-error-transform</code>. All transforms are compiled and dry-run validated at startup.</p>
+
+  <h2>Non-JSON responses</h2>
+  <p>Set <code>x-mcp-response-format</code> to handle binary or media responses:</p>
+  <table>
+    <thead><tr><th>Value</th><th>MCP content type</th></tr></thead>
+    <tbody>
+      <tr><td><code>json</code> (default)</td><td><code>TextContent</code> with JSON string</td></tr>
+      <tr><td><code>text</code></td><td><code>TextContent</code></td></tr>
+      <tr><td><code>image</code></td><td><code>ImageContent</code> (base64)</td></tr>
+      <tr><td><code>audio</code></td><td><code>AudioContent</code> (base64)</td></tr>
+      <tr><td><code>binary</code></td><td><code>ResourceContent</code> (base64)</td></tr>
+      <tr><td><code>auto</code></td><td>Detected from <code>Content-Type</code></td></tr>
+    </tbody>
+  </table>
+
+  <h2>Disabling operations</h2>
+  <p>Set <code>x-mcp-enabled: false</code> on any operation in an overlay to exclude it from tool generation entirely. This does not affect the upstream API — the operation simply won't appear as an MCP tool.</p>
+
+  <h2>Dry-run validation</h2>
+  <p>At startup the proxy generates a synthetic request for every enabled operation using example values from the spec. If any jq transform or schema mapping fails, the proxy refuses to start and logs the offending operation. This catches misconfigured overlays before they reach production.</p>
+
+  <h2>x-mcp extensions reference</h2>
+  <table>
+    <thead><tr><th>Extension</th><th>Type</th><th>Default</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td><code>x-mcp-enabled</code></td><td>bool</td><td><code>true</code></td><td>Include operation as a tool</td></tr>
+      <tr><td><code>x-mcp-tool-name</code></td><td>string</td><td>derived</td><td>Override generated tool name</td></tr>
+      <tr><td><code>x-mcp-auth-required</code></td><td>bool</td><td><code>true</code></td><td>Per-operation auth bypass</td></tr>
+      <tr><td><code>x-mcp-safe</code></td><td>bool</td><td><code>false</code></td><td>Mark as read-only for group filters</td></tr>
+      <tr><td><code>x-mcp-response-format</code></td><td>string</td><td><code>json</code></td><td>Response content type</td></tr>
+      <tr><td><code>x-mcp-request-transform</code></td><td>string</td><td>generated</td><td>jq expression for request body</td></tr>
+      <tr><td><code>x-mcp-response-transform</code></td><td>string</td><td><code>.</code></td><td>jq expression for response</td></tr>
+      <tr><td><code>x-mcp-error-transform</code></td><td>string</td><td>default</td><td>jq expression for error responses</td></tr>
+      <tr><td><code>x-mcp-tier</code></td><td>string</td><td>—</td><td>Arbitrary label for group filters</td></tr>
+    </tbody>
+  </table>
+
+  <h2>See also</h2>
+  <ul>
+    <li><a href="/docs/overlays">OpenAPI Overlays</a> — add x-mcp extensions without touching specs</li>
+    <li><a href="/docs/hot-reload">Background Spec Refresh</a> — keep specs up to date automatically</li>
+    <li><a href="/docs/auth">Authentication</a> — outbound auth for protected APIs</li>
+  </ul>
+</DocsLayout>

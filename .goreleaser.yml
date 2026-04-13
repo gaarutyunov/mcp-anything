@@ -41,13 +41,21 @@ builds:
       - arm64
 
 archives:
-  - id: default
+  - id: proxy
+    ids: [proxy]
     formats:
       - tar.gz
-    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    name_template: "{{ .ProjectName }}_proxy_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+  - id: operator
+    ids: [operator]
+    formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_operator_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
 
 dockers_v2:
-  - ids: [proxy]
+  - id: proxy
+    ids: [proxy]
     images:
       - "ghcr.io/gaarutyunov/mcp-anything"
     tags:
@@ -58,7 +66,8 @@ dockers_v2:
       - linux/arm64
     dockerfile: Dockerfile.goreleaser
 
-  - ids: [operator]
+  - id: operator
+    ids: [operator]
     images:
       - "ghcr.io/gaarutyunov/mcp-anything-operator"
     tags:
@@ -68,15 +77,6 @@ dockers_v2:
       - linux/amd64
       - linux/arm64
     dockerfile: Dockerfile.operator.goreleaser
-
-helm_charts:
-  - name: mcp-anything
-    dir: charts/mcp-anything
-    chart_version: "{{ .Version }}"
-    app_version: "{{ .Version }}"
-    oci:
-      - host: ghcr.io
-        owner: gaarutyunov
 
 checksum:
   name_template: "checksums.txt"

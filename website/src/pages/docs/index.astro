@@ -1,0 +1,69 @@
+---
+import DocsLayout from '../../layouts/DocsLayout.astro';
+---
+
+<DocsLayout
+  title="Introduction"
+  description="Get started with mcp-anything — a stateless Go proxy that turns REST APIs, shell commands, and scripts into MCP tools."
+  current=""
+>
+  <h1>Introduction</h1>
+  <p class="lead">mcp-anything is a stateless Go proxy that converts REST APIs, shell commands, and JavaScript scripts into <a href="https://modelcontextprotocol.io" target="_blank" rel="noopener noreferrer">MCP</a> tools — no code, no plugins, just a YAML config file.</p>
+
+  <h2>What it does</h2>
+  <p>Point it at an OpenAPI spec, a CLI tool, or a JavaScript file. The proxy generates MCP tools automatically and handles the full request lifecycle: auth, schema validation, request/response transforms, error mapping, and observability.</p>
+  <p>Any MCP-compatible client (Claude, Cursor, etc.) connects to <code>http://localhost:8080/mcp</code> and immediately has access to all configured tools.</p>
+
+  <h2>Quick start — Kraken Market Data</h2>
+  <p>The Kraken cryptocurrency exchange offers a public REST API with no authentication required. Download the example config files and start the proxy:</p>
+  <p><strong>1. Download config, spec, and overlay</strong></p>
+  <pre><code>mkdir -p kraken && cd kraken
+curl -sLO https://raw.githubusercontent.com/gaarutyunov/mcp-anything/main/deploy/examples/kraken/config.yaml
+curl -sLO https://raw.githubusercontent.com/gaarutyunov/mcp-anything/main/deploy/examples/kraken/spec.yaml
+curl -sLO https://raw.githubusercontent.com/gaarutyunov/mcp-anything/main/deploy/examples/kraken/overlay.yaml</code></pre>
+  <p><strong>2. Install and run</strong></p>
+  <pre><code>go install github.com/gaarutyunov/mcp-anything/cmd/proxy@latest
+CONFIG_PATH=config.yaml proxy</code></pre>
+  <p>Your MCP client now has five tools:</p>
+  <table>
+    <thead><tr><th>Tool</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>kraken__get_system_status</code></td><td>Exchange status and server time</td></tr>
+      <tr><td><code>kraken__get_ticker</code></td><td>Real-time prices for any trading pair</td></tr>
+      <tr><td><code>kraken__get_ohlc</code></td><td>OHLC candlestick data</td></tr>
+      <tr><td><code>kraken__get_order_book</code></td><td>Live order book depth</td></tr>
+      <tr><td><code>kraken__get_recent_trades</code></td><td>Most recent public trades</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Three types of tools</h2>
+  <p>The proxy supports three upstream types that can be mixed in the same config:</p>
+  <ul>
+    <li><strong>HTTP</strong> — connect to any REST API with an OpenAPI 3.0 spec. Tools are auto-generated from operations. See <a href="/docs/openapi">HTTP APIs</a>.</li>
+    <li><strong>Command</strong> — wrap any CLI tool with typed arguments. See <a href="/docs/commands">Shell Commands</a>.</li>
+    <li><strong>Script</strong> — custom logic in a sandboxed JavaScript runtime. See <a href="/docs/scripts">JavaScript Scripts</a>.</li>
+  </ul>
+
+  <h2>Key concepts</h2>
+  <ul>
+    <li><strong>Stateless</strong> — no shared mutable state; every pod is identical</li>
+    <li><strong>Tool prefix</strong> — each upstream has a <code>tool_prefix</code>; tools are named <code>&#123;prefix&#125;__&#123;operation&#125;</code></li>
+    <li><strong>Overlays</strong> — customize any OpenAPI operation via RFC 9535 JSONPath without touching the original spec</li>
+    <li><strong>Groups</strong> — serve different tool subsets at different endpoints from the same upstreams</li>
+    <li><strong>Hot-reload</strong> — config and spec changes are applied atomically without restarting</li>
+  </ul>
+
+  <h2>Docker</h2>
+  <pre><code>docker run -p 8080:8080 \
+  -v $(pwd):/etc/mcp-anything \
+  -w /etc/mcp-anything \
+  ghcr.io/gaarutyunov/mcp-anything:latest</code></pre>
+
+  <h2>What's next</h2>
+  <ul>
+    <li><a href="/docs/openapi">HTTP APIs (OpenAPI)</a> — how tool generation works</li>
+    <li><a href="/docs/overlays">OpenAPI Overlays</a> — customize tools without modifying specs</li>
+    <li><a href="/docs/auth">Authentication</a> — inbound and outbound auth strategies</li>
+    <li><a href="/docs/config">Config Reference</a> — all configuration fields</li>
+  </ul>
+</DocsLayout>

@@ -1,0 +1,55 @@
+---
+import DocsLayout from '../../layouts/DocsLayout.astro';
+---
+
+<DocsLayout
+  title="Token Counting"
+  description="Per-tool token counting measures response sizes before they reach the MCP client, emitting metrics and optionally truncating oversized results."
+  current="token-counting"
+>
+  <h1>Token Counting</h1>
+  <p class="lead">Large tool results consume significant context window space in the calling LLM. The proxy counts tokens in every tool response before it is returned to the MCP client, emitting per-tool metrics and optionally enforcing size limits.</p>
+
+  <h2>How it works</h2>
+  <p>After any jq response transform is applied, the proxy tokenizes the result using a tiktoken-compatible tokenizer. The token count is attached to the active OpenTelemetry span and emitted as a histogram metric. No result content is logged.</p>
+
+  <h2>Configuration</h2>
+  <pre><code>token_counting:
+  enabled: true
+  model: gpt-4o           # tokenizer model (used for byte-pair encoding)
+  max_tokens: 8192        # optional: reject results that exceed this limit</code></pre>
+
+  <h3>Per-tool limit override</h3>
+  <p>Set a per-operation limit via the <code>x-mcp-max-tokens</code> extension in an overlay:</p>
+  <pre><code>- target: "$.paths[\"/search\"].get"
+  update:
+    x-mcp-max-tokens: 2048    # tighter limit for a high-cardinality search endpoint</code></pre>
+
+  <h2>What happens when a result exceeds the limit</h2>
+  <p>By default the proxy returns an MCP error instructing the client to narrow its query. Set <code>truncate: true</code> to truncate the result to the limit instead:</p>
+  <pre><code>token_counting:
+  enabled: true
+  max_tokens: 8192
+  truncate: true       # truncate instead of rejecting oversized results</code></pre>
+  <p>Truncation operates on the post-transform JSON string at the token boundary, then appends a <code>…[truncated]</code> marker so the client knows the result is incomplete.</p>
+
+  <h2>Metrics</h2>
+  <p>Token counts are emitted as an OpenTelemetry histogram <code>mcp.tool.response_tokens</code> with a <code>tool</code> label. This lets you observe which tools are burning the most context budget over time in your Prometheus/Grafana stack. See <a href="/docs/telemetry">OpenTelemetry</a>.</p>
+
+  <h2>Supported tokenizers</h2>
+  <table>
+    <thead><tr><th>Model value</th><th>Encoding</th></tr></thead>
+    <tbody>
+      <tr><td><code>gpt-4o</code></td><td>o200k_base</td></tr>
+      <tr><td><code>gpt-4</code>, <code>gpt-3.5-turbo</code></td><td>cl100k_base</td></tr>
+      <tr><td><code>claude-3</code></td><td>approximated via cl100k_base</td></tr>
+    </tbody>
+  </table>
+
+  <h2>See also</h2>
+  <ul>
+    <li><a href="/docs/caching">Tool Result Caching</a> — avoid re-fetching large results</li>
+    <li><a href="/docs/telemetry">OpenTelemetry</a> — full metrics reference</li>
+    <li><a href="/docs/overlays">OpenAPI Overlays</a> — per-operation limits</li>
+  </ul>
+</DocsLayout>

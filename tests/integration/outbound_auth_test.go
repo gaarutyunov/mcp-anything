@@ -340,7 +340,7 @@ func TestOAuth2ClientCredentials(t *testing.T) {
 	})
 
 	// Start Keycloak for OAuth2 client credentials flow.
-	kc := useSharedKeycloak(ctx, t, net.ID, net.Name)
+	kc := useSharedKeycloak(ctx, t, net.Name)
 
 	// Configure Keycloak: create a client with service accounts enabled.
 	adminToken := kcAdminToken(t, kc.ExternalURL)
@@ -421,7 +421,7 @@ upstreams:
 
 	proxyReq := proxyContainerRequest()
 	proxyReq.ExposedPorts = []string{"8080/tcp"}
-	proxyReq.Networks = []string{net.Name}
+	proxyReq.Networks = []string{net.Name, kc.NetworkName}
 	proxyReq.Env = map[string]string{
 		"CONFIG_PATH":          "/etc/mcp-anything/config.yaml",
 		"OAUTH2_CLIENT_SECRET": clientSecret,
@@ -493,7 +493,7 @@ func TestInboundTokenNotForwardedToUpstream(t *testing.T) {
 	})
 
 	// Start Keycloak for inbound JWT validation.
-	kc := useSharedKeycloak(ctx, t, net.ID, net.Name)
+	kc := useSharedKeycloak(ctx, t, net.Name)
 
 	// Create a client for generating inbound MCP client tokens.
 	adminToken := kcAdminToken(t, kc.ExternalURL)
@@ -568,7 +568,7 @@ upstreams:
 
 	proxyReq := proxyContainerRequest()
 	proxyReq.ExposedPorts = []string{"8080/tcp"}
-	proxyReq.Networks = []string{net.Name}
+	proxyReq.Networks = []string{net.Name, kc.NetworkName}
 	proxyReq.Env = map[string]string{
 		"CONFIG_PATH":    "/etc/mcp-anything/config.yaml",
 		"UPSTREAM_TOKEN": "outbound-static-token",

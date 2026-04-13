@@ -1,0 +1,134 @@
+---
+import DocsLayout from '../../layouts/DocsLayout.astro';
+---
+
+<DocsLayout
+  title="Shell Commands"
+  description="Expose kubectl, aws, gh, or any CLI tool as MCP tools with typed arguments and shell-escape security."
+  current="commands"
+>
+  <h1>Shell Commands</h1>
+  <p class="lead">Wrap any CLI tool as an MCP tool. Arguments are declared with types and passed into a command template. Shell-escape is applied automatically to prevent injection.</p>
+
+  <h2>Configuration</h2>
+  <pre><code>upstreams:
+  - name: cluster
+    type: command
+    tool_prefix: k8s
+    tools:
+      - name: get_pods
+        description: List pods in a namespace
+        command: kubectl get pods -n &#123;&#123;namespace&#125;&#125; -o json
+        args:
+          namespace:
+            type: string
+            description: Kubernetes namespace
+            required: true
+        timeout: 30s
+
+      - name: describe_pod
+        description: Describe a specific pod
+        command: kubectl describe pod &#123;&#123;pod&#125;&#125; -n &#123;&#123;namespace&#125;&#125;
+        args:
+          pod:
+            type: string
+            description: Pod name
+            required: true
+          namespace:
+            type: string
+            description: Kubernetes namespace
+            default: default
+        timeout: 20s</code></pre>
+
+  <h2>Argument interpolation</h2>
+  <p>Arguments are referenced in the <code>command</code> string using double-brace syntax: <code>&#123;&#123;arg_name&#125;&#125;</code>. Before execution, each argument value is shell-escaped to prevent injection attacks.</p>
+  <p>Supported argument types:</p>
+  <table>
+    <thead><tr><th>Type</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>string</code></td><td>Text value, shell-escaped</td></tr>
+      <tr><td><code>integer</code></td><td>Integer, validated before interpolation</td></tr>
+      <tr><td><code>number</code></td><td>Float, validated before interpolation</td></tr>
+      <tr><td><code>boolean</code></td><td>true/false</td></tr>
+      <tr><td><code>array</code></td><td>Comma-separated values</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Argument options</h2>
+  <table>
+    <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>type</code></td><td>string</td><td>Argument type (see above)</td></tr>
+      <tr><td><code>description</code></td><td>string</td><td>Shown to the MCP client</td></tr>
+      <tr><td><code>required</code></td><td>bool</td><td>Whether the argument must be provided</td></tr>
+      <tr><td><code>default</code></td><td>any</td><td>Value used when argument is absent</td></tr>
+      <tr><td><code>enum</code></td><td>array</td><td>Allowed values</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Timeout</h2>
+  <p>The <code>timeout</code> field (e.g. <code>30s</code>, <code>2m</code>) sets the maximum execution time. Commands that exceed the timeout are killed and an error is returned to the MCP client.</p>
+
+  <h2>Working directory and environment</h2>
+  <p>Commands inherit the proxy process's working directory and environment. Use <code>$&#123;ENV_VAR&#125;</code> syntax in the command string to inject environment variables — these are expanded from the proxy environment before execution, not passed as shell variables.</p>
+  <pre><code>tools:
+  - name: aws_s3_ls
+    description: List S3 bucket contents
+    command: aws s3 ls s3://&#123;&#123;bucket&#125;&#125; --region $&#123;AWS_DEFAULT_REGION&#125;
+    args:
+      bucket:
+        type: string
+        required: true</code></pre>
+
+  <h2>Common examples</h2>
+
+  <h3>kubectl</h3>
+  <pre><code>tools:
+  - name: get_pods
+    command: kubectl get pods -n &#123;&#123;namespace&#125;&#125; -o json
+    args:
+      namespace:
+        type: string
+        required: true
+
+  - name: get_logs
+    command: kubectl logs &#123;&#123;pod&#125;&#125; -n &#123;&#123;namespace&#125;&#125; --tail &#123;&#123;lines&#125;&#125;
+    args:
+      pod:
+        type: string
+        required: true
+      namespace:
+        type: string
+        default: default
+      lines:
+        type: integer
+        default: 50</code></pre>
+
+  <h3>AWS CLI</h3>
+  <pre><code>tools:
+  - name: describe_instances
+    command: aws ec2 describe-instances --region &#123;&#123;region&#125;&#125; --output json
+    args:
+      region:
+        type: string
+        required: true
+        enum: [us-east-1, us-west-2, eu-west-1]</code></pre>
+
+  <h3>Git</h3>
+  <pre><code>tools:
+  - name: git_log
+    command: git -C &#123;&#123;repo&#125;&#125; log --oneline -&#123;&#123;count&#125;&#125;
+    args:
+      repo:
+        type: string
+        required: true
+      count:
+        type: integer
+        default: 20</code></pre>
+
+  <h2>See also</h2>
+  <ul>
+    <li><a href="/docs/scripts">JavaScript Scripts</a> — for more complex logic requiring HTTP calls or conditional behavior</li>
+    <li><a href="/docs/routing">Multi-Upstream Routing</a> — combine command and HTTP upstreams in one proxy</li>
+  </ul>
+</DocsLayout>

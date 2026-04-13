@@ -14,7 +14,7 @@ env:
   GOWORK: off
   OPERATOR_IMAGE: ghcr.io/${{ github.repository }}-operator:sha-${{ github.sha }}
   PROXY_IMAGE: ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
-  CADDY_IMAGE: ghcr.io/${{ github.repository }}:caddy-sha-${{ github.sha }}
+  CADDY_IMAGE: ghcr.io/${{ github.repository }}-caddy:sha-${{ github.sha }}
 
 jobs:
   lint-and-test:
@@ -145,12 +145,6 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-
-      - name: Setup Testcontainers Cloud Client
-        uses: atomicjar/testcontainers-cloud-setup-action@v1
-        with:
-          token: ${{ secrets.TC_CLOUD_TOKEN }}
-          wait: 'true'
 
       - name: Integration tests
         uses: nick-fields/retry@v3

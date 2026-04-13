@@ -4,43 +4,23 @@ package integration_test
 
 import (
 	"context"
-	"fmt"
-	"log/slog"
 	"strings"
 	"testing"
-	"time"
 	"unicode"
-
-	dockernetwork "github.com/docker/docker/api/types/network"
-	dockerclient "github.com/docker/docker/client"
 )
 
-// useSharedKeycloak connects the global shared Keycloak container to the test's
-// Docker network (with alias "keycloak") and creates a unique realm for the test.
-// It falls back to starting a fresh Keycloak if the global instance is unavailable.
+// useSharedKeycloak returns a keycloakSetup backed by the global shared Keycloak
+// container. Each test gets its own realm to avoid cross-test interference.
+// The proxy container must join kc.NetworkName to reach Keycloak by the alias "keycloak".
 //
-// Use this instead of startKeycloak in any test that needs an OIDC/Keycloak server.
-// networkID is net.ID and networkName is net.Name from testcontainers.DockerNetwork.
-func useSharedKeycloak(ctx context.Context, t *testing.T, networkID, networkName string) *keycloakSetup {
+// Falls back to starting a fresh per-test Keycloak if the global instance is unavailable.
+func useSharedKeycloak(ctx context.Context, t *testing.T, testNetworkName string) *keycloakSetup {
 	t.Helper()
 
 	if globalKC == nil {
-		// Graceful fallback: start a fresh Keycloak for this test.
-		return startKeycloak(ctx, t, networkName)
+		// Graceful fallback: start a fresh Keycloak on the test's own network.
+		return startKeycloak(ctx, t, testNetworkName)
 	}
-
-	containerID := globalKC.container.GetContainerID()
-	if err := kcNetworkConnectWithRetry(ctx, t, networkID, networkName, containerID); err != nil {
-		t.Logf("useSharedKeycloak: connect to network %q failed after retries (%v); falling back to fresh Keycloak", networkName, err)
-		return startKeycloak(ctx, t, networkName)
-	}
-	t.Cleanup(func() {
-		cleanCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		if err := kcNetworkDisconnect(cleanCtx, networkID, containerID); err != nil {
-			t.Logf("useSharedKeycloak: disconnect from network %q: %v", networkName, err)
-		}
-	})
 
 	// Each test gets its own realm to avoid cross-test interference.
 	realm := kcRealmName(t.Name())
@@ -51,60 +31,8 @@ func useSharedKeycloak(ctx context.Context, t *testing.T, networkID, networkName
 		ExternalURL: globalKC.externalURL,
 		InternalURL: "http://keycloak:8080",
 		Realm:       realm,
+		NetworkName: globalKC.networkName,
 	}
-}
-
-// kcNetworkConnectWithRetry attaches containerID to networkID, retrying up to 3
-// times with 500 ms back-off to handle transient Docker API failures. It also
-// treats "already exists" as a success so idempotent re-connects don't fall back
-// to an expensive per-test Keycloak startup.
-func kcNetworkConnectWithRetry(ctx context.Context, t *testing.T, networkID, networkName, containerID string) error {
-	t.Helper()
-	const maxAttempts = 3
-	var lastErr error
-	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		err := kcNetworkConnect(ctx, networkID, containerID)
-		if err == nil {
-			return nil
-		}
-		// "already exists" means the container is already on this network — success.
-		if strings.Contains(err.Error(), "already exists") {
-			return nil
-		}
-		slog.Warn("kcNetworkConnect attempt failed",
-			"attempt", attempt,
-			"max_attempts", maxAttempts,
-			"network", networkName,
-			"error", err,
-		)
-		lastErr = err
-		if attempt < maxAttempts {
-			time.Sleep(500 * time.Millisecond)
-		}
-	}
-	return lastErr
-}
-
-// kcNetworkConnect attaches containerID to networkID with the DNS alias "keycloak".
-func kcNetworkConnect(ctx context.Context, networkID, containerID string) error {
-	cli, err := dockerclient.NewClientWithOpts(dockerclient.FromEnv, dockerclient.WithAPIVersionNegotiation())
-	if err != nil {
-		return fmt.Errorf("docker client: %w", err)
-	}
-	defer cli.Close()
-	return cli.NetworkConnect(ctx, networkID, containerID, &dockernetwork.EndpointSettings{
-		Aliases: []string{"keycloak"},
-	})
-}
-
-// kcNetworkDisconnect detaches containerID from networkID.
-func kcNetworkDisconnect(ctx context.Context, networkID, containerID string) error {
-	cli, err := dockerclient.NewClientWithOpts(dockerclient.FromEnv, dockerclient.WithAPIVersionNegotiation())
-	if err != nil {
-		return fmt.Errorf("docker client: %w", err)
-	}
-	defer cli.Close()
-	return cli.NetworkDisconnect(ctx, networkID, containerID, false)
 }
 
 // kcRealmName converts a Go test name into a Keycloak-safe realm name.

@@ -53,9 +53,6 @@ Integration tests live in `tests/integration/` with build tag `//go:build integr
 ## Additional rules
 See `.claude/rules/` for scoped rules on integration tests, OpenAPI package patterns, and common review issues.
 
-## Testcontainers
-Set `TC_CLOUD_TOKEN` environment variable to use Testcontainers Cloud. Without it, tests use the local Docker daemon. The library auto-detects.
-
 ## Active development
 This project has no public users. There is no backward compatibility requirement. Interfaces, config schemas, and APIs may change freely between tasks.
 

@@ -7,7 +7,6 @@ require (
 	github.com/caddyserver/caddy/v2 v2.11.2
 	github.com/coreos/go-oidc/v3 v3.17.0
 	github.com/dgraph-io/ristretto v0.2.0
-	github.com/docker/docker v28.5.2+incompatible
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/getkin/kin-openapi v0.134.0
 	github.com/go-chi/chi/v5 v5.2.5
@@ -26,6 +25,7 @@ require (
 	github.com/pkoukk/tiktoken-go v0.1.8
 	github.com/prometheus/client_golang v1.23.2
 	github.com/redis/go-redis/v9 v9.18.0
+	github.com/sony/gobreaker/v2 v2.4.0
 	github.com/speakeasy-api/jsonpath v0.6.0
 	github.com/speakeasy-api/openapi-overlay v0.10.3
 	github.com/testcontainers/testcontainers-go v0.41.0
@@ -96,6 +96,7 @@ require (
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/distribution/reference v0.6.0 // indirect
 	github.com/dlclark/regexp2 v1.11.5 // indirect
+	github.com/docker/docker v28.5.2+incompatible // indirect
 	github.com/docker/go-connections v0.6.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/dprotaso/go-yit v0.0.0-20191028211022-135eb7262960 // indirect
@@ -213,7 +214,6 @@ require (
 	github.com/smallstep/pkcs7 v0.2.1 // indirect
 	github.com/smallstep/scep v0.0.0-20250318231241-a25cabb69492 // indirect
 	github.com/smallstep/truststore v0.13.0 // indirect
-	github.com/sony/gobreaker/v2 v2.4.0 // indirect
 	github.com/spf13/cast v1.7.0 // indirect
 	github.com/spf13/cobra v1.10.2 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect

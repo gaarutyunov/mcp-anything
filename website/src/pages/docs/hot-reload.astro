@@ -1,0 +1,78 @@
+---
+import DocsLayout from '../../layouts/DocsLayout.astro';
+---
+
+<DocsLayout
+  title="Hot-Reload & Spec Refresh"
+  description="Config hot-reload with fsnotify and background OpenAPI spec refresh with ETag/conditional GET. Both are atomic and zero-downtime."
+  current="hot-reload"
+>
+  <h1>Hot-Reload &amp; Spec Refresh</h1>
+  <p class="lead">Config changes and OpenAPI spec updates are applied atomically at runtime without restarting the proxy or dropping in-flight requests.</p>
+
+  <h2>Config hot-reload</h2>
+  <p>The proxy watches the config file with <a href="https://github.com/fsnotify/fsnotify" target="_blank" rel="noopener noreferrer">fsnotify</a>. When a change is detected:</p>
+  <ol>
+    <li>The new config is parsed and validated</li>
+    <li>A new set of upstreams, tools, and groups is built</li>
+    <li>The new routing table is swapped in atomically</li>
+    <li>In-flight requests continue using the old routing table until they complete</li>
+  </ol>
+  <p>If the new config is invalid, the proxy logs the error and continues running with the current config.</p>
+
+  <h3>Kubernetes ConfigMap support</h3>
+  <p>Kubernetes updates ConfigMaps by atomically swapping a symlink to a new data directory. fsnotify detects the symlink change and triggers a reload. No special configuration is required.</p>
+  <pre><code># Mount config, specs, and overlays as separate ConfigMaps
+# for independent update cycles
+volumes:
+  - name: config
+    configMap:
+      name: mcp-anything-config
+  - name: specs
+    configMap:
+      name: mcp-anything-specs
+  - name: overlays
+    configMap:
+      name: mcp-anything-overlays</code></pre>
+
+  <h2>Background spec refresh</h2>
+  <p>HTTP upstreams can re-fetch their OpenAPI spec on a configurable interval:</p>
+  <pre><code>upstreams:
+  - name: myapi
+    type: http
+    openapi:
+      source: https://api.example.com/openapi.yaml
+      refresh_interval: 5m     # re-fetch every 5 minutes</code></pre>
+  <p>On each refresh:</p>
+  <ol>
+    <li>The proxy sends a conditional GET with the <code>If-None-Match</code> header (ETag from the previous response)</li>
+    <li>If the server returns <code>304 Not Modified</code>, no work is done</li>
+    <li>If the spec has changed, it is parsed, overlays are applied, tools are regenerated</li>
+    <li>The upstream's tool registry is swapped in atomically</li>
+  </ol>
+
+  <h3>Refresh intervals</h3>
+  <p>Valid duration formats: <code>30s</code>, <code>5m</code>, <code>1h</code>. If <code>refresh_interval</code> is not set, the spec is loaded once at startup and never re-fetched.</p>
+
+  <h3>Refresh on startup</h3>
+  <p>The proxy always loads specs on startup regardless of <code>refresh_interval</code>. If a spec fails to load at startup, the proxy refuses to start.</p>
+
+  <h2>Reload failures</h2>
+  <p>Config and spec reload failures are non-fatal — the proxy logs the error and continues with the previous valid state. This means a bad config push doesn't take down your MCP endpoint.</p>
+
+  <h2>Health and readiness</h2>
+  <p>The proxy exposes standard Kubernetes probes:</p>
+  <table>
+    <thead><tr><th>Path</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td><code>GET /healthz</code></td><td>Liveness — returns 200 if the server is running</td></tr>
+      <tr><td><code>GET /readyz</code></td><td>Readiness — returns 200 when all upstreams are loaded and ready</td></tr>
+    </tbody>
+  </table>
+
+  <h2>See also</h2>
+  <ul>
+    <li><a href="/docs/kubernetes">Kubernetes</a> — ConfigMap mounting and deployment patterns</li>
+    <li><a href="/docs/routing">Multi-Upstream Routing</a> — independent refresh cycles per upstream</li>
+  </ul>
+</DocsLayout>

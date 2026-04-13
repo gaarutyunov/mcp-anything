@@ -1,0 +1,114 @@
+---
+import DocsLayout from '../../layouts/DocsLayout.astro';
+---
+
+<DocsLayout
+  title="Go SDK"
+  description="Embed mcp-anything as a Go library. Register custom tool providers via the registry pattern. Tree-shaking keeps binaries lean."
+  current="sdk"
+>
+  <h1>Go SDK</h1>
+  <p class="lead">mcp-anything is library-first. You can embed the proxy in your own Go binary, register custom tool providers, and import only the auth strategies and upstream types you need.</p>
+
+  <h2>Embedding the proxy</h2>
+  <pre><code>import (
+    "context"
+    mcpanything "github.com/gaarutyunov/mcp-anything/pkg/mcpanything"
+    _ "github.com/gaarutyunov/mcp-anything/pkg/auth/inbound/all"   // all inbound strategies
+    _ "github.com/gaarutyunov/mcp-anything/pkg/auth/outbound/all"  // all outbound strategies
+    _ "github.com/gaarutyunov/mcp-anything/pkg/upstream/all"       // all upstream types
+)
+
+func main() &#123;
+    proxy, err := mcpanything.New(ctx, mcpanything.Options&#123;
+        ConfigPath: "/etc/mcp-anything/config.yaml",
+    &#125;)
+    if err != nil &#123;
+        log.Fatal(err)
+    &#125;
+    if err := proxy.Start(ctx); err != nil &#123;
+        log.Fatal(err)
+    &#125;
+&#125;</code></pre>
+
+  <h2>Registry pattern</h2>
+  <p>Every pluggable component — auth strategies, upstream types, embedding providers — follows the registry pattern. Components register themselves via <code>init()</code>, which runs only when the package is imported. If you don't import a package, its code is not linked into the binary.</p>
+
+  <h3>Importing only what you need</h3>
+  <pre><code>// Import only JWT inbound auth and OAuth2 outbound auth
+import (
+    _ "github.com/gaarutyunov/mcp-anything/pkg/auth/inbound/jwt"
+    _ "github.com/gaarutyunov/mcp-anything/pkg/auth/outbound/oauth2"
+    // Lua and JavaScript strategies are NOT linked
+)
+
+// Import only HTTP upstream type
+import (
+    _ "github.com/gaarutyunov/mcp-anything/pkg/upstream/http"
+    // command and script upstreams are NOT linked
+)</code></pre>
+
+  <h3>All-in-one bundles</h3>
+  <pre><code>// Import everything
+import _ "github.com/gaarutyunov/mcp-anything/pkg/auth/inbound/all"
+import _ "github.com/gaarutyunov/mcp-anything/pkg/auth/outbound/all"
+import _ "github.com/gaarutyunov/mcp-anything/pkg/upstream/all"</code></pre>
+
+  <h2>Registering a custom upstream type</h2>
+  <pre><code>package myupstream
+
+import (
+    "context"
+    "github.com/gaarutyunov/mcp-anything/pkg/upstream"
+    "github.com/gaarutyunov/mcp-anything/pkg/config"
+)
+
+func init() &#123;
+    upstream.Register("my-type", func(ctx context.Context, cfg *config.UpstreamConfig) (upstream.Provider, error) &#123;
+        return &MyProvider&#123;cfg: cfg&#125;, nil
+    &#125;)
+&#125;
+
+type MyProvider struct &#123;
+    cfg *config.UpstreamConfig
+&#125;
+
+func (p *MyProvider) Tools(ctx context.Context) ([]mcp.Tool, error) &#123;
+    // return your custom tools
+&#125;
+
+func (p *MyProvider) Call(ctx context.Context, name string, args map[string]any) (*mcp.CallToolResult, error) &#123;
+    // handle tool calls
+&#125;</code></pre>
+  <p>Then import it in your binary:</p>
+  <pre><code>import _ "github.com/myorg/myproject/myupstream"</code></pre>
+
+  <h2>Registering a custom inbound auth strategy</h2>
+  <pre><code>package myauth
+
+import (
+    "context"
+    "github.com/gaarutyunov/mcp-anything/pkg/auth/inbound"
+    "github.com/gaarutyunov/mcp-anything/pkg/config"
+)
+
+func init() &#123;
+    inbound.Register("my-strategy", func(ctx context.Context, cfg *config.InboundAuthConfig) (inbound.TokenValidator, string, error) &#123;
+        return &MyValidator&#123;&#125;, "my-strategy", nil
+    &#125;)
+&#125;</code></pre>
+
+  <h2>Tree-shaking</h2>
+  <p>Go's linker excludes packages that are never imported. The <code>tests/treeshake/</code> directory contains build-tag-isolated programs that verify importing only specific sub-packages does not pull in unrelated heavy dependencies (e.g. Sobek JavaScript runtime, gopher-lua).</p>
+  <p>When adding a new strategy or upstream type, add a treeshake test to verify isolation.</p>
+
+  <h2>Module</h2>
+  <pre><code>go get github.com/gaarutyunov/mcp-anything@latest</code></pre>
+  <p>Module path: <code>github.com/gaarutyunov/mcp-anything</code></p>
+
+  <h2>See also</h2>
+  <ul>
+    <li><a href="/docs/auth">Authentication</a> — built-in inbound and outbound strategies</li>
+    <li><a href="/docs/routing">Multi-Upstream Routing</a> — upstream type configuration</li>
+  </ul>
+</DocsLayout>

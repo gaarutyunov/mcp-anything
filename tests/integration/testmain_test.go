@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/network"
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
@@ -24,6 +25,7 @@ var globalKC *sharedKeycloakContainer
 type sharedKeycloakContainer struct {
 	container   testcontainers.Container
 	externalURL string // http://host:PORT — accessible from the test machine
+	networkName string // dedicated Keycloak network — proxy containers join this
 }
 
 // TestMain starts shared containers before running all integration tests and
@@ -118,18 +120,35 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// startSharedKeycloak starts a single Keycloak instance that is shared across tests.
-// KC_HOSTNAME is set to http://keycloak:8080 so tokens carry that as their iss claim,
-// matching the per-test proxy config. KC_HOSTNAME_STRICT=false allows admin API access
-// via the mapped host port.
+// startSharedKeycloak starts a single Keycloak instance on its own dedicated
+// Docker network. Each test's proxy container joins this network to reach
+// Keycloak by the alias "keycloak". This avoids runtime network connect/disconnect
+// operations that can disrupt Keycloak's host port mapping (especially on
+// Docker Desktop / OrbStack / GitHub Actions).
+//
+// KC_HOSTNAME is set to http://keycloak:8080 so tokens carry that as their iss
+// claim, matching the per-test proxy config. KC_HOSTNAME_STRICT=false allows
+// admin API access via the mapped host port.
 func startSharedKeycloak(ctx context.Context) (*sharedKeycloakContainer, error) {
 	start := time.Now()
+
+	// Create a dedicated network for the shared Keycloak container.
+	kcNet, err := network.New(ctx, network.WithDriver("bridge"))
+	if err != nil {
+		return nil, fmt.Errorf("create keycloak network: %w", err)
+	}
+	slog.Info("Keycloak: created dedicated network", "network", kcNet.Name)
+
 	slog.Info("Keycloak: launching container")
 	kc, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: testcontainers.ContainerRequest{
 			Image:        "quay.io/keycloak/keycloak:25.0",
 			Cmd:          []string{"start-dev"},
 			ExposedPorts: []string{"8080/tcp"},
+			Networks:     []string{kcNet.Name},
+			NetworkAliases: map[string][]string{
+				kcNet.Name: {"keycloak"},
+			},
 			Env: map[string]string{
 				"KEYCLOAK_ADMIN":          "admin",
 				"KEYCLOAK_ADMIN_PASSWORD": "admin",
@@ -146,6 +165,7 @@ func startSharedKeycloak(ctx context.Context) (*sharedKeycloakContainer, error) 
 		Started: true,
 	})
 	if err != nil {
+		_ = kcNet.Remove(ctx)
 		return nil, fmt.Errorf("start shared Keycloak: %w", err)
 	}
 	slog.Info("Keycloak: container ready", "container_startup", time.Since(start).Round(time.Millisecond))
@@ -153,16 +173,19 @@ func startSharedKeycloak(ctx context.Context) (*sharedKeycloakContainer, error) 
 	host, err := kc.Host(ctx)
 	if err != nil {
 		_ = kc.Terminate(context.Background())
+		_ = kcNet.Remove(ctx)
 		return nil, fmt.Errorf("get host: %w", err)
 	}
 	port, err := kc.MappedPort(ctx, "8080")
 	if err != nil {
 		_ = kc.Terminate(context.Background())
+		_ = kcNet.Remove(ctx)
 		return nil, fmt.Errorf("get mapped port: %w", err)
 	}
 
 	return &sharedKeycloakContainer{
 		container:   kc,
 		externalURL: fmt.Sprintf("http://%s:%s", host, port.Port()),
+		networkName: kcNet.Name,
 	}, nil
 }

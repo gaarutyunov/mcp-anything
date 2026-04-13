@@ -14,7 +14,7 @@ env:
   GOWORK: off
   OPERATOR_IMAGE: ghcr.io/${{ github.repository }}-operator:sha-${{ github.sha }}
   PROXY_IMAGE: ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
-  CADDY_IMAGE: ghcr.io/${{ github.repository }}:caddy-sha-${{ github.sha }}
+  CADDY_IMAGE: ghcr.io/${{ github.repository }}-caddy:sha-${{ github.sha }}
 
 jobs:
   lint-and-test:

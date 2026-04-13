@@ -146,12 +146,6 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Setup Testcontainers Cloud Client
-        uses: atomicjar/testcontainers-cloud-setup-action@v1
-        with:
-          token: ${{ secrets.TC_CLOUD_TOKEN }}
-          wait: 'true'
-
       - name: Integration tests
         uses: nick-fields/retry@v3
         with:

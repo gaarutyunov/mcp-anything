@@ -296,8 +296,6 @@ make check        # lint + vet + unit tests + build
 make integration  # integration tests (Docker + Testcontainers)
 ```
 
-Set `TC_CLOUD_TOKEN` to run containers via [Testcontainers Cloud](https://testcontainers.com/cloud/).
-
 ## Design
 
 See [SPEC.md](SPEC.md) for the full architecture document covering all design decisions, configuration model, and acceptance criteria.

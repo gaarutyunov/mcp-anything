@@ -71,6 +71,7 @@ type keycloakSetup struct {
 	ExternalURL string // http://host:port (test machine access)
 	InternalURL string // http://keycloak:8080 (Docker network access)
 	Realm       string
+	NetworkName string // Docker network the proxy must join to reach Keycloak
 }
 
 // startKeycloak starts a Keycloak 25 container and returns the setup struct.
@@ -115,6 +116,7 @@ func startKeycloak(ctx context.Context, t *testing.T, netName string) *keycloakS
 		ExternalURL: external,
 		InternalURL: "http://keycloak:8080",
 		Realm:       "test-realm",
+		NetworkName: netName, // already on the test network
 	}
 
 	// Configure Keycloak via REST API.
@@ -465,11 +467,13 @@ func authProxyFiles(t *testing.T, tmpDir, cfgContent string, withOverlay bool) [
 }
 
 // startAuthProxy starts the proxy with the given config content and environment.
-func startAuthProxy(ctx context.Context, t *testing.T, netName string, files []testcontainers.ContainerFile, env map[string]string) string {
+func startAuthProxy(ctx context.Context, t *testing.T, netName string, files []testcontainers.ContainerFile, env map[string]string, extraNetworks ...string) string {
 	t.Helper()
 	proxyReq := proxyContainerRequest()
 	proxyReq.ExposedPorts = []string{"8080/tcp"}
-	proxyReq.Networks = []string{netName}
+	networks := []string{netName}
+	networks = append(networks, extraNetworks...)
+	proxyReq.Networks = networks
 	proxyReq.Env = env
 	proxyReq.Files = files
 	proxyReq.WaitingFor = wait.ForHTTP("/healthz").WithPort("8080").WithStartupTimeout(120 * time.Second)
@@ -511,7 +515,7 @@ func TestJWTAuthAllowsValidToken(t *testing.T) {
 	registerStub(t, wmURL, `{"request":{"method":"GET","url":"/pets"},"response":{"status":200,"body":"{\"pets\":[]}","headers":{"Content-Type":"application/json"}}}`)
 
 	// Start Keycloak and configure a client.
-	kc := useSharedKeycloak(ctx, t, net.ID, net.Name)
+	kc := useSharedKeycloak(ctx, t, net.Name)
 	adminToken := kcAdminToken(t, kc.ExternalURL)
 	clientUUID := kcCreateClient(t, kc.ExternalURL, adminToken, kc.Realm, "mcp-anything")
 	kcAddAudienceMapper(t, kc.ExternalURL, adminToken, kc.Realm, clientUUID, "mcp-anything")
@@ -544,7 +548,7 @@ upstreams:
 	files := authProxyFiles(t, tmpDir, cfg, false)
 	proxyURL := startAuthProxy(ctx, t, net.Name, files, map[string]string{
 		"CONFIG_PATH": "/etc/mcp-anything/config.yaml",
-	})
+	}, kc.NetworkName)
 
 	// Obtain a valid JWT from Keycloak.
 	jwt := kcClientCredentialsToken(t, kc.ExternalURL, kc.Realm, "mcp-anything", clientSecret)
@@ -586,7 +590,7 @@ func TestJWTAuthRejects401OnInvalidToken(t *testing.T) {
 	wmURL := fmt.Sprintf("http://%s:%s", wmHost, wmPort.Port())
 	registerStub(t, wmURL, `{"request":{"method":"GET","url":"/pets"},"response":{"status":200,"body":"{}","headers":{"Content-Type":"application/json"}}}`)
 
-	kc := useSharedKeycloak(ctx, t, net.ID, net.Name)
+	kc := useSharedKeycloak(ctx, t, net.Name)
 	adminToken := kcAdminToken(t, kc.ExternalURL)
 	kcCreateClient(t, kc.ExternalURL, adminToken, kc.Realm, "mcp-anything")
 
@@ -617,7 +621,7 @@ upstreams:
 	files := authProxyFiles(t, tmpDir, cfg, false)
 	proxyURL := startAuthProxy(ctx, t, net.Name, files, map[string]string{
 		"CONFIG_PATH": "/etc/mcp-anything/config.yaml",
-	})
+	}, kc.NetworkName)
 
 	// Use an invalid token.
 	resp := mcpPost(t, proxyURL, "tools/list", map[string]any{}, "Bearer invalid.token.here")
@@ -653,7 +657,7 @@ func TestJWTAuthRejectsMissingToken(t *testing.T) {
 	wmURL := fmt.Sprintf("http://%s:%s", wmHost, wmPort.Port())
 	registerStub(t, wmURL, `{"request":{"method":"GET","url":"/pets"},"response":{"status":200,"body":"{}","headers":{"Content-Type":"application/json"}}}`)
 
-	kc := useSharedKeycloak(ctx, t, net.ID, net.Name)
+	kc := useSharedKeycloak(ctx, t, net.Name)
 	adminToken := kcAdminToken(t, kc.ExternalURL)
 	kcCreateClient(t, kc.ExternalURL, adminToken, kc.Realm, "mcp-anything")
 
@@ -684,7 +688,7 @@ upstreams:
 	files := authProxyFiles(t, tmpDir, cfg, false)
 	proxyURL := startAuthProxy(ctx, t, net.Name, files, map[string]string{
 		"CONFIG_PATH": "/etc/mcp-anything/config.yaml",
-	})
+	}, kc.NetworkName)
 
 	// No Authorization header.
 	resp := mcpPost(t, proxyURL, "tools/list", map[string]any{}, "")
@@ -716,7 +720,7 @@ func TestIntrospectionAuthAllowsActiveToken(t *testing.T) {
 	wmURL := fmt.Sprintf("http://%s:%s", wmHost, wmPort.Port())
 	registerStub(t, wmURL, `{"request":{"method":"GET","url":"/pets"},"response":{"status":200,"body":"{\"pets\":[]}","headers":{"Content-Type":"application/json"}}}`)
 
-	kc := useSharedKeycloak(ctx, t, net.ID, net.Name)
+	kc := useSharedKeycloak(ctx, t, net.Name)
 	adminToken := kcAdminToken(t, kc.ExternalURL)
 
 	// Create the introspection resource server client.
@@ -755,7 +759,7 @@ upstreams:
 	files := authProxyFiles(t, tmpDir, cfg, false)
 	proxyURL := startAuthProxy(ctx, t, net.Name, files, map[string]string{
 		"CONFIG_PATH": "/etc/mcp-anything/config.yaml",
-	})
+	}, kc.NetworkName)
 
 	// Get a token from the token-client.
 	token := kcClientCredentialsToken(t, kc.ExternalURL, kc.Realm, "token-client", tokenSecret)
@@ -869,7 +873,7 @@ func TestPerOperationAuthBypass(t *testing.T) {
 	registerStub(t, wmURL, `{"request":{"method":"GET","url":"/health"},"response":{"status":200,"body":"{\"ok\":true}","headers":{"Content-Type":"application/json"}}}`)
 	registerStub(t, wmURL, `{"request":{"method":"GET","url":"/pets"},"response":{"status":200,"body":"{\"pets\":[]}","headers":{"Content-Type":"application/json"}}}`)
 
-	kc := useSharedKeycloak(ctx, t, net.ID, net.Name)
+	kc := useSharedKeycloak(ctx, t, net.Name)
 	adminToken := kcAdminToken(t, kc.ExternalURL)
 	kcCreateClient(t, kc.ExternalURL, adminToken, kc.Realm, "mcp-anything")
 
@@ -902,7 +906,7 @@ upstreams:
 	files := authProxyFiles(t, tmpDir, cfg, true)
 	proxyURL := startAuthProxy(ctx, t, net.Name, files, map[string]string{
 		"CONFIG_PATH": "/etc/mcp-anything/config.yaml",
-	})
+	}, kc.NetworkName)
 
 	// Call the protected tool (listPets) with NO Authorization header — should get 401.
 	// Use raw HTTP because we expect the middleware to return 401 before MCP initialization.

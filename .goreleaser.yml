@@ -41,10 +41,17 @@ builds:
       - arm64
 
 archives:
-  - id: default
+  - id: proxy
+    ids: [proxy]
     formats:
       - tar.gz
-    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    name_template: "{{ .ProjectName }}_proxy_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+  - id: operator
+    ids: [operator]
+    formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_operator_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
 
 dockers_v2:
   - id: proxy

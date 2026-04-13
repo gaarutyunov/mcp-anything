@@ -107,10 +107,7 @@ func TestKagentRemoteMCPServerE2E(t *testing.T) {
 
 	// ── Load proxy image into k3s ──────────────────────────────────────────────
 
-	t.Logf("loading proxy image %q into k3s", proxyImage)
-	if err := globalK3s.container.LoadImages(ctx, proxyImage); err != nil {
-		t.Fatalf("loading proxy image into k3s: %v", err)
-	}
+	loadImageIntoK3s(ctx, t, globalK3s, proxyImage)
 
 	// ── Install kagent (once) ──────────────────────────────────────────────────
 

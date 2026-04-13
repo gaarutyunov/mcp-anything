@@ -14,6 +14,7 @@ import (
 	"time"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	testcontainers "github.com/testcontainers/testcontainers-go"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
@@ -96,6 +97,36 @@ func createOrUpdateConfigMap(ctx context.Context, c client.Client, cm *corev1.Co
 		return fmt.Errorf("updating ConfigMap %s/%s: %w", cm.Namespace, cm.Name, err)
 	}
 	return nil
+}
+
+// loadImageIntoK3s pulls the named image into the Testcontainers Docker daemon
+// and then imports it into k3s's containerd runtime via LoadImages.
+//
+// Integration tests use ContainerRequest{Image: img}, which makes Testcontainers
+// pull the image automatically. E2E tests instead call k3s.LoadImages, which
+// calls provider.SaveImages (docker image save) — a raw export that requires the
+// image to already be present in the daemon. Without an explicit pull first,
+// LoadImages fails with "no such image" when PROXY_IMAGE is a registry reference
+// that hasn't been cached yet (e.g. in CI with Testcontainers Cloud).
+func loadImageIntoK3s(ctx context.Context, t *testing.T, cluster *sharedK3sCluster, imageName string) {
+	t.Helper()
+
+	provider, err := testcontainers.NewDockerProvider()
+	if err != nil {
+		t.Fatalf("creating Docker provider to pull %q: %v", imageName, err)
+	}
+	defer provider.Close()
+
+	t.Logf("pulling proxy image %q into Docker daemon", imageName)
+	if err := provider.PullImage(ctx, imageName); err != nil {
+		t.Fatalf("pulling proxy image %q: %v", imageName, err)
+	}
+
+	t.Logf("loading proxy image %q into k3s containerd", imageName)
+	if err := cluster.container.LoadImages(ctx, imageName); err != nil {
+		t.Fatalf("loading proxy image %q into k3s: %v", imageName, err)
+	}
+	t.Log("proxy image ready in k3s")
 }
 
 // portForwardToPod sets up a port-forward from localPort on the test host to

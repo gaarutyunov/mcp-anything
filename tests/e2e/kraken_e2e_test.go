@@ -56,11 +56,7 @@ func TestKrakenMarketDataE2E(t *testing.T) {
 		t.Fatal("PROXY_IMAGE must point to the image built for this test run")
 	}
 
-	t.Logf("loading proxy image %q into k3s", proxyImage)
-	if err := globalK3s.container.LoadImages(ctx, proxyImage); err != nil {
-		t.Fatalf("cannot load proxy image %q into k3s: %v", proxyImage, err)
-	}
-	t.Log("proxy image loaded into k3s")
+	loadImageIntoK3s(ctx, t, globalK3s, proxyImage)
 
 	// ── 2. Build k8s client ───────────────────────────────────────────────────
 

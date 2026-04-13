@@ -47,7 +47,8 @@ archives:
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
 
 dockers_v2:
-  - ids: [proxy]
+  - id: proxy
+    ids: [proxy]
     images:
       - "ghcr.io/gaarutyunov/mcp-anything"
     tags:
@@ -58,7 +59,8 @@ dockers_v2:
       - linux/arm64
     dockerfile: Dockerfile.goreleaser
 
-  - ids: [operator]
+  - id: operator
+    ids: [operator]
     images:
       - "ghcr.io/gaarutyunov/mcp-anything-operator"
     tags:

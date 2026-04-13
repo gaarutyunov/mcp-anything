@@ -39,23 +39,27 @@ docker run -v $(pwd)/config.yaml:/etc/mcp-anything/config.yaml \
 
 ### Connect to Kraken Market Data
 
-The Kraken cryptocurrency exchange exposes a public REST API — no API key required. A ready-to-use OpenAPI spec and overlay are included in [deploy/examples/kraken/](deploy/examples/kraken/).
-
-```yaml
-# config.yaml
-upstreams:
-  - name: kraken
-    type: http
-    tool_prefix: kraken
-    base_url: https://api.kraken.com
-    openapi:
-      source: deploy/examples/kraken/spec.yaml
-    overlay:
-      source: deploy/examples/kraken/overlay.yaml
-```
+The Kraken cryptocurrency exchange exposes a public REST API — no API key required. Download the example config files and start the proxy in three commands:
 
 ```bash
-proxy --config config.yaml
+# 1. Download config, OpenAPI spec, and overlay
+mkdir -p kraken && cd kraken
+curl -sLO https://raw.githubusercontent.com/gaarutyunov/mcp-anything/main/deploy/examples/kraken/config.yaml
+curl -sLO https://raw.githubusercontent.com/gaarutyunov/mcp-anything/main/deploy/examples/kraken/spec.yaml
+curl -sLO https://raw.githubusercontent.com/gaarutyunov/mcp-anything/main/deploy/examples/kraken/overlay.yaml
+
+# 2. Install and run
+go install github.com/gaarutyunov/mcp-anything/cmd/proxy@latest
+CONFIG_PATH=config.yaml proxy
+```
+
+Or with Docker:
+
+```bash
+docker run -p 8080:8080 \
+  -v $(pwd):/etc/mcp-anything \
+  -w /etc/mcp-anything \
+  ghcr.io/gaarutyunov/mcp-anything:latest
 ```
 
 Connect any MCP client to `http://localhost:8080/mcp`. Five tools are now available:
@@ -69,6 +73,15 @@ Connect any MCP client to `http://localhost:8080/mcp`. Five tools are now availa
 | `kraken__get_recent_trades` | Most recent 10 public trades |
 
 The overlay in [deploy/examples/kraken/overlay.yaml](deploy/examples/kraken/overlay.yaml) applies jq transforms that flatten Kraken's nested response format into clean named fields — no client-side parsing required.
+
+#### Use with Claude Code
+
+```bash
+CONFIG_PATH=config.yaml proxy &
+claude mcp add --transport http kraken http://localhost:8080/mcp
+```
+
+Claude can now call Kraken tools directly — ask it to check Bitcoin prices, pull OHLC data, or read the order book.
 
 ## Configuration
 
@@ -282,8 +295,6 @@ Requirements: Go 1.25+, Docker (for integration tests)
 make check        # lint + vet + unit tests + build
 make integration  # integration tests (Docker + Testcontainers)
 ```
-
-Set `TC_CLOUD_TOKEN` to run containers via [Testcontainers Cloud](https://testcontainers.com/cloud/).
 
 ## Design
 

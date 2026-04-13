@@ -124,31 +124,53 @@ func startKeycloak(ctx context.Context, t *testing.T, netName string) *keycloakS
 	return setup
 }
 
-// kcAdminToken obtains a Keycloak admin access token.
+// kcAdminToken obtains a Keycloak admin access token, retrying on transient
+// errors (connection refused, etc.) that occur in CI when the mapped port is
+// momentarily unreachable after a Docker network connect/disconnect.
 func kcAdminToken(t *testing.T, baseURL string) string {
 	t.Helper()
+
+	const maxAttempts = 10
+	const retryInterval = 2 * time.Second
+	tokenURL := baseURL + "/realms/master/protocol/openid-connect/token"
 	data := url.Values{
 		"username":   {"admin"},
 		"password":   {"admin"},
 		"grant_type": {"password"},
 		"client_id":  {"admin-cli"},
 	}
-	resp, err := http.PostForm(baseURL+"/realms/master/protocol/openid-connect/token", data) //nolint:noctx
-	if err != nil {
-		t.Fatalf("get keycloak admin token: %v", err)
+
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		resp, err := http.PostForm(tokenURL, data) //nolint:noctx
+		if err != nil {
+			lastErr = err
+			t.Logf("kcAdminToken: attempt %d/%d failed: %v", attempt, maxAttempts, err)
+			if attempt < maxAttempts {
+				time.Sleep(retryInterval)
+			}
+			continue
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			lastErr = fmt.Errorf("status %d: %s", resp.StatusCode, body)
+			t.Logf("kcAdminToken: attempt %d/%d: %v", attempt, maxAttempts, lastErr)
+			if attempt < maxAttempts {
+				time.Sleep(retryInterval)
+			}
+			continue
+		}
+		var result struct {
+			AccessToken string `json:"access_token"`
+		}
+		if err := json.Unmarshal(body, &result); err != nil || result.AccessToken == "" {
+			t.Fatalf("parse keycloak admin token: %v, body: %s", err, body)
+		}
+		return result.AccessToken
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("get keycloak admin token: status %d: %s", resp.StatusCode, body)
-	}
-	var result struct {
-		AccessToken string `json:"access_token"`
-	}
-	if err := json.Unmarshal(body, &result); err != nil || result.AccessToken == "" {
-		t.Fatalf("parse keycloak admin token: %v, body: %s", err, body)
-	}
-	return result.AccessToken
+	t.Fatalf("get keycloak admin token: failed after %d attempts: %v", maxAttempts, lastErr)
+	return "" // unreachable
 }
 
 // kcCreateRealm creates a Keycloak realm.

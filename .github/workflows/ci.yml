@@ -178,12 +178,6 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Setup Testcontainers Cloud Client
-        uses: atomicjar/testcontainers-cloud-setup-action@v1
-        with:
-          token: ${{ secrets.TC_CLOUD_TOKEN }}
-          wait: 'true'
-
       - name: Run E2E test
         uses: nick-fields/retry@v3
         with:
@@ -194,3 +188,4 @@ jobs:
         env:
           PROXY_IMAGE: ${{ env.PROXY_IMAGE }}
           OPERATOR_IMAGE: ${{ env.OPERATOR_IMAGE }}
+          E2E_TEST: ${{ matrix.test }}

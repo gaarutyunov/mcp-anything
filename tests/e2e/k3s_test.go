@@ -62,8 +62,8 @@ func startSharedK3s(ctx context.Context) (*sharedK3sCluster, error) {
 
 	repoRoot := "../.."
 	for _, pair := range []struct{ src, dst string }{
-		{"deploy/helm/mcp-anything/crds/mcpproxy.yaml", "mcpproxy.yaml"},
-		{"deploy/helm/mcp-anything/crds/mcpupstream.yaml", "mcpupstream.yaml"},
+		{"charts/mcp-anything/crds/mcpproxy.yaml", "mcpproxy.yaml"},
+		{"charts/mcp-anything/crds/mcpupstream.yaml", "mcpupstream.yaml"},
 	} {
 		data, err := os.ReadFile(filepath.Join(repoRoot, pair.src))
 		if err != nil {

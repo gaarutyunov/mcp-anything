@@ -12,6 +12,10 @@
 
 ARG GO_VERSION=1.24
 ARG GOLANGCI_LINT_VERSION=v1.64.0
+ARG PROXY_IMAGE=mcp-anything:latest
+
+# ── Stage 0: extract proxy binary from proxy image ───────────────────────────
+FROM ${PROXY_IMAGE} AS proxy-binary
 
 # ── Stage 1: build write-file helper ─────────────────────────────────────────
 FROM golang:${GO_VERSION}-alpine AS helper-builder
@@ -35,9 +39,8 @@ RUN wget -q -O- "https://raw.githubusercontent.com/golangci/golangci-lint/master
 # Copy write-file helper from builder stage
 COPY --from=helper-builder /usr/local/bin/write-file /usr/local/bin/write-file
 
-# Copy the proxy binary (must be provided via --build-arg PROXY_IMAGE or copied externally)
-# When building for E2E tests, the proxy binary is copied from the proxy image.
-COPY bin/proxy /usr/local/bin/proxy
+# Copy the proxy binary from the proxy image (/usr/local/bin/proxy per Dockerfile)
+COPY --from=proxy-binary /usr/local/bin/proxy /usr/local/bin/proxy
 
 # Seed the workspace with the sample project
 WORKDIR /workspace

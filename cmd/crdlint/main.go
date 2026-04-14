@@ -65,6 +65,20 @@ func run() (bool, error) {
 
 	allOK := true
 
+	// ── Phase 0: Validate types_gen.go ───────────────────────────────────────────
+	slog.Info("phase 0: validating types_gen.go")
+	typesOK, err := crdutil.ValidateTypesFile(repoRoot)
+	if err != nil {
+		return false, fmt.Errorf("validating types file: %w", err)
+	}
+	if !typesOK {
+		slog.Error("types_gen.go is out of date — run: make generate-crds",
+			"path", crdutil.TypesGenPath)
+		allOK = false
+	} else {
+		slog.Info("types_gen.go is up to date", "path", crdutil.TypesGenPath)
+	}
+
 	// ── Phase 1: Validate spec_gen.go ────────────────────────────────────────────
 	slog.Info("phase 1: validating spec_gen.go")
 	specOK, err := crdutil.ValidateSpecFile(repoRoot)

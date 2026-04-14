@@ -44,12 +44,11 @@ spec:
           metadata:
             type: object
           spec:
-            description: MCPUpstreamSpec defines the desired state of MCPUpstream.
+            description: Spec is the desired state of MCPUpstream.
             properties:
               baseURL:
-                description: |-
-                  BaseURL is the base URL for the upstream HTTP API.
-                  Mutually exclusive with ServiceRef. Only used when Type is "http".
+                description: BaseURL is the base URL for the upstream HTTP API. Mutually
+                  exclusive with ServiceRef. Only used when Type is "http".
                 type: string
               commands:
                 description: Commands defines command-backed MCP tools. Required when
@@ -124,9 +123,9 @@ spec:
                   when Type is "http".
                 properties:
                   autoDiscover:
-                    description: |-
-                      AutoDiscover configures automatic OpenAPI spec discovery from the upstream.
-                      Mutually exclusive with ConfigMapRef and URL.
+                    description: AutoDiscover configures automatic OpenAPI spec discovery
+                      from the upstream. Mutually exclusive with ConfigMapRef and
+                      URL.
                     properties:
                       path:
                         description: Path is the URL path at which the upstream serves
@@ -134,9 +133,8 @@ spec:
                         type: string
                     type: object
                   configMapRef:
-                    description: |-
-                      ConfigMapRef references a ConfigMap containing the OpenAPI spec.
-                      Mutually exclusive with URL and AutoDiscover.
+                    description: ConfigMapRef references a ConfigMap containing the
+                      OpenAPI spec. Mutually exclusive with URL and AutoDiscover.
                     properties:
                       key:
                         description: Key is the key in the ConfigMap data.
@@ -149,8 +147,7 @@ spec:
                     - name
                     type: object
                   url:
-                    description: |-
-                      URL is the URL from which the OpenAPI spec is fetched.
+                    description: URL is the URL from which the OpenAPI spec is fetched.
                       Mutually exclusive with ConfigMapRef and AutoDiscover.
                     type: string
                 type: object
@@ -220,8 +217,7 @@ spec:
                     type: object
                 type: object
               serviceRef:
-                description: |-
-                  ServiceRef references an in-cluster Kubernetes Service.
+                description: ServiceRef references an in-cluster Kubernetes Service.
                   Mutually exclusive with BaseURL. Only used when Type is "http".
                 properties:
                   name:
@@ -260,10 +256,9 @@ spec:
                 type: object
               type:
                 default: http
-                description: |-
-                  Type is the upstream type: "http" (default) or "command".
-                  HTTP upstreams require baseURL/serviceRef and openapi.
-                  Command upstreams require commands and must not set baseURL/serviceRef/openapi.
+                description: 'Type is the upstream type: "http" (default) or "command".
+                  HTTP upstreams require baseURL/serviceRef and openapi. Command upstreams
+                  require commands and must not set baseURL/serviceRef/openapi.'
                 enum:
                 - http
                 - command
@@ -283,7 +278,7 @@ spec:
                 type: object
             type: object
           status:
-            description: MCPUpstreamStatus defines the observed state of MCPUpstream.
+            description: Status is the observed state of MCPUpstream.
             properties:
               assignedProxy:
                 description: AssignedProxy is the name of the MCPProxy this upstream

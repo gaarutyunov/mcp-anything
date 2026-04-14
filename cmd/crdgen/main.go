@@ -63,6 +63,13 @@ func run() error {
 	}
 	slog.Info("generating CRDs", "repo_root", repoRoot)
 
+	// ── Phase 0: Generate types_gen.go (Kubernetes wrapper types) ───────────────
+	slog.Info("phase 0: generating Kubernetes wrapper types")
+	if err := crdutil.WriteTypesFile(repoRoot); err != nil {
+		return fmt.Errorf("writing types file: %w", err)
+	}
+	slog.Info("wrote types file", "path", crdutil.TypesGenPath)
+
 	// ── Phase 1: Generate spec_gen.go from config types ──────────────────────────
 	slog.Info("phase 1: generating CRD spec types from config")
 	if err := crdutil.WriteSpecFile(repoRoot); err != nil {

@@ -18,26 +18,467 @@ import (
 	"text/template"
 )
 
-// SpecGenPath is the relative path (from repo root) of the generated types file.
+// SpecGenPath is the relative path (from repo root) of the generated spec types file.
 const SpecGenPath = "pkg/crd/v1alpha1/spec_gen.go"
+
+// TypesGenPath is the relative path (from repo root) of the generated Kubernetes wrapper types file.
+const TypesGenPath = "pkg/crd/v1alpha1/types_gen.go"
 
 // typeSpec defines a CRD spec type to generate from a config type.
 type typeSpec struct {
-	Name   string      // generated Go type name
-	Doc    string      // type-level doc comment
-	Src    string      // source config type name (for doc comment lookup)
-	Fields []fieldSpec // fields to include in the generated type
+	Name        string      // generated Go type name
+	Doc         string      // type-level doc comment
+	Src         string      // source config type name (for doc comment lookup)
+	TypeMarkers []string    // kubebuilder markers written before the type doc comment
+	Fields      []fieldSpec // fields to include in the generated type
 }
 
 // fieldSpec defines a single field in a generated CRD type.
 type fieldSpec struct {
 	Name        string   // Go field name in the generated struct
+	Embedded    bool     // if true, output as embedded field (Type JSONTag only, no Name or Doc)
 	ConfigField string   // config struct field name (used to inherit doc comments)
 	Type        string   // Go type string
 	JSONTag     string   // full JSON struct tag, e.g. `json:"port,omitempty"`
 	Markers     []string // kubebuilder markers (written as // +kubebuilder:... comments)
 	Optional    bool     // if true, add // +optional marker
 	Doc         string   // explicit doc comment (overrides the config field comment)
+}
+
+// crdRootTypeSpecs defines all Kubernetes wrapper types for pkg/crd/v1alpha1/types_gen.go.
+// These are the root CRD objects, their specs, statuses, list types, and K8s-specific helpers.
+var crdRootTypeSpecs = []typeSpec{
+	// ── MCPProxy ─────────────────────────────────────────────────────────────────
+	{
+		Name: "MCPProxy",
+		Doc:  "MCPProxy is the Schema for the mcpproxies API.",
+		TypeMarkers: []string{
+			"+kubebuilder:object:root=true",
+			"+kubebuilder:subresource:status",
+			"+kubebuilder:resource:scope=Namespaced",
+			`+kubebuilder:printcolumn:name="Upstreams",type=integer,JSONPath=".status.upstreamCount"`,
+			`+kubebuilder:printcolumn:name="Tools",type=integer,JSONPath=".status.toolCount"`,
+			`+kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"`,
+		},
+		Fields: []fieldSpec{
+			{Embedded: true, Type: "metav1.TypeMeta", JSONTag: "`json:\",inline\"`"},
+			{Embedded: true, Type: "metav1.ObjectMeta", JSONTag: "`json:\"metadata,omitempty\"`"},
+			{Name: "Spec", Type: "MCPProxySpec", JSONTag: "`json:\"spec,omitempty\"`", Doc: "Spec is the desired state of MCPProxy.", Optional: true},
+			{Name: "Status", Type: "MCPProxyStatus", JSONTag: "`json:\"status,omitempty\"`", Doc: "Status is the observed state of MCPProxy.", Optional: true},
+		},
+	},
+	// ── MCPProxySpec ──────────────────────────────────────────────────────────────
+	{
+		Name: "MCPProxySpec",
+		Doc:  "MCPProxySpec defines the desired state of MCPProxy.",
+		Fields: []fieldSpec{
+			{
+				Name:     "UpstreamSelector",
+				Type:     "metav1.LabelSelector",
+				JSONTag:  "`json:\"upstreamSelector,omitempty\"`",
+				Doc:      "UpstreamSelector selects MCPUpstream resources by label.",
+				Optional: true,
+			},
+			{
+				Name:     "NamespaceSelector",
+				Type:     "NamespaceSelectorSpec",
+				JSONTag:  "`json:\"namespaceSelector,omitempty\"`",
+				Doc:      "NamespaceSelector restricts which namespaces are searched for matching MCPUpstream resources. If empty, only the same namespace as the MCPProxy is searched.",
+				Optional: true,
+			},
+			{
+				Name:     "ServiceDiscovery",
+				Type:     "*ServiceDiscoverySpec",
+				JSONTag:  "`json:\"serviceDiscovery,omitempty\"`",
+				Doc:      "ServiceDiscovery configures annotation-based upstream discovery from Kubernetes Services.",
+				Optional: true,
+			},
+			{
+				Name:     "Replicas",
+				Type:     "*int32",
+				JSONTag:  "`json:\"replicas,omitempty\"`",
+				Markers:  []string{"+kubebuilder:validation:Minimum=1"},
+				Doc:      "Replicas is the number of proxy pod replicas. Defaults to 1.",
+				Optional: true,
+			},
+			{
+				Name:     "Image",
+				Type:     "string",
+				JSONTag:  "`json:\"image,omitempty\"`",
+				Doc:      "Image is the proxy container image. Defaults to ghcr.io/gaarutyunov/mcp-anything:latest.",
+				Optional: true,
+			},
+			{
+				Name:     "Resources",
+				Type:     "corev1.ResourceRequirements",
+				JSONTag:  "`json:\"resources,omitempty\"`",
+				Doc:      "Resources defines CPU/memory requirements for the proxy container.",
+				Optional: true,
+			},
+			{
+				Name:     "Server",
+				Type:     "ProxyServerSpec",
+				JSONTag:  "`json:\"server,omitempty\"`",
+				Doc:      "Server configures the MCP server endpoint.",
+				Optional: true,
+			},
+			{
+				Name:     "Naming",
+				Type:     "ProxyNamingSpec",
+				JSONTag:  "`json:\"naming,omitempty\"`",
+				Doc:      "Naming configures how MCP tool names are generated.",
+				Optional: true,
+			},
+			{
+				Name:     "InboundAuth",
+				Type:     "*ProxyInboundAuthSpec",
+				JSONTag:  "`json:\"inboundAuth,omitempty\"`",
+				Doc:      "InboundAuth configures authentication for inbound MCP clients.",
+				Optional: true,
+			},
+			{
+				Name:     "Telemetry",
+				Type:     "*ProxyTelemetrySpec",
+				JSONTag:  "`json:\"telemetry,omitempty\"`",
+				Doc:      "Telemetry configures observability settings.",
+				Optional: true,
+			},
+		},
+	},
+	// ── NamespaceSelectorSpec ─────────────────────────────────────────────────────
+	{
+		Name: "NamespaceSelectorSpec",
+		Doc:  "NamespaceSelectorSpec selects namespaces by name.",
+		Fields: []fieldSpec{
+			{
+				Name:     "MatchNames",
+				Type:     "[]string",
+				JSONTag:  "`json:\"matchNames,omitempty\"`",
+				Doc:      "MatchNames is a list of namespace names to search for MCPUpstream resources.",
+				Optional: true,
+			},
+		},
+	},
+	// ── ServiceDiscoverySpec ──────────────────────────────────────────────────────
+	{
+		Name: "ServiceDiscoverySpec",
+		Doc:  "ServiceDiscoverySpec configures annotation-based upstream discovery from Services.",
+		Fields: []fieldSpec{
+			{
+				Name:     "Enabled",
+				Type:     "bool",
+				JSONTag:  "`json:\"enabled,omitempty\"`",
+				Doc:      "Enabled enables scanning for Services annotated with mcp-anything.ai/enabled=true.",
+				Optional: true,
+			},
+			{
+				Name:     "NamespaceSelector",
+				Type:     "*ServiceDiscoveryNamespaceSelector",
+				JSONTag:  "`json:\"namespaceSelector,omitempty\"`",
+				Doc:      "NamespaceSelector restricts which namespaces are scanned for annotated Services. If not set, the same namespaces as NamespaceSelector are used.",
+				Optional: true,
+			},
+		},
+	},
+	// ── ServiceDiscoveryNamespaceSelector ────────────────────────────────────────
+	{
+		Name: "ServiceDiscoveryNamespaceSelector",
+		Doc:  "ServiceDiscoveryNamespaceSelector restricts which namespaces are scanned for annotated Services.",
+		Fields: []fieldSpec{
+			{
+				Name:     "MatchNames",
+				Type:     "[]string",
+				JSONTag:  "`json:\"matchNames,omitempty\"`",
+				Doc:      "MatchNames is a list of specific namespace names to scan.",
+				Optional: true,
+			},
+			{
+				Name:     "MatchLabels",
+				Type:     "map[string]string",
+				JSONTag:  "`json:\"matchLabels,omitempty\"`",
+				Doc:      "MatchLabels scans all namespaces whose labels match these key-value pairs.",
+				Optional: true,
+			},
+		},
+	},
+	// ── MCPProxyStatus ────────────────────────────────────────────────────────────
+	{
+		Name: "MCPProxyStatus",
+		Doc:  "MCPProxyStatus defines the observed state of MCPProxy.",
+		Fields: []fieldSpec{
+			{
+				Name:     "Conditions",
+				Type:     "[]metav1.Condition",
+				JSONTag:  "`json:\"conditions,omitempty\"`",
+				Doc:      "Conditions represents the latest available observations of the MCPProxy state.",
+				Optional: true,
+			},
+			{
+				Name:    "UpstreamCount",
+				Type:    "int",
+				JSONTag: "`json:\"upstreamCount,omitempty\"`",
+				Doc:     "UpstreamCount is the number of MCPUpstream resources currently selected.",
+			},
+			{
+				Name:    "AnnotatedServiceCount",
+				Type:    "int",
+				JSONTag: "`json:\"annotatedServiceCount,omitempty\"`",
+				Doc:     "AnnotatedServiceCount is the number of annotated Services currently discovered.",
+			},
+			{
+				Name:    "ToolCount",
+				Type:    "int",
+				JSONTag: "`json:\"toolCount,omitempty\"`",
+				Doc:     "ToolCount is the total number of MCP tools exposed.",
+			},
+			{
+				Name:    "ObservedGeneration",
+				Type:    "int64",
+				JSONTag: "`json:\"observedGeneration,omitempty\"`",
+				Doc:     "ObservedGeneration is the generation of the spec last processed by the controller.",
+			},
+		},
+	},
+	// ── MCPProxyList ──────────────────────────────────────────────────────────────
+	{
+		Name:        "MCPProxyList",
+		Doc:         "MCPProxyList contains a list of MCPProxy.",
+		TypeMarkers: []string{"+kubebuilder:object:root=true"},
+		Fields: []fieldSpec{
+			{Embedded: true, Type: "metav1.TypeMeta", JSONTag: "`json:\",inline\"`"},
+			{Embedded: true, Type: "metav1.ListMeta", JSONTag: "`json:\"metadata,omitempty\"`"},
+			{Name: "Items", Type: "[]MCPProxy", JSONTag: "`json:\"items\"`", Doc: "Items is the list of MCPProxy resources."},
+		},
+	},
+	// ── MCPUpstream ───────────────────────────────────────────────────────────────
+	{
+		Name: "MCPUpstream",
+		Doc:  "MCPUpstream is the Schema for the mcpupstreams API.",
+		TypeMarkers: []string{
+			"+kubebuilder:object:root=true",
+			"+kubebuilder:subresource:status",
+			"+kubebuilder:resource:scope=Namespaced",
+			`+kubebuilder:printcolumn:name="Proxy",type=string,JSONPath=".status.assignedProxy"`,
+			`+kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"`,
+		},
+		Fields: []fieldSpec{
+			{Embedded: true, Type: "metav1.TypeMeta", JSONTag: "`json:\",inline\"`"},
+			{Embedded: true, Type: "metav1.ObjectMeta", JSONTag: "`json:\"metadata,omitempty\"`"},
+			{Name: "Spec", Type: "MCPUpstreamSpec", JSONTag: "`json:\"spec,omitempty\"`", Doc: "Spec is the desired state of MCPUpstream.", Optional: true},
+			{Name: "Status", Type: "MCPUpstreamStatus", JSONTag: "`json:\"status,omitempty\"`", Doc: "Status is the observed state of MCPUpstream.", Optional: true},
+		},
+	},
+	// ── MCPUpstreamSpec ───────────────────────────────────────────────────────────
+	{
+		Name: "MCPUpstreamSpec",
+		Doc:  "MCPUpstreamSpec defines the desired state of MCPUpstream.",
+		Fields: []fieldSpec{
+			{
+				Name:     "Type",
+				Type:     "string",
+				JSONTag:  "`json:\"type,omitempty\"`",
+				Markers:  []string{"+kubebuilder:default=http", "+kubebuilder:validation:Enum=http;command"},
+				Doc:      "Type is the upstream type: \"http\" (default) or \"command\". HTTP upstreams require baseURL/serviceRef and openapi. Command upstreams require commands and must not set baseURL/serviceRef/openapi.",
+				Optional: true,
+			},
+			{
+				Name:     "ToolPrefix",
+				Type:     "string",
+				JSONTag:  "`json:\"toolPrefix,omitempty\"`",
+				Doc:      "ToolPrefix is prepended to all tool names from this upstream.",
+				Optional: true,
+			},
+			{
+				Name:     "ServiceRef",
+				Type:     "*ServiceRefSpec",
+				JSONTag:  "`json:\"serviceRef,omitempty\"`",
+				Doc:      "ServiceRef references an in-cluster Kubernetes Service. Mutually exclusive with BaseURL. Only used when Type is \"http\".",
+				Optional: true,
+			},
+			{
+				Name:     "BaseURL",
+				Type:     "string",
+				JSONTag:  "`json:\"baseURL,omitempty\"`",
+				Doc:      "BaseURL is the base URL for the upstream HTTP API. Mutually exclusive with ServiceRef. Only used when Type is \"http\".",
+				Optional: true,
+			},
+			{
+				Name:     "OpenAPI",
+				Type:     "MCPUpstreamOpenAPISpec",
+				JSONTag:  "`json:\"openapi,omitempty\"`",
+				Doc:      "OpenAPI configures the OpenAPI spec source. Required when Type is \"http\".",
+				Optional: true,
+			},
+			{
+				Name:     "Overlay",
+				Type:     "*MCPUpstreamOverlaySpec",
+				JSONTag:  "`json:\"overlay,omitempty\"`",
+				Doc:      "Overlay configures an optional OpenAPI Overlay document.",
+				Optional: true,
+			},
+			{
+				Name:     "OutboundAuth",
+				Type:     "*MCPUpstreamOutboundAuthSpec",
+				JSONTag:  "`json:\"outboundAuth,omitempty\"`",
+				Doc:      "OutboundAuth configures authentication for outbound requests to the upstream.",
+				Optional: true,
+			},
+			{
+				Name:     "Transport",
+				Type:     "*MCPUpstreamTransportSpec",
+				JSONTag:  "`json:\"transport,omitempty\"`",
+				Doc:      "Transport configures HTTP transport settings for the upstream.",
+				Optional: true,
+			},
+			{
+				Name:     "Validation",
+				Type:     "*MCPUpstreamValidationSpec",
+				JSONTag:  "`json:\"validation,omitempty\"`",
+				Doc:      "Validation configures request/response validation against the OpenAPI schema.",
+				Optional: true,
+			},
+			{
+				Name:     "Commands",
+				Type:     "[]MCPUpstreamCommandSpec",
+				JSONTag:  "`json:\"commands,omitempty\"`",
+				Doc:      "Commands defines command-backed MCP tools. Required when Type is \"command\".",
+				Optional: true,
+			},
+		},
+	},
+	// ── ServiceRefSpec ────────────────────────────────────────────────────────────
+	{
+		Name: "ServiceRefSpec",
+		Doc:  "ServiceRefSpec references a Kubernetes Service.",
+		Fields: []fieldSpec{
+			{
+				Name:    "Name",
+				Type:    "string",
+				JSONTag: "`json:\"name\"`",
+				Doc:     "Name is the name of the Service.",
+			},
+			{
+				Name:    "Port",
+				Type:    "int32",
+				JSONTag: "`json:\"port\"`",
+				Markers: []string{"+kubebuilder:validation:Minimum=1", "+kubebuilder:validation:Maximum=65535"},
+				Doc:     "Port is the port the service exposes.",
+			},
+		},
+	},
+	// ── MCPUpstreamOpenAPISpec ────────────────────────────────────────────────────
+	{
+		Name: "MCPUpstreamOpenAPISpec",
+		Doc:  "MCPUpstreamOpenAPISpec configures the OpenAPI spec source.",
+		Fields: []fieldSpec{
+			{
+				Name:     "ConfigMapRef",
+				Type:     "*ConfigMapKeyRef",
+				JSONTag:  "`json:\"configMapRef,omitempty\"`",
+				Doc:      "ConfigMapRef references a ConfigMap containing the OpenAPI spec. Mutually exclusive with URL and AutoDiscover.",
+				Optional: true,
+			},
+			{
+				Name:     "URL",
+				Type:     "string",
+				JSONTag:  "`json:\"url,omitempty\"`",
+				Doc:      "URL is the URL from which the OpenAPI spec is fetched. Mutually exclusive with ConfigMapRef and AutoDiscover.",
+				Optional: true,
+			},
+			{
+				Name:     "AutoDiscover",
+				Type:     "*AutoDiscoverSpec",
+				JSONTag:  "`json:\"autoDiscover,omitempty\"`",
+				Doc:      "AutoDiscover configures automatic OpenAPI spec discovery from the upstream. Mutually exclusive with ConfigMapRef and URL.",
+				Optional: true,
+			},
+		},
+	},
+	// ── ConfigMapKeyRef ───────────────────────────────────────────────────────────
+	{
+		Name: "ConfigMapKeyRef",
+		Doc:  "ConfigMapKeyRef references a specific key within a ConfigMap.",
+		Fields: []fieldSpec{
+			{
+				Name:    "Name",
+				Type:    "string",
+				JSONTag: "`json:\"name\"`",
+				Doc:     "Name is the name of the ConfigMap.",
+			},
+			{
+				Name:    "Key",
+				Type:    "string",
+				JSONTag: "`json:\"key\"`",
+				Doc:     "Key is the key in the ConfigMap data.",
+			},
+		},
+	},
+	// ── AutoDiscoverSpec ──────────────────────────────────────────────────────────
+	{
+		Name: "AutoDiscoverSpec",
+		Doc:  "AutoDiscoverSpec configures automatic OpenAPI discovery.",
+		Fields: []fieldSpec{
+			{
+				Name:     "Path",
+				Type:     "string",
+				JSONTag:  "`json:\"path,omitempty\"`",
+				Doc:      "Path is the URL path at which the upstream serves its OpenAPI spec.",
+				Optional: true,
+			},
+		},
+	},
+	// ── MCPUpstreamOverlaySpec ────────────────────────────────────────────────────
+	{
+		Name: "MCPUpstreamOverlaySpec",
+		Doc:  "MCPUpstreamOverlaySpec configures an OpenAPI Overlay document.",
+		Fields: []fieldSpec{
+			{
+				Name:     "ConfigMapRef",
+				Type:     "*ConfigMapKeyRef",
+				JSONTag:  "`json:\"configMapRef,omitempty\"`",
+				Doc:      "ConfigMapRef references a ConfigMap containing the overlay document.",
+				Optional: true,
+			},
+		},
+	},
+	// ── MCPUpstreamStatus ─────────────────────────────────────────────────────────
+	{
+		Name: "MCPUpstreamStatus",
+		Doc:  "MCPUpstreamStatus defines the observed state of MCPUpstream.",
+		Fields: []fieldSpec{
+			{
+				Name:     "Conditions",
+				Type:     "[]metav1.Condition",
+				JSONTag:  "`json:\"conditions,omitempty\"`",
+				Doc:      "Conditions represents the latest available observations of the MCPUpstream state.",
+				Optional: true,
+			},
+			{
+				Name:     "AssignedProxy",
+				Type:     "string",
+				JSONTag:  "`json:\"assignedProxy,omitempty\"`",
+				Doc:      "AssignedProxy is the name of the MCPProxy this upstream is currently assigned to.",
+				Optional: true,
+			},
+			{
+				Name:    "ToolCount",
+				Type:    "int",
+				JSONTag: "`json:\"toolCount,omitempty\"`",
+				Doc:     "ToolCount is the number of MCP tools this upstream contributes.",
+			},
+		},
+	},
+	// ── MCPUpstreamList ───────────────────────────────────────────────────────────
+	{
+		Name:        "MCPUpstreamList",
+		Doc:         "MCPUpstreamList contains a list of MCPUpstream.",
+		TypeMarkers: []string{"+kubebuilder:object:root=true"},
+		Fields: []fieldSpec{
+			{Embedded: true, Type: "metav1.TypeMeta", JSONTag: "`json:\",inline\"`"},
+			{Embedded: true, Type: "metav1.ListMeta", JSONTag: "`json:\"metadata,omitempty\"`"},
+			{Name: "Items", Type: "[]MCPUpstream", JSONTag: "`json:\"items\"`", Doc: "Items is the list of MCPUpstream resources."},
+		},
+	},
 }
 
 // crdTypeSpecs is the complete mapping of config types to generated CRD spec types.
@@ -654,6 +1095,93 @@ func ValidateSpecFile(repoRoot string) (bool, error) {
 			return false, nil
 		}
 		return false, fmt.Errorf("reading %s: %w", specPath, err)
+	}
+
+	return bytes.Equal(expected, existing), nil
+}
+
+// GenerateTypesContent generates the content of types_gen.go from crdRootTypeSpecs.
+func GenerateTypesContent() ([]byte, error) {
+	var sb strings.Builder
+
+	sb.WriteString("// Code generated by \"go run ./cmd/crdgen\". DO NOT EDIT.\n")
+	sb.WriteString("// Regenerate with: make generate-crds\n\n")
+	sb.WriteString("package v1alpha1\n\n")
+	sb.WriteString("import (\n")
+	sb.WriteString("\tcorev1 \"k8s.io/api/core/v1\"\n")
+	sb.WriteString("\tmetav1 \"k8s.io/apimachinery/pkg/apis/meta/v1\"\n")
+	sb.WriteString(")\n")
+
+	for _, ts := range crdRootTypeSpecs {
+		sb.WriteString("\n")
+		for _, marker := range ts.TypeMarkers {
+			sb.WriteString("// " + marker + "\n")
+		}
+		if len(ts.TypeMarkers) > 0 {
+			sb.WriteString("\n")
+		}
+		sb.WriteString("// " + ts.Doc + "\n")
+		sb.WriteString("type " + ts.Name + " struct {\n")
+		for _, f := range ts.Fields {
+			if f.Embedded {
+				sb.WriteString("\t" + f.Type + " " + f.JSONTag + "\n")
+			} else {
+				for _, marker := range f.Markers {
+					sb.WriteString("\t// " + marker + "\n")
+				}
+				if f.Optional {
+					sb.WriteString("\t// +optional\n")
+				}
+				if f.Doc != "" {
+					sb.WriteString("\t// " + f.Doc + "\n")
+				}
+				sb.WriteString("\t" + f.Name + " " + f.Type + " " + f.JSONTag + "\n")
+			}
+		}
+		sb.WriteString("}\n")
+	}
+
+	sb.WriteString("\nfunc init() {\n")
+	sb.WriteString("\tSchemeBuilder.Register(&MCPProxy{}, &MCPProxyList{})\n")
+	sb.WriteString("\tSchemeBuilder.Register(&MCPUpstream{}, &MCPUpstreamList{})\n")
+	sb.WriteString("}\n")
+
+	formatted, err := format.Source([]byte(sb.String()))
+	if err != nil {
+		return []byte(sb.String()), fmt.Errorf("formatting generated types (raw output follows): %w", err)
+	}
+	return formatted, nil
+}
+
+// WriteTypesFile generates and writes pkg/crd/v1alpha1/types_gen.go.
+func WriteTypesFile(repoRoot string) error {
+	content, err := GenerateTypesContent()
+	if err != nil {
+		return fmt.Errorf("generating types content: %w", err)
+	}
+
+	outPath := filepath.Join(repoRoot, TypesGenPath)
+	if err := os.WriteFile(outPath, content, 0o644); err != nil {
+		return fmt.Errorf("writing %s: %w", outPath, err)
+	}
+	return nil
+}
+
+// ValidateTypesFile checks that pkg/crd/v1alpha1/types_gen.go matches what would be generated.
+// Returns (true, nil) if up-to-date, (false, nil) if out of date, or (false, err) on errors.
+func ValidateTypesFile(repoRoot string) (bool, error) {
+	expected, err := GenerateTypesContent()
+	if err != nil {
+		return false, fmt.Errorf("generating expected types content: %w", err)
+	}
+
+	typesPath := filepath.Join(repoRoot, TypesGenPath)
+	existing, err := os.ReadFile(typesPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("reading %s: %w", typesPath, err)
 	}
 
 	return bytes.Equal(expected, existing), nil

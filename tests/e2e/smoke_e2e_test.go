@@ -505,6 +505,7 @@ func helmInstallOperator(ctx context.Context, t *testing.T, kubeConfigYAML []byt
 		"--timeout", "3m",
 	)
 	if out, err := installCmd.CombinedOutput(); err != nil {
+		collectNamespaceDiagnostics(t, kubeconfigPath, smokeNamespace)
 		t.Fatalf("helm install failed: %v\noutput:\n%s", err, out)
 	}
 	t.Log("helm install succeeded")
@@ -724,4 +725,46 @@ func waitForWiremockAdmin(ctx context.Context, baseURL string) error {
 		}
 		return body.Status == "healthy", nil
 	})
+}
+
+// collectNamespaceDiagnostics gathers pod status, events, and container logs from
+// the given namespace using kubectl, then logs them via t.Logf. Call this before
+// t.Fatalf when a helm install or pod readiness check fails so the CI log contains
+// enough context to diagnose the failure without manual re-runs.
+func collectNamespaceDiagnostics(t *testing.T, kubeconfigPath, namespace string) {
+	t.Helper()
+
+	kubectl := func(args ...string) string {
+		diagCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(diagCtx, "kubectl", append([]string{"--kubeconfig", kubeconfigPath}, args...)...) //nolint:gosec // test helper
+		out, _ := cmd.CombinedOutput()
+		return string(out)
+	}
+
+	t.Logf("=== DIAGNOSTICS: namespace %s ===", namespace)
+
+	// Pod overview.
+	t.Logf("--- pods ---\n%s", kubectl("get", "pods", "-n", namespace, "-o", "wide"))
+
+	// Per-pod details: describe + logs (including from previously-crashed containers).
+	podsOut := kubectl("get", "pods", "-n", namespace, "-o", "jsonpath={.items[*].metadata.name}")
+	for _, podName := range strings.Fields(podsOut) {
+		t.Logf("--- describe pod/%s ---\n%s", podName,
+			kubectl("describe", "pod", podName, "-n", namespace))
+
+		// Current container logs.
+		t.Logf("--- logs pod/%s ---\n%s", podName,
+			kubectl("logs", podName, "-n", namespace, "--all-containers", "--tail=200"))
+
+		// Previous container logs (if the container crashed and restarted).
+		prev := kubectl("logs", podName, "-n", namespace, "--all-containers", "--previous", "--tail=200")
+		if prev != "" {
+			t.Logf("--- logs pod/%s (previous) ---\n%s", podName, prev)
+		}
+	}
+
+	// Namespace events sorted by time.
+	t.Logf("--- events ---\n%s",
+		kubectl("get", "events", "-n", namespace, "--sort-by=.metadata.creationTimestamp"))
 }

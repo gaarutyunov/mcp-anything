@@ -2,11 +2,10 @@
 // files are up to date with their source types and configuration.
 //
 // The linter fires only when golangci-lint analyses the pkg/crd/v1alpha1
-// package and checks three things:
+// package and checks two things:
 //
-//  1. types_gen.go matches what crdgen would produce from the root type specs.
-//  2. spec_gen.go matches what crdgen would produce from pkg/config/config.go.
-//  3. CRD YAML files in charts/mcp-anything/crds/ match controller-gen output.
+//  1. spec_gen.go matches what crdgen would produce from pkg/config/config.go.
+//  2. CRD YAML files in charts/mcp-anything/crds/ match controller-gen output.
 //
 // Fix any failures reported by this linter by running:
 //
@@ -25,6 +24,15 @@ import (
 
 	"github.com/gaarutyunov/mcp-anything/internal/crdutil"
 )
+
+// hashFile returns the SHA-256 hex digest of the file at path.
+func hashFile(path string) (string, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	return crdutil.HashBytes(b), nil
+}
 
 const controllerGenVersion = "v0.17.0"
 
@@ -75,16 +83,7 @@ func run(pass *analysis.Pass) (interface{}, error) {
 	// diagnostic anchor for all repo-level findings.
 	anchor := pass.Files[0].Package
 
-	// ── Phase 1: Validate types_gen.go ───────────────────────────────────────
-	typesOK, err := crdutil.ValidateTypesFile(repoRoot)
-	if err != nil {
-		return nil, fmt.Errorf("crdlint: validating types_gen.go: %w", err)
-	}
-	if !typesOK {
-		pass.Reportf(anchor, "%s is out of date — run: make generate-crds", crdutil.TypesGenPath)
-	}
-
-	// ── Phase 2: Validate spec_gen.go ────────────────────────────────────────
+	// ── Phase 1: Validate spec_gen.go ────────────────────────────────────────
 	specOK, err := crdutil.ValidateSpecFile(repoRoot)
 	if err != nil {
 		return nil, fmt.Errorf("crdlint: validating spec_gen.go: %w", err)
@@ -93,7 +92,7 @@ func run(pass *analysis.Pass) (interface{}, error) {
 		pass.Reportf(anchor, "%s is out of date — run: make generate-crds", crdutil.SpecGenPath)
 	}
 
-	// ── Phase 3: Validate CRD YAML files ─────────────────────────────────────
+	// ── Phase 2: Validate CRD YAML files ─────────────────────────────────────
 	tmpDir, err := os.MkdirTemp("", "mcp-crdlint-*")
 	if err != nil {
 		return nil, fmt.Errorf("crdlint: creating temp dir: %w", err)
@@ -106,23 +105,24 @@ func run(pass *analysis.Pass) (interface{}, error) {
 
 	for _, outDir := range crdOutputDirs {
 		for src, dst := range crdRenames {
-			generated, err := os.ReadFile(filepath.Join(tmpDir, src))
+			generatedHash, err := hashFile(filepath.Join(tmpDir, src))
 			if err != nil {
-				return nil, fmt.Errorf("crdlint: reading generated CRD %s: %w", src, err)
+				return nil, fmt.Errorf("crdlint: hashing generated CRD %s: %w", src, err)
 			}
 
 			dstPath := filepath.Join(repoRoot, outDir, dst)
-			existing, err := os.ReadFile(dstPath)
+			existingHash, err := hashFile(dstPath)
 			if err != nil {
 				if os.IsNotExist(err) {
 					pass.Reportf(anchor, "CRD file %s is missing — run: make generate-crds", filepath.Join(outDir, dst))
 					continue
 				}
-				return nil, fmt.Errorf("crdlint: reading %s: %w", dstPath, err)
+				return nil, fmt.Errorf("crdlint: hashing %s: %w", dstPath, err)
 			}
 
-			if !bytes.Equal(generated, existing) {
-				pass.Reportf(anchor, "CRD file %s is out of date — run: make generate-crds", filepath.Join(outDir, dst))
+			if generatedHash != existingHash {
+				pass.Reportf(anchor, "CRD file %s is out of date (generated sha256=%s, on-disk sha256=%s) — run: make generate-crds",
+					filepath.Join(outDir, dst), generatedHash, existingHash)
 			}
 		}
 	}

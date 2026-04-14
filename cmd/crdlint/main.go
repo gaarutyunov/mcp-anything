@@ -29,6 +29,15 @@ import (
 	"github.com/gaarutyunov/mcp-anything/internal/crdutil"
 )
 
+// hashFile returns the SHA-256 hex digest of the file at path.
+func hashFile(path string) (string, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	return crdutil.HashBytes(b), nil
+}
+
 const controllerGenVersion = "v0.17.0"
 
 // crdOutputDirs lists all helm chart directories that must contain up-to-date CRD manifests.
@@ -95,13 +104,13 @@ func run() (bool, error) {
 	for _, outDir := range crdOutputDirs {
 		absOutDir := filepath.Join(repoRoot, outDir)
 		for src, dst := range crdRenames {
-			generated, err := os.ReadFile(filepath.Join(tmpDir, src))
+			generatedHash, err := hashFile(filepath.Join(tmpDir, src))
 			if err != nil {
-				return false, fmt.Errorf("reading generated CRD %s: %w", src, err)
+				return false, fmt.Errorf("hashing generated CRD %s: %w", src, err)
 			}
 
 			dstPath := filepath.Join(absOutDir, dst)
-			existing, err := os.ReadFile(dstPath)
+			existingHash, err := hashFile(dstPath)
 			if err != nil {
 				if os.IsNotExist(err) {
 					slog.Error("CRD file missing — run: make generate-crds",
@@ -109,15 +118,19 @@ func run() (bool, error) {
 					allOK = false
 					continue
 				}
-				return false, fmt.Errorf("reading %s: %w", dstPath, err)
+				return false, fmt.Errorf("hashing %s: %w", dstPath, err)
 			}
 
-			if !bytes.Equal(generated, existing) {
+			if generatedHash != existingHash {
 				slog.Error("CRD file is out of date — run: make generate-crds",
-					"path", filepath.Join(outDir, dst))
+					"path", filepath.Join(outDir, dst),
+					"generated_sha256", generatedHash,
+					"existing_sha256", existingHash)
 				allOK = false
 			} else {
-				slog.Info("CRD file is up to date", "path", filepath.Join(outDir, dst))
+				slog.Info("CRD file is up to date",
+					"path", filepath.Join(outDir, dst),
+					"sha256", existingHash)
 			}
 		}
 	}

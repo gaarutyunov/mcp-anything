@@ -9,6 +9,8 @@
 package crdutil
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"go/ast"
 	"go/format"
@@ -20,6 +22,15 @@ import (
 	"strings"
 	"unicode"
 )
+
+// HashBytes returns the SHA-256 hex digest of b.
+// Use this instead of bytes.Equal when comparing generated vs on-disk file
+// content so that the comparison does not require holding both copies in memory
+// simultaneously and the diagnostic message can include the digest values.
+func HashBytes(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
 
 // SpecGenPath is the path (relative to repo root) of the generated spec types file.
 const SpecGenPath = "pkg/crd/v1alpha1/spec_gen.go"
@@ -131,7 +142,7 @@ func ValidateSpecFile(repoRoot string) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("reading %s: %w", SpecGenPath, err)
 	}
-	return want == string(got), nil
+	return HashBytes([]byte(want)) == HashBytes(got), nil
 }
 
 // ── internal helpers ──────────────────────────────────────────────────────────

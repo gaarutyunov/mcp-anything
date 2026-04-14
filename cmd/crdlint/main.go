@@ -1,9 +1,11 @@
 // Package main implements the CRD linter for mcp-anything.
 //
-// It validates that the CRD YAML files checked into the helm chart directories
-// exactly match what controller-gen would generate from pkg/crd/v1alpha1/types.go.
-// This catches situations where types.go is updated but the CRD YAML files are
-// not regenerated, or where the YAML files are edited by hand.
+// It validates that:
+//  1. pkg/crd/v1alpha1/spec_gen.go exactly matches what would be generated from
+//     pkg/config/config.go (catches cases where config types changed but the spec
+//     file was not regenerated).
+//  2. The CRD YAML files in charts/mcp-anything/crds/ exactly match what
+//     controller-gen would generate from pkg/crd/v1alpha1/types.go and spec_gen.go.
 //
 // Usage:
 //
@@ -12,7 +14,7 @@
 // Exit codes:
 //
 //	0  All CRD files are up-to-date.
-//	1  One or more CRD files are out of date or missing. Run "make generate-crds".
+//	1  One or more files are out of date or missing. Run "make generate-crds".
 package main
 
 import (
@@ -23,6 +25,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+
+	"github.com/gaarutyunov/mcp-anything/internal/crdutil"
 )
 
 const controllerGenVersion = "v0.17.0"
@@ -30,7 +34,6 @@ const controllerGenVersion = "v0.17.0"
 // crdOutputDirs lists all helm chart directories that must contain up-to-date CRD manifests.
 var crdOutputDirs = []string{
 	"charts/mcp-anything/crds",
-	"deploy/helm/mcp-anything/crds",
 }
 
 // crdRenames maps the controller-gen output filenames to the canonical names
@@ -60,6 +63,25 @@ func run() (bool, error) {
 	}
 	slog.Info("validating CRDs", "repo_root", repoRoot)
 
+	allOK := true
+
+	// ── Phase 1: Validate spec_gen.go ────────────────────────────────────────────
+	slog.Info("phase 1: validating spec_gen.go")
+	specOK, err := crdutil.ValidateSpecFile(repoRoot)
+	if err != nil {
+		return false, fmt.Errorf("validating spec file: %w", err)
+	}
+	if !specOK {
+		slog.Error("spec_gen.go is out of date — run: make generate-crds",
+			"path", crdutil.SpecGenPath)
+		allOK = false
+	} else {
+		slog.Info("spec_gen.go is up to date", "path", crdutil.SpecGenPath)
+	}
+
+	// ── Phase 2: Validate CRD YAML files ─────────────────────────────────────────
+	slog.Info("phase 2: validating CRD YAML files")
+
 	// Generate CRDs to a temp directory.
 	tmpDir, err := os.MkdirTemp("", "mcp-crdlint-*")
 	if err != nil {
@@ -72,7 +94,6 @@ func run() (bool, error) {
 	}
 
 	// Compare generated files with each output directory.
-	allOK := true
 	for _, outDir := range crdOutputDirs {
 		absOutDir := filepath.Join(repoRoot, outDir)
 		for src, dst := range crdRenames {

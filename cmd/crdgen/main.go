@@ -1,16 +1,22 @@
 // Package main implements the CRD generator for mcp-anything.
 //
-// It uses controller-gen to generate CRD YAML manifests from the Go type
-// definitions in pkg/crd/v1alpha1/, then writes them to all helm chart
-// locations that ship the CRDs.
+// It runs in two phases:
+//
+//  1. Type generation: reads pkg/config/config.go and generates
+//     pkg/crd/v1alpha1/spec_gen.go with the CRD spec types derived from the
+//     proxy/upstream config types.
+//
+//  2. YAML generation: invokes controller-gen to produce CRD YAML manifests
+//     from the types in pkg/crd/v1alpha1/ and writes them to
+//     charts/mcp-anything/crds/.
 //
 // Usage:
 //
 //	go run ./cmd/crdgen
 //
 // The generator is idempotent: running it twice produces the same output.
-// Run it whenever pkg/crd/v1alpha1/types.go changes, then commit the
-// updated CRD YAML files together with the Go changes.
+// Run it whenever pkg/config/config.go or pkg/crd/v1alpha1/types.go changes,
+// then commit the updated files together with the Go changes.
 package main
 
 import (
@@ -22,6 +28,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+
+	"github.com/gaarutyunov/mcp-anything/internal/crdutil"
 )
 
 const controllerGenVersion = "v0.17.0"
@@ -30,7 +38,6 @@ const controllerGenVersion = "v0.17.0"
 // The generator writes to each of these directories.
 var crdOutputDirs = []string{
 	"charts/mcp-anything/crds",
-	"deploy/helm/mcp-anything/crds",
 }
 
 // crdRenames maps the controller-gen output filenames to the canonical names
@@ -55,6 +62,16 @@ func run() error {
 		return fmt.Errorf("finding repo root: %w", err)
 	}
 	slog.Info("generating CRDs", "repo_root", repoRoot)
+
+	// ── Phase 1: Generate spec_gen.go from config types ──────────────────────────
+	slog.Info("phase 1: generating CRD spec types from config")
+	if err := crdutil.WriteSpecFile(repoRoot); err != nil {
+		return fmt.Errorf("writing spec file: %w", err)
+	}
+	slog.Info("wrote spec file", "path", crdutil.SpecGenPath)
+
+	// ── Phase 2: Generate CRD YAML via controller-gen ────────────────────────────
+	slog.Info("phase 2: generating CRD YAML via controller-gen")
 
 	// Generate CRDs to a temp directory.
 	tmpDir, err := os.MkdirTemp("", "mcp-crds-*")

@@ -138,6 +138,7 @@ jobs:
   build-workspace-image:
     name: Build & Push Workspace Image
     runs-on: ubuntu-latest
+    needs: [build-image]
     permissions:
       contents: read
       packages: write

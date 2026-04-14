@@ -44,9 +44,9 @@ The Kraken cryptocurrency exchange exposes a public REST API — no API key requ
 ```bash
 # 1. Download config, OpenAPI spec, and overlay
 mkdir -p kraken && cd kraken
-curl -sLO https://raw.githubusercontent.com/gaarutyunov/mcp-anything/main/deploy/examples/kraken/config.yaml
-curl -sLO https://raw.githubusercontent.com/gaarutyunov/mcp-anything/main/deploy/examples/kraken/spec.yaml
-curl -sLO https://raw.githubusercontent.com/gaarutyunov/mcp-anything/main/deploy/examples/kraken/overlay.yaml
+curl -sLO https://raw.githubusercontent.com/gaarutyunov/mcp-anything/main/examples/kraken/config.yaml
+curl -sLO https://raw.githubusercontent.com/gaarutyunov/mcp-anything/main/examples/kraken/spec.yaml
+curl -sLO https://raw.githubusercontent.com/gaarutyunov/mcp-anything/main/examples/kraken/overlay.yaml
 
 # 2. Install and run
 go install github.com/gaarutyunov/mcp-anything/cmd/proxy@latest
@@ -72,7 +72,7 @@ Connect any MCP client to `http://localhost:8080/mcp`. Five tools are now availa
 | `kraken__get_order_book` | Live order book with top 5 bid/ask levels |
 | `kraken__get_recent_trades` | Most recent 10 public trades |
 
-The overlay in [deploy/examples/kraken/overlay.yaml](deploy/examples/kraken/overlay.yaml) applies jq transforms that flatten Kraken's nested response format into clean named fields — no client-side parsing required.
+The overlay in [examples/kraken/overlay.yaml](examples/kraken/overlay.yaml) applies jq transforms that flatten Kraken's nested response format into clean named fields — no client-side parsing required.
 
 #### Use with Claude Code
 
@@ -103,10 +103,10 @@ upstreams:
     tool_prefix: kraken
     base_url: https://api.kraken.com
     openapi:
-      source: deploy/examples/kraken/spec.yaml
+      source: examples/kraken/spec.yaml
       refresh_interval: 5m
     overlay:
-      source: deploy/examples/kraken/overlay.yaml
+      source: examples/kraken/overlay.yaml
 
   # Shell command upstream — wraps any CLI tool
   - name: cluster
@@ -147,11 +147,11 @@ groups:
     filter: "$.paths[?(@['x-mcp-safe'] == true)]"
 ```
 
-See [deploy/examples/](deploy/examples/) for complete examples including Kubernetes CRDs and Helm values.
+See [examples/](examples/) for complete examples including Kubernetes CRDs and Helm values.
 
 ## OpenAPI Overlays
 
-Customize how operations are exposed as MCP tools without modifying the original spec. The [Kraken overlay](deploy/examples/kraken/overlay.yaml) shows realistic use:
+Customize how operations are exposed as MCP tools without modifying the original spec. The [Kraken overlay](examples/kraken/overlay.yaml) shows realistic use:
 
 ```yaml
 overlay: 1.0.0
@@ -285,7 +285,7 @@ spec:
             name: mcp-anything-config
 ```
 
-Use the `MCPProxy` and `MCPUpstream` CRDs with the included Helm chart for production deployments. See [deploy/examples/kraken/](deploy/examples/kraken/) for a complete Kubernetes example including CRD manifests and Helm values.
+Use the `MCPProxy` and `MCPUpstream` CRDs with the included Helm chart for production deployments. See [examples/kraken/](examples/kraken/) for a complete Kubernetes example including CRD manifests and Helm values.
 
 ## Development
 

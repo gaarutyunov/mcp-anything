@@ -4,6 +4,8 @@ BINARY := bin/proxy
 OPERATOR_BINARY := bin/operator
 GOFLAGS := -race
 INTEGRATION_TIMEOUT := 600s
+E2E_TEST ?=
+E2E_RUN_FLAG = $(if $(E2E_TEST),-run $(E2E_TEST),)
 
 HELM_CHART_DIR := charts/mcp-anything
 HELM_DIST_DIR := dist
@@ -28,6 +30,9 @@ test:
 
 integration:
 	go test $(GOFLAGS) -tags integration -count=1 -timeout $(INTEGRATION_TIMEOUT) ./tests/integration/...
+
+e2e:
+	go test $(GOFLAGS) -tags e2e -count=1 -timeout $(INTEGRATION_TIMEOUT) $(E2E_RUN_FLAG) ./tests/e2e/...
 
 treeshake:
 	go test -tags treeshake -count=1 ./tests/treeshake/...

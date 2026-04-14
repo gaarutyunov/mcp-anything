@@ -1,0 +1,23 @@
+## MCPProxy — tells the mcp-anything operator to create a proxy Deployment + Service.
+## Apply after the MCPUpstream is created:
+##   kubectl apply -f examples/kagent/mcpproxy.yaml -n mcp-system
+##
+## Replace <PROXY_IMAGE> with the mcp-anything proxy image tag
+## (e.g. ghcr.io/gaarutyunov/mcp-anything:latest).
+
+apiVersion: mcp-anything.ai/v1alpha1
+kind: MCPProxy
+metadata:
+  name: demo-proxy
+  namespace: mcp-system
+spec:
+  upstreamSelector:
+    matchLabels:
+      mcp-anything.ai/proxy: demo-proxy
+  image: "<PROXY_IMAGE>"
+  server:
+    port: 8080
+    transport:
+      - streamable-http
+  naming:
+    separator: "__"

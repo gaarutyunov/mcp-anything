@@ -7,13 +7,13 @@
 ##   1. mcp-anything operator is deployed (see helm-values.yaml)
 ##   2. The kraken ConfigMaps are created:
 ##      kubectl -n mcp-system create configmap kraken-spec \
-##        --from-file=spec.yaml=deploy/examples/kraken/spec.yaml
+##        --from-file=spec.yaml=examples/kraken/spec.yaml
 ##      kubectl -n mcp-system create configmap kraken-overlay \
-##        --from-file=overlay.yaml=deploy/examples/kraken/overlay.yaml
+##        --from-file=overlay.yaml=examples/kraken/overlay.yaml
 ##   3. The MCPUpstream is applied (see mcpupstream.yaml)
 ##
 ## Apply:
-##   kubectl apply -f deploy/examples/kraken/mcpproxy.yaml
+##   kubectl apply -f examples/kraken/mcpproxy.yaml
 apiVersion: mcp-anything.ai/v1alpha1
 kind: MCPProxy
 metadata:

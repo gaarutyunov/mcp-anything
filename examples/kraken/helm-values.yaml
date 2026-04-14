@@ -3,11 +3,11 @@
 ## Usage:
 ##   helm install mcp-anything ./deploy/helm/mcp-anything \
 ##     -n mcp-system --create-namespace \
-##     -f deploy/examples/kraken/helm-values.yaml
+##     -f examples/kraken/helm-values.yaml
 ##
 ## After installing the operator, apply the MCPProxy and MCPUpstream resources:
-##   kubectl apply -f deploy/examples/kraken/mcpproxy.yaml
-##   kubectl apply -f deploy/examples/kraken/mcpupstream.yaml
+##   kubectl apply -f examples/kraken/mcpproxy.yaml
+##   kubectl apply -f examples/kraken/mcpupstream.yaml
 
 replicaCount: 1
 

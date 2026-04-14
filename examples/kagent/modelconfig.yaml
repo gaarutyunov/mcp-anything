@@ -1,0 +1,23 @@
+## ModelConfig — points kagent at the Anthropic API (or any OpenAI-compatible endpoint).
+## Create the API key secret first:
+##   kubectl create secret generic llm-api-key \
+##     --from-literal=ANTHROPIC_API_KEY=<YOUR_ANTHROPIC_API_KEY> \
+##     -n <NAMESPACE>
+##
+## Then apply this resource:
+##   kubectl apply -f examples/kagent/modelconfig.yaml -n <NAMESPACE>
+
+apiVersion: kagent.dev/v1alpha2
+kind: ModelConfig
+metadata:
+  name: demo-model
+  namespace: mcp-system
+spec:
+  model: claude-3-5-sonnet-20241022
+  provider: Anthropic
+  apiKeySecret: llm-api-key
+  apiKeySecretKey: ANTHROPIC_API_KEY
+  anthropic:
+    maxTokens: 4096
+    # Uncomment to override the Anthropic base URL (e.g. for a local mock):
+    # baseUrl: http://my-llm-mock:8080

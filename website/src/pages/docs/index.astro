@@ -18,9 +18,9 @@ import DocsLayout from '../../layouts/DocsLayout.astro';
   <p>The Kraken cryptocurrency exchange offers a public REST API with no authentication required. Download the example config files and start the proxy:</p>
   <p><strong>1. Download config, spec, and overlay</strong></p>
   <pre><code>mkdir -p kraken && cd kraken
-curl -sLO https://raw.githubusercontent.com/gaarutyunov/mcp-anything/main/deploy/examples/kraken/config.yaml
-curl -sLO https://raw.githubusercontent.com/gaarutyunov/mcp-anything/main/deploy/examples/kraken/spec.yaml
-curl -sLO https://raw.githubusercontent.com/gaarutyunov/mcp-anything/main/deploy/examples/kraken/overlay.yaml</code></pre>
+curl -sLO https://raw.githubusercontent.com/gaarutyunov/mcp-anything/main/examples/kraken/config.yaml
+curl -sLO https://raw.githubusercontent.com/gaarutyunov/mcp-anything/main/examples/kraken/spec.yaml
+curl -sLO https://raw.githubusercontent.com/gaarutyunov/mcp-anything/main/examples/kraken/overlay.yaml</code></pre>
   <p><strong>2. Install and run</strong></p>
   <pre><code>go install github.com/gaarutyunov/mcp-anything/cmd/proxy@latest
 CONFIG_PATH=config.yaml proxy</code></pre>

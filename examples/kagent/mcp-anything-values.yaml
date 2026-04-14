@@ -1,0 +1,35 @@
+## Helm values for deploying mcp-anything operator to serve a Demo Items API
+## to be used as a kagent RemoteMCPServer.
+##
+## Usage:
+##   helm install mcp-anything ./deploy/helm/mcp-anything \
+##     -n mcp-system --create-namespace \
+##     -f examples/kagent/mcp-anything-values.yaml
+##
+## After installing the operator, apply the MCPProxy and MCPUpstream resources
+## and then the kagent resources (modelconfig.yaml, remotemcpserver.yaml, agent.yaml).
+##
+## Replace <UPSTREAM_BASE_URL> and <OPENAPI_SPEC_URL> with your actual upstream addresses.
+
+replicaCount: 1
+
+image:
+  repository: ghcr.io/gaarutyunov/mcp-anything-operator
+  pullPolicy: IfNotPresent
+  tag: ""  # defaults to .Chart.AppVersion
+
+serviceAccount:
+  create: true
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 128Mi
+
+# Watch only a specific namespace to limit scope.
+watchNamespace: "mcp-system"
+
+leaderElect: false

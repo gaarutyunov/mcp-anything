@@ -1,0 +1,69 @@
+## Minimal Helm values for deploying kagent alongside mcp-anything.
+##
+## Usage:
+##   helm install kagent-crds oci://ghcr.io/kagent-dev/kagent/helm/kagent-crds \
+##     --version v0.9.0-beta3 --namespace kagent --create-namespace
+##
+##   helm install kagent oci://ghcr.io/kagent-dev/kagent/helm/kagent \
+##     --version v0.9.0-beta3 --namespace kagent \
+##     -f examples/kagent/kagent-values.yaml \
+##     --set providers.anthropic.apiKey=<YOUR_ANTHROPIC_API_KEY>
+##
+## Adjust providers.anthropic.apiKey (or use providers.openAI / providers.ollama).
+
+# Disable heavyweight optional sub-charts not needed for basic mcp-anything integration.
+kmcp:
+  enabled: false
+
+# Disable built-in agents; add only the agents you need.
+agents:
+  k8s-agent:
+    enabled: false
+  kgateway-agent:
+    enabled: false
+  istio-agent:
+    enabled: false
+  promql-agent:
+    enabled: false
+  observability-agent:
+    enabled: false
+  argo-rollouts-agent:
+    enabled: false
+  helm-agent:
+    enabled: false
+  cilium-policy-agent:
+    enabled: false
+  cilium-manager-agent:
+    enabled: false
+  cilium-debug-agent:
+    enabled: false
+
+tools:
+  grafana-mcp:
+    enabled: false
+  querydoc:
+    enabled: false
+
+# UI is optional — disable for headless deployments.
+ui:
+  enabled: false
+
+# Controller runs without authentication for simplicity.
+controller:
+  auth:
+    mode: unsecure
+
+# Bundled PostgreSQL for development only; use an external database in production.
+database:
+  postgres:
+    bundled:
+      enabled: true
+      storage: 500Mi
+
+# Default model provider: Anthropic.
+# Supply the API key via --set providers.anthropic.apiKey=<key>.
+providers:
+  default: anthropic
+  anthropic:
+    model: claude-3-5-sonnet-20241022
+    # apiKey is set via --set at install time (not stored in this file).

@@ -15,7 +15,7 @@ import DocsLayout from '../../layouts/DocsLayout.astro';
   <pre><code>helm install mcp-anything ./charts/mcp-anything \
   --namespace mcp \
   --create-namespace \
-  -f deploy/examples/kraken/helm-values.yaml</code></pre>
+  -f examples/kraken/helm-values.yaml</code></pre>
 
   <h2>Deployment — plain Kubernetes</h2>
   <p>Mount the config as a ConfigMap and mount specs/overlays as separate ConfigMaps so they can be updated independently:</p>

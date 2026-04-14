@@ -1,0 +1,57 @@
+# Dockerfile.workspace builds a remote development workspace image that combines:
+#   - mcp-anything proxy binary
+#   - Go toolchain
+#   - golangci-lint
+#   - write-file helper (safe atomic file writer)
+#   - sample Go project pre-seeded in /workspace
+#
+# Build from the repo root:
+#   docker build -f examples/remote-dev/Dockerfile.workspace \
+#     --build-arg PROXY_IMAGE=<proxy-image> \
+#     -t workspace:latest .
+
+ARG GO_VERSION=1.25
+ARG GOLANGCI_LINT_VERSION=v2.7.2
+ARG PROXY_IMAGE=mcp-anything:latest
+
+# ── Stage 0: extract proxy binary from proxy image ───────────────────────────
+FROM ${PROXY_IMAGE} AS proxy-binary
+
+# ── Stage 1: build write-file helper ─────────────────────────────────────────
+FROM golang:${GO_VERSION}-alpine AS helper-builder
+WORKDIR /build
+COPY go.mod go.sum ./
+COPY cmd/testhelpers/write-file/ ./cmd/testhelpers/write-file/
+RUN CGO_ENABLED=0 go build -trimpath -o /usr/local/bin/write-file ./cmd/testhelpers/write-file/
+
+# ── Stage 2: final workspace image ───────────────────────────────────────────
+FROM golang:${GO_VERSION}-alpine
+
+ARG GOLANGCI_LINT_VERSION
+
+# Install required tools
+RUN apk add --no-cache git bash grep findutils
+
+# Install golangci-lint
+RUN wget -q -O- "https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh" \
+    | sh -s -- -b /usr/local/bin "${GOLANGCI_LINT_VERSION}"
+
+# Copy write-file helper from builder stage
+COPY --from=helper-builder /usr/local/bin/write-file /usr/local/bin/write-file
+
+# Copy the proxy binary from the proxy image (/usr/local/bin/proxy per Dockerfile)
+COPY --from=proxy-binary /usr/local/bin/proxy /usr/local/bin/proxy
+
+# Seed the workspace with the sample project
+WORKDIR /workspace
+COPY examples/remote-dev/sample-project/ ./
+
+# Pre-download Go module dependencies
+RUN go mod download
+
+# Warm up golangci-lint cache (optional but speeds up first run)
+RUN golangci-lint run ./... || true
+
+EXPOSE 8080
+ENV CONFIG_PATH=/etc/mcp-anything/config.yaml
+ENTRYPOINT ["/usr/local/bin/proxy"]

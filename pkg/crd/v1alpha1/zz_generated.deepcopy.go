@@ -186,6 +186,82 @@ func (in *MCPUpstreamSpec) DeepCopyInto(out *MCPUpstreamSpec) {
 		*out = new(MCPUpstreamValidationSpec)
 		**out = **in
 	}
+	if in.Commands != nil {
+		in, out := &in.Commands, &out.Commands
+		*out = make([]MCPUpstreamCommandSpec, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+}
+
+// DeepCopyInto copies all properties of MCPUpstreamCommandSpec into another object.
+func (in *MCPUpstreamCommandSpec) DeepCopyInto(out *MCPUpstreamCommandSpec) {
+	*out = *in
+	if in.Env != nil {
+		in, out := &in.Env, &out.Env
+		*out = make(map[string]string, len(*in))
+		for key, val := range *in {
+			(*out)[key] = val
+		}
+	}
+	if in.InputSchema != nil {
+		in, out := &in.InputSchema, &out.InputSchema
+		*out = new(MCPUpstreamCommandInputSchema)
+		(*in).DeepCopyInto(*out)
+	}
+}
+
+// DeepCopy creates a deep copy of MCPUpstreamCommandSpec.
+func (in *MCPUpstreamCommandSpec) DeepCopy() *MCPUpstreamCommandSpec {
+	if in == nil {
+		return nil
+	}
+	out := new(MCPUpstreamCommandSpec)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto copies all properties of MCPUpstreamCommandInputSchema into another object.
+func (in *MCPUpstreamCommandInputSchema) DeepCopyInto(out *MCPUpstreamCommandInputSchema) {
+	*out = *in
+	if in.Properties != nil {
+		in, out := &in.Properties, &out.Properties
+		*out = make(map[string]MCPUpstreamCommandSchemaProperty, len(*in))
+		for key, val := range *in {
+			(*out)[key] = val
+		}
+	}
+	if in.Required != nil {
+		in, out := &in.Required, &out.Required
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+}
+
+// DeepCopy creates a deep copy of MCPUpstreamCommandInputSchema.
+func (in *MCPUpstreamCommandInputSchema) DeepCopy() *MCPUpstreamCommandInputSchema {
+	if in == nil {
+		return nil
+	}
+	out := new(MCPUpstreamCommandInputSchema)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto copies all properties of MCPUpstreamCommandSchemaProperty into another object.
+func (in *MCPUpstreamCommandSchemaProperty) DeepCopyInto(out *MCPUpstreamCommandSchemaProperty) {
+	*out = *in
+}
+
+// DeepCopy creates a deep copy of MCPUpstreamCommandSchemaProperty.
+func (in *MCPUpstreamCommandSchemaProperty) DeepCopy() *MCPUpstreamCommandSchemaProperty {
+	if in == nil {
+		return nil
+	}
+	out := new(MCPUpstreamCommandSchemaProperty)
+	in.DeepCopyInto(out)
+	return out
 }
 
 // DeepCopy creates a deep copy of MCPUpstreamSpec.

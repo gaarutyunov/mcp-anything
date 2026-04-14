@@ -197,22 +197,31 @@ type MCPUpstream struct {
 
 // MCPUpstreamSpec defines the desired state of MCPUpstream.
 type MCPUpstreamSpec struct {
+	// Type is the upstream type: "http" (default) or "command".
+	// HTTP upstreams require baseURL/serviceRef and openapi.
+	// Command upstreams require commands and must not set baseURL/serviceRef/openapi.
+	// +optional
+	// +kubebuilder:default=http
+	// +kubebuilder:validation:Enum=http;command
+	Type string `json:"type,omitempty"`
+
 	// ToolPrefix is prepended to all tool names from this upstream.
 	// +optional
 	ToolPrefix string `json:"toolPrefix,omitempty"`
 
 	// ServiceRef references an in-cluster Kubernetes Service.
-	// Mutually exclusive with BaseURL.
+	// Mutually exclusive with BaseURL. Only used when Type is "http".
 	// +optional
 	ServiceRef *ServiceRefSpec `json:"serviceRef,omitempty"`
 
 	// BaseURL is the base URL for the upstream HTTP API.
-	// Mutually exclusive with ServiceRef.
+	// Mutually exclusive with ServiceRef. Only used when Type is "http".
 	// +optional
 	BaseURL string `json:"baseURL,omitempty"`
 
-	// OpenAPI configures the OpenAPI spec source.
-	OpenAPI MCPUpstreamOpenAPISpec `json:"openapi"`
+	// OpenAPI configures the OpenAPI spec source. Required when Type is "http".
+	// +optional
+	OpenAPI MCPUpstreamOpenAPISpec `json:"openapi,omitempty"`
 
 	// Overlay configures an optional OpenAPI Overlay document.
 	// +optional
@@ -229,6 +238,73 @@ type MCPUpstreamSpec struct {
 	// Validation configures request/response validation against the OpenAPI schema.
 	// +optional
 	Validation *MCPUpstreamValidationSpec `json:"validation,omitempty"`
+
+	// Commands defines command-backed MCP tools. Required when Type is "command".
+	// +optional
+	Commands []MCPUpstreamCommandSpec `json:"commands,omitempty"`
+}
+
+// MCPUpstreamCommandSpec defines a single command-backed MCP tool in the CRD.
+type MCPUpstreamCommandSpec struct {
+	// ToolName is the tool name (without prefix).
+	ToolName string `json:"toolName"`
+
+	// Description is the human-readable tool description.
+	// +optional
+	Description string `json:"description,omitempty"`
+
+	// Command is the Go text/template command string.
+	Command string `json:"command"`
+
+	// Shell enables shell mode (sh -c) with auto-quoting. Default false.
+	// +optional
+	Shell bool `json:"shell,omitempty"`
+
+	// WorkingDir sets the working directory for the child process.
+	// +optional
+	WorkingDir string `json:"workingDir,omitempty"`
+
+	// Timeout per execution (e.g. "30s").
+	// +optional
+	Timeout string `json:"timeout,omitempty"`
+
+	// MaxOutput caps bytes captured from stdout/stderr. 0 = 1 MiB default.
+	// +optional
+	MaxOutput int64 `json:"maxOutput,omitempty"`
+
+	// Env is a map of additional environment variables.
+	// +optional
+	Env map[string]string `json:"env,omitempty"`
+
+	// InputSchema defines the JSON Schema for tool arguments.
+	// +optional
+	InputSchema *MCPUpstreamCommandInputSchema `json:"inputSchema,omitempty"`
+}
+
+// MCPUpstreamCommandInputSchema is the JSON Schema for a command tool's input.
+type MCPUpstreamCommandInputSchema struct {
+	// Type is the JSON Schema type (default "object").
+	// +optional
+	Type string `json:"type,omitempty"`
+
+	// Properties defines the schema properties.
+	// +optional
+	Properties map[string]MCPUpstreamCommandSchemaProperty `json:"properties,omitempty"`
+
+	// Required lists required property names.
+	// +optional
+	Required []string `json:"required,omitempty"`
+}
+
+// MCPUpstreamCommandSchemaProperty describes a single property in a command input schema.
+type MCPUpstreamCommandSchemaProperty struct {
+	// Type is the JSON Schema type.
+	// +optional
+	Type string `json:"type,omitempty"`
+
+	// Description is the human-readable description.
+	// +optional
+	Description string `json:"description,omitempty"`
 }
 
 // ServiceRefSpec references a Kubernetes Service.

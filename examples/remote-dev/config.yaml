@@ -1,0 +1,94 @@
+server:
+  port: 8080
+
+naming:
+  separator: "__"
+
+upstreams:
+  - name: dev
+    enabled: true
+    tool_prefix: dev
+    type: command
+    commands:
+      - tool_name: write_file
+        description: "Write content to a file in the workspace"
+        command: "/usr/local/bin/write-file {{.path}} {{.content}}"
+        timeout: 10s
+        input_schema:
+          type: object
+          properties:
+            path:
+              type: string
+              description: "File path relative to /workspace (or absolute path under /workspace)"
+            content:
+              type: string
+              description: "File content to write"
+          required: [path, content]
+
+      - tool_name: read_file
+        description: "Read the contents of a file"
+        command: "cat {{.path}}"
+        timeout: 10s
+        input_schema:
+          type: object
+          properties:
+            path:
+              type: string
+              description: "Absolute file path to read"
+          required: [path]
+
+      - tool_name: list_files
+        description: "List files matching a pattern in a directory"
+        command: "find {{.directory}} -type f -name {{.pattern}}"
+        timeout: 10s
+        input_schema:
+          type: object
+          properties:
+            directory:
+              type: string
+              description: "Directory to search in"
+            pattern:
+              type: string
+              description: "File name glob pattern (e.g. *.go)"
+          required: [directory, pattern]
+
+      - tool_name: search_files
+        description: "Search file contents for a pattern (grep)"
+        command: "grep -rn {{.pattern}} {{.directory}}"
+        timeout: 30s
+        input_schema:
+          type: object
+          properties:
+            pattern:
+              type: string
+              description: "Search pattern (fixed string or regex)"
+            directory:
+              type: string
+              description: "Directory to search in"
+          required: [pattern, directory]
+
+      - tool_name: run_lint
+        description: "Run Go linter and return diagnostics"
+        command: "golangci-lint run {{.path}}"
+        working_dir: /workspace
+        timeout: 60s
+        input_schema:
+          type: object
+          properties:
+            path:
+              type: string
+              description: "Package path to lint (e.g. ./...)"
+          required: [path]
+
+      - tool_name: run_build
+        description: "Run Go build and return errors"
+        command: "go build {{.path}}"
+        working_dir: /workspace
+        timeout: 60s
+        input_schema:
+          type: object
+          properties:
+            path:
+              type: string
+              description: "Package path to build (e.g. ./...)"
+          required: [path]

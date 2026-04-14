@@ -1,0 +1,93 @@
+apiVersion: mcp-anything.ai/v1alpha1
+kind: MCPUpstream
+metadata:
+  name: remote-dev
+  namespace: remote-dev-e2e
+  labels:
+    mcp-anything.ai/proxy: remote-dev-proxy
+spec:
+  type: command
+  toolPrefix: dev
+  commands:
+    - toolName: write_file
+      description: "Write content to a file in the workspace"
+      command: "/usr/local/bin/write-file {{.path}} {{.content}}"
+      timeout: "10s"
+      inputSchema:
+        type: object
+        properties:
+          path:
+            type: string
+            description: "File path relative to /workspace (or absolute path under /workspace)"
+          content:
+            type: string
+            description: "File content to write"
+        required: [path, content]
+
+    - toolName: read_file
+      description: "Read the contents of a file"
+      command: "cat {{.path}}"
+      timeout: "10s"
+      inputSchema:
+        type: object
+        properties:
+          path:
+            type: string
+            description: "Absolute file path to read"
+        required: [path]
+
+    - toolName: list_files
+      description: "List files matching a pattern in a directory"
+      command: "find {{.directory}} -type f -name {{.pattern}}"
+      timeout: "10s"
+      inputSchema:
+        type: object
+        properties:
+          directory:
+            type: string
+            description: "Directory to search in"
+          pattern:
+            type: string
+            description: "File name glob pattern (e.g. *.go)"
+        required: [directory, pattern]
+
+    - toolName: search_files
+      description: "Search file contents for a pattern (grep)"
+      command: "grep -rn {{.pattern}} {{.directory}}"
+      timeout: "30s"
+      inputSchema:
+        type: object
+        properties:
+          pattern:
+            type: string
+            description: "Search pattern (fixed string or regex)"
+          directory:
+            type: string
+            description: "Directory to search in"
+        required: [pattern, directory]
+
+    - toolName: run_lint
+      description: "Run Go linter and return diagnostics"
+      command: "golangci-lint run {{.path}}"
+      workingDir: /workspace
+      timeout: "60s"
+      inputSchema:
+        type: object
+        properties:
+          path:
+            type: string
+            description: "Package path to lint (e.g. ./...)"
+        required: [path]
+
+    - toolName: run_build
+      description: "Run Go build and return errors"
+      command: "go build {{.path}}"
+      workingDir: /workspace
+      timeout: "60s"
+      inputSchema:
+        type: object
+        properties:
+          path:
+            type: string
+            description: "Package path to build (e.g. ./...)"
+        required: [path]

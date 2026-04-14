@@ -56,16 +56,41 @@ type generatedUpstreamConfig struct {
 	Name         string                     `yaml:"name"`
 	Enabled      bool                       `yaml:"enabled"`
 	ToolPrefix   string                     `yaml:"tool_prefix,omitempty"`
+	Type         string                     `yaml:"type,omitempty"`
 	BaseURL      string                     `yaml:"base_url,omitempty"`
-	OpenAPI      generatedOpenAPIConfig     `yaml:"openapi"`
+	OpenAPI      *generatedOpenAPIConfig    `yaml:"openapi,omitempty"`
 	Overlay      *generatedOverlayConfig    `yaml:"overlay,omitempty"`
 	OutboundAuth *generatedOutboundAuth     `yaml:"outbound_auth,omitempty"`
 	Transport    *generatedTransportConfig  `yaml:"transport,omitempty"`
 	Validation   *generatedValidationConfig `yaml:"validation,omitempty"`
+	Commands     []generatedCommandConfig   `yaml:"commands,omitempty"`
 }
 
 type generatedOpenAPIConfig struct {
 	Source string `yaml:"source"`
+}
+
+type generatedCommandConfig struct {
+	ToolName    string                       `yaml:"tool_name"`
+	Description string                       `yaml:"description,omitempty"`
+	Command     string                       `yaml:"command"`
+	Shell       bool                         `yaml:"shell,omitempty"`
+	WorkingDir  string                       `yaml:"working_dir,omitempty"`
+	Timeout     string                       `yaml:"timeout,omitempty"`
+	MaxOutput   int64                        `yaml:"max_output,omitempty"`
+	Env         map[string]string            `yaml:"env,omitempty"`
+	InputSchema *generatedCommandInputSchema `yaml:"input_schema,omitempty"`
+}
+
+type generatedCommandInputSchema struct {
+	Type       string                                    `yaml:"type,omitempty"`
+	Properties map[string]generatedCommandSchemaProperty `yaml:"properties,omitempty"`
+	Required   []string                                  `yaml:"required,omitempty"`
+}
+
+type generatedCommandSchemaProperty struct {
+	Type        string `yaml:"type,omitempty"`
+	Description string `yaml:"description,omitempty"`
 }
 
 type generatedOverlayConfig struct {
@@ -168,6 +193,68 @@ func buildUpstreamConfig(up *v1alpha1.MCPUpstream) (generatedUpstreamConfig, err
 		ToolPrefix: up.Spec.ToolPrefix,
 	}
 
+	// Dispatch by upstream type.
+	upstreamType := up.Spec.Type
+	if upstreamType == "" {
+		upstreamType = "http"
+	}
+
+	switch upstreamType {
+	case "command":
+		return buildCommandUpstreamConfig(up, uc)
+	default:
+		return buildHTTPUpstreamConfig(up, uc)
+	}
+}
+
+// buildCommandUpstreamConfig fills in a generatedUpstreamConfig for a command upstream.
+func buildCommandUpstreamConfig(up *v1alpha1.MCPUpstream, uc generatedUpstreamConfig) (generatedUpstreamConfig, error) {
+	if len(up.Spec.Commands) == 0 {
+		return generatedUpstreamConfig{}, fmt.Errorf("upstream %s/%s: type command requires at least one command entry", up.Namespace, up.Name)
+	}
+
+	uc.Type = "command"
+	cmds := make([]generatedCommandConfig, 0, len(up.Spec.Commands))
+	for _, cmd := range up.Spec.Commands {
+		gc := generatedCommandConfig{
+			ToolName:    cmd.ToolName,
+			Description: cmd.Description,
+			Command:     cmd.Command,
+			Shell:       cmd.Shell,
+			WorkingDir:  cmd.WorkingDir,
+			Timeout:     cmd.Timeout,
+			MaxOutput:   cmd.MaxOutput,
+			Env:         cmd.Env,
+		}
+		if cmd.InputSchema != nil {
+			gc.InputSchema = buildGeneratedInputSchema(cmd.InputSchema)
+		}
+		cmds = append(cmds, gc)
+	}
+	uc.Commands = cmds
+	return uc, nil
+}
+
+// buildGeneratedInputSchema converts an MCPUpstreamCommandInputSchema to its generated form.
+func buildGeneratedInputSchema(s *v1alpha1.MCPUpstreamCommandInputSchema) *generatedCommandInputSchema {
+	gs := &generatedCommandInputSchema{
+		Type:     s.Type,
+		Required: s.Required,
+	}
+	if len(s.Properties) > 0 {
+		gs.Properties = make(map[string]generatedCommandSchemaProperty, len(s.Properties))
+		for name, prop := range s.Properties {
+			gs.Properties[name] = generatedCommandSchemaProperty{
+				Type:        prop.Type,
+				Description: prop.Description,
+			}
+		}
+	}
+	return gs
+}
+
+// buildHTTPUpstreamConfig fills in a generatedUpstreamConfig for an HTTP upstream.
+func buildHTTPUpstreamConfig(up *v1alpha1.MCPUpstream, uc generatedUpstreamConfig) (generatedUpstreamConfig, error) {
 	// Base URL resolution.
 	switch {
 	case up.Spec.ServiceRef != nil:
@@ -186,11 +273,11 @@ func buildUpstreamConfig(up *v1alpha1.MCPUpstream) (generatedUpstreamConfig, err
 	openAPI := up.Spec.OpenAPI
 	switch {
 	case openAPI.ConfigMapRef != nil:
-		uc.OpenAPI = generatedOpenAPIConfig{
+		uc.OpenAPI = &generatedOpenAPIConfig{
 			Source: fmt.Sprintf("%s/%s_%s.yaml", specsDir, up.Namespace, up.Name),
 		}
 	case openAPI.URL != "":
-		uc.OpenAPI = generatedOpenAPIConfig{
+		uc.OpenAPI = &generatedOpenAPIConfig{
 			Source: openAPI.URL,
 		}
 	case openAPI.AutoDiscover != nil:
@@ -198,7 +285,7 @@ func buildUpstreamConfig(up *v1alpha1.MCPUpstream) (generatedUpstreamConfig, err
 		if path == "" {
 			path = "/openapi.json"
 		}
-		uc.OpenAPI = generatedOpenAPIConfig{
+		uc.OpenAPI = &generatedOpenAPIConfig{
 			Source: uc.BaseURL + path,
 		}
 	default:

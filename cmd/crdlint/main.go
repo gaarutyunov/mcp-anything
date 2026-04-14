@@ -5,7 +5,7 @@
 //     pkg/config/config.go (catches cases where config types changed but the spec
 //     file was not regenerated).
 //  2. The CRD YAML files in charts/mcp-anything/crds/ exactly match what
-//     controller-gen would generate from pkg/crd/v1alpha1/types.go and spec_gen.go.
+//     controller-gen would generate from pkg/crd/v1alpha1/.
 //
 // Usage:
 //
@@ -65,20 +65,6 @@ func run() (bool, error) {
 
 	allOK := true
 
-	// ── Phase 0: Validate types_gen.go ───────────────────────────────────────────
-	slog.Info("phase 0: validating types_gen.go")
-	typesOK, err := crdutil.ValidateTypesFile(repoRoot)
-	if err != nil {
-		return false, fmt.Errorf("validating types file: %w", err)
-	}
-	if !typesOK {
-		slog.Error("types_gen.go is out of date — run: make generate-crds",
-			"path", crdutil.TypesGenPath)
-		allOK = false
-	} else {
-		slog.Info("types_gen.go is up to date", "path", crdutil.TypesGenPath)
-	}
-
 	// ── Phase 1: Validate spec_gen.go ────────────────────────────────────────────
 	slog.Info("phase 1: validating spec_gen.go")
 	specOK, err := crdutil.ValidateSpecFile(repoRoot)
@@ -96,7 +82,6 @@ func run() (bool, error) {
 	// ── Phase 2: Validate CRD YAML files ─────────────────────────────────────────
 	slog.Info("phase 2: validating CRD YAML files")
 
-	// Generate CRDs to a temp directory.
 	tmpDir, err := os.MkdirTemp("", "mcp-crdlint-*")
 	if err != nil {
 		return false, fmt.Errorf("creating temp dir: %w", err)
@@ -107,7 +92,6 @@ func run() (bool, error) {
 		return false, fmt.Errorf("running controller-gen: %w", err)
 	}
 
-	// Compare generated files with each output directory.
 	for _, outDir := range crdOutputDirs {
 		absOutDir := filepath.Join(repoRoot, outDir)
 		for src, dst := range crdRenames {

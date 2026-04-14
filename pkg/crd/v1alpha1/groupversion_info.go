@@ -1,6 +1,7 @@
 // Package v1alpha1 contains the v1alpha1 API types for mcp-anything CRDs.
 //
 // +groupName=mcp-anything.ai
+// +kubebuilder:object:generate=true
 package v1alpha1
 
 import (

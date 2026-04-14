@@ -147,7 +147,7 @@ func Generate(ctx context.Context, proxy *v1alpha1.MCPProxy, upstreams []v1alpha
 	}
 
 	// Telemetry configuration.
-	if proxy.Spec.Telemetry != nil && proxy.Spec.Telemetry.Enabled {
+	if proxy.Spec.Telemetry != nil && proxy.Spec.Telemetry.OTLPEndpoint != "" {
 		cfg.Telemetry = &generatedTelemetryConfig{
 			OTLPEndpoint: proxy.Spec.Telemetry.OTLPEndpoint,
 		}
@@ -160,7 +160,7 @@ func Generate(ctx context.Context, proxy *v1alpha1.MCPProxy, upstreams []v1alpha
 		}
 		if proxy.Spec.InboundAuth.JWT != nil {
 			inboundAuth.JWT = &generatedJWTAuthConfig{
-				JWKSURL: proxy.Spec.InboundAuth.JWT.JWKSUrl,
+				JWKSURL: proxy.Spec.InboundAuth.JWT.JWKSURL,
 			}
 		}
 		cfg.InboundAuth = inboundAuth
@@ -226,8 +226,8 @@ func buildCommandUpstreamConfig(up *v1alpha1.MCPUpstream, uc generatedUpstreamCo
 			MaxOutput:   cmd.MaxOutput,
 			Env:         cmd.Env,
 		}
-		if cmd.InputSchema != nil {
-			gc.InputSchema = buildGeneratedInputSchema(cmd.InputSchema)
+		if cmd.InputSchema.Type != "" || len(cmd.InputSchema.Properties) > 0 || len(cmd.InputSchema.Required) > 0 {
+			gc.InputSchema = buildGeneratedInputSchema(&cmd.InputSchema)
 		}
 		cmds = append(cmds, gc)
 	}

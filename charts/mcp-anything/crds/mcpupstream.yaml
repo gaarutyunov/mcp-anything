@@ -44,78 +44,64 @@ spec:
           metadata:
             type: object
           spec:
-            description: Spec is the desired state of MCPUpstream.
+            description: MCPUpstreamSpec defines the desired state of MCPUpstream.
             properties:
               baseURL:
-                description: BaseURL is the base URL for the upstream HTTP API. Mutually
-                  exclusive with ServiceRef. Only used when Type is "http".
+                description: |-
+                  BaseURL is the base URL for the upstream HTTP API.
+                  Mutually exclusive with ServiceRef. Only used when Type is "http".
                 type: string
               commands:
-                description: Commands defines command-backed MCP tools. Required when
-                  Type is "command".
+                description: |-
+                  Commands defines command-backed MCP tools. Required when Type is "command".
+                  Generated from pkg/config.CommandConfig.
                 items:
-                  description: MCPUpstreamCommandSpec defines a single command-backed
-                    MCP tool in the CRD.
+                  description: CommandConfig defines a single command-backed MCP tool
+                    within a command upstream.
                   properties:
                     command:
-                      description: Command is the Go text/template command string.
                       type: string
                     description:
-                      description: Description is the human-readable tool description.
                       type: string
                     env:
                       additionalProperties:
                         type: string
-                      description: Env is a map of additional environment variables.
                       type: object
                     inputSchema:
-                      description: InputSchema defines the JSON Schema for tool arguments.
+                      description: CommandInputSchema is the JSON Schema definition
+                        for a command tool's input parameters.
                       properties:
                         properties:
                           additionalProperties:
-                            description: MCPUpstreamCommandSchemaProperty describes
-                              a single property in a command input schema.
+                            description: CommandSchemaProperty describes a single
+                              property in a command tool's input schema.
                             properties:
                               description:
-                                description: Description is the human-readable description.
                                 type: string
                               type:
-                                description: Type is the JSON Schema type.
                                 type: string
                             type: object
-                          description: Properties defines the schema properties.
                           type: object
                         required:
-                          description: Required lists required property names.
                           items:
                             type: string
                           type: array
                         type:
-                          description: Type is the JSON Schema type (default "object").
                           type: string
                       type: object
                     maxOutput:
-                      description: MaxOutput caps bytes captured from stdout/stderr.
-                        0 = 1 MiB default.
+                      description: max bytes from stdout/stderr; 0 = 1 MiB default
                       format: int64
                       type: integer
                     shell:
-                      description: Shell enables shell mode (sh -c) with auto-quoting.
-                        Default false.
+                      description: execute via sh -c; default false (direct exec)
                       type: boolean
                     timeout:
-                      description: Timeout per execution (e.g. "30s").
                       type: string
                     toolName:
-                      description: ToolName is the tool name (without prefix).
                       type: string
                     workingDir:
-                      description: WorkingDir sets the working directory for the child
-                        process.
                       type: string
-                  required:
-                  - command
-                  - toolName
                   type: object
                 type: array
               openapi:
@@ -123,9 +109,9 @@ spec:
                   when Type is "http".
                 properties:
                   autoDiscover:
-                    description: AutoDiscover configures automatic OpenAPI spec discovery
-                      from the upstream. Mutually exclusive with ConfigMapRef and
-                      URL.
+                    description: |-
+                      AutoDiscover configures automatic OpenAPI spec discovery from the upstream.
+                      Mutually exclusive with ConfigMapRef and URL.
                     properties:
                       path:
                         description: Path is the URL path at which the upstream serves
@@ -133,8 +119,9 @@ spec:
                         type: string
                     type: object
                   configMapRef:
-                    description: ConfigMapRef references a ConfigMap containing the
-                      OpenAPI spec. Mutually exclusive with URL and AutoDiscover.
+                    description: |-
+                      ConfigMapRef references a ConfigMap containing the OpenAPI spec.
+                      Mutually exclusive with URL and AutoDiscover.
                     properties:
                       key:
                         description: Key is the key in the ConfigMap data.
@@ -147,7 +134,8 @@ spec:
                     - name
                     type: object
                   url:
-                    description: URL is the URL from which the OpenAPI spec is fetched.
+                    description: |-
+                      URL is the URL from which the OpenAPI spec is fetched.
                       Mutually exclusive with ConfigMapRef and AutoDiscover.
                     type: string
                 type: object
@@ -156,11 +144,12 @@ spec:
                   to the upstream.
                 properties:
                   bearer:
-                    description: Bearer configures bearer token authentication.
+                    description: Bearer configures static Bearer token injection from
+                      a Kubernetes Secret.
                     properties:
                       secretRef:
-                        description: 'SecretRef references a Secret containing the
-                          bearer token (key: "token").'
+                        description: SecretRef references a Secret containing the
+                          bearer token under key "token".
                         properties:
                           name:
                             description: Name is the name of the Secret.
@@ -170,7 +159,8 @@ spec:
                         type: object
                     type: object
                   oauth2:
-                    description: OAuth2 configures OAuth2 client credentials flow.
+                    description: OAuth2 configures OAuth2 client credentials flow
+                      with credentials from a Kubernetes Secret.
                     properties:
                       secretRef:
                         description: SecretRef references a Secret containing client_id
@@ -217,14 +207,15 @@ spec:
                     type: object
                 type: object
               serviceRef:
-                description: ServiceRef references an in-cluster Kubernetes Service.
+                description: |-
+                  ServiceRef references an in-cluster Kubernetes Service.
                   Mutually exclusive with BaseURL. Only used when Type is "http".
                 properties:
                   name:
                     description: Name is the name of the Service.
                     type: string
                   port:
-                    description: Port is the port the service exposes.
+                    description: Port is the port the Service exposes.
                     format: int32
                     maximum: 65535
                     minimum: 1
@@ -241,10 +232,16 @@ spec:
                   upstream.
                 properties:
                   maxIdleConns:
-                    description: MaxIdleConns is the maximum number of idle connections.
+                    description: 'MaxIdleConns is the maximum number of idle (keep-alive)
+                      connections. Default: 100.'
+                    type: integer
+                  maxIdleConnsPerHost:
+                    description: 'MaxIdleConnsPerHost is the maximum number of idle
+                      connections per host. Default: 10.'
                     type: integer
                   tls:
-                    description: TLS configures TLS for outbound connections.
+                    description: TLS configures TLS for outbound connections using
+                      a Kubernetes Secret.
                     properties:
                       secretName:
                         description: SecretName is the name of the Secret containing
@@ -256,29 +253,38 @@ spec:
                 type: object
               type:
                 default: http
-                description: 'Type is the upstream type: "http" (default) or "command".
-                  HTTP upstreams require baseURL/serviceRef and openapi. Command upstreams
-                  require commands and must not set baseURL/serviceRef/openapi.'
+                description: |-
+                  Type is the upstream type: "http" (default) or "command".
+                  HTTP upstreams require baseURL/serviceRef and openapi.
+                  Command upstreams require commands and must not set baseURL/serviceRef/openapi.
                 enum:
                 - http
                 - command
                 type: string
               validation:
-                description: Validation configures request/response validation against
-                  the OpenAPI schema.
+                description: |-
+                  Validation configures request/response validation against the OpenAPI schema.
+                  Generated from pkg/config.ValidationConfig.
                 properties:
+                  errorStatus:
+                    items:
+                      type: integer
+                    type: array
+                  responseValidationFailure:
+                    description: '"warn" | "fail"'
+                    type: string
+                  successStatus:
+                    items:
+                      type: integer
+                    type: array
                   validateRequest:
-                    description: ValidateRequest enables request validation against
-                      the OpenAPI schema.
                     type: boolean
                   validateResponse:
-                    description: ValidateResponse enables response validation against
-                      the OpenAPI schema.
                     type: boolean
                 type: object
             type: object
           status:
-            description: Status is the observed state of MCPUpstream.
+            description: MCPUpstreamStatus defines the observed state of MCPUpstream.
             properties:
               assignedProxy:
                 description: AssignedProxy is the name of the MCPProxy this upstream

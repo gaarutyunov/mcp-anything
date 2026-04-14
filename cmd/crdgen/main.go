@@ -2,13 +2,15 @@
 //
 // It runs in two phases:
 //
-//  1. Type generation: reads pkg/config/config.go and generates
-//     pkg/crd/v1alpha1/spec_gen.go with the CRD spec types derived from the
-//     proxy/upstream config types.
+//  1. Spec generation: reads pkg/config/config.go and generates
+//     pkg/crd/v1alpha1/spec_gen.go — Go types derived from the proxy/upstream
+//     config types with JSON tags (koanf→camelCase) and inherited doc comments.
 //
-//  2. YAML generation: invokes controller-gen to produce CRD YAML manifests
-//     from the types in pkg/crd/v1alpha1/ and writes them to
-//     charts/mcp-anything/crds/.
+//  2. YAML + deepcopy generation: invokes controller-gen to produce CRD YAML
+//     manifests and zz_generated.deepcopy.go from pkg/crd/v1alpha1/.
+//
+// Kubernetes-specific types (MCPProxy, MCPUpstream, SecretRef-based TLS, etc.)
+// live in the hand-written pkg/crd/v1alpha1/types.go and are not generated.
 //
 // Usage:
 //
@@ -35,7 +37,6 @@ import (
 const controllerGenVersion = "v0.17.0"
 
 // crdOutputDirs lists all helm chart directories that contain CRD manifests.
-// The generator writes to each of these directories.
 var crdOutputDirs = []string{
 	"charts/mcp-anything/crds",
 }
@@ -63,24 +64,16 @@ func run() error {
 	}
 	slog.Info("generating CRDs", "repo_root", repoRoot)
 
-	// ── Phase 0: Generate types_gen.go (Kubernetes wrapper types) ───────────────
-	slog.Info("phase 0: generating Kubernetes wrapper types")
-	if err := crdutil.WriteTypesFile(repoRoot); err != nil {
-		return fmt.Errorf("writing types file: %w", err)
-	}
-	slog.Info("wrote types file", "path", crdutil.TypesGenPath)
-
 	// ── Phase 1: Generate spec_gen.go from config types ──────────────────────────
-	slog.Info("phase 1: generating CRD spec types from config")
+	slog.Info("phase 1: generating CRD spec types from pkg/config/config.go")
 	if err := crdutil.WriteSpecFile(repoRoot); err != nil {
 		return fmt.Errorf("writing spec file: %w", err)
 	}
 	slog.Info("wrote spec file", "path", crdutil.SpecGenPath)
 
-	// ── Phase 2: Generate CRD YAML via controller-gen ────────────────────────────
-	slog.Info("phase 2: generating CRD YAML via controller-gen")
+	// ── Phase 2: Generate CRD YAML + deepcopy via controller-gen ─────────────────
+	slog.Info("phase 2: generating CRD YAML and deepcopy via controller-gen")
 
-	// Generate CRDs to a temp directory.
 	tmpDir, err := os.MkdirTemp("", "mcp-crds-*")
 	if err != nil {
 		return fmt.Errorf("creating temp dir: %w", err)
@@ -91,7 +84,7 @@ func run() error {
 		return fmt.Errorf("running controller-gen: %w", err)
 	}
 
-	// Read the generated files.
+	// Read the generated CRD YAML files.
 	generated := make(map[string][]byte)
 	for src := range crdRenames {
 		data, err := os.ReadFile(filepath.Join(tmpDir, src))
@@ -101,16 +94,15 @@ func run() error {
 		generated[src] = data
 	}
 
-	// Write to each output directory.
+	// Write CRD YAML to each output directory.
 	for _, outDir := range crdOutputDirs {
 		absOutDir := filepath.Join(repoRoot, outDir)
 		if err := os.MkdirAll(absOutDir, 0o755); err != nil {
 			return fmt.Errorf("creating output dir %s: %w", absOutDir, err)
 		}
 		for src, dst := range crdRenames {
-			data := generated[src]
 			dstPath := filepath.Join(absOutDir, dst)
-			if err := os.WriteFile(dstPath, data, 0o644); err != nil {
+			if err := os.WriteFile(dstPath, generated[src], 0o644); err != nil {
 				return fmt.Errorf("writing %s: %w", dstPath, err)
 			}
 			slog.Info("wrote CRD", "path", filepath.Join(outDir, dst))
@@ -121,13 +113,15 @@ func run() error {
 	return nil
 }
 
-// runControllerGen invokes controller-gen via "go run" to generate CRD manifests
-// from the pkg/crd/v1alpha1 package into outDir.
+// runControllerGen invokes controller-gen via "go run" to generate both CRD
+// manifests (written to outDir) and deepcopy methods (written in-place to
+// pkg/crd/v1alpha1/zz_generated.deepcopy.go).
 func runControllerGen(ctx context.Context, repoRoot, outDir string) error {
 	tool := fmt.Sprintf("sigs.k8s.io/controller-tools/cmd/controller-gen@%s", controllerGenVersion)
 	args := []string{
 		"run", tool,
 		"crd",
+		"object:headerFile=",
 		"paths=./pkg/crd/v1alpha1/...",
 		fmt.Sprintf("output:crd:dir=%s", outDir),
 	}
@@ -147,7 +141,6 @@ func runControllerGen(ctx context.Context, repoRoot, outDir string) error {
 // findRepoRoot walks up from the directory containing this source file to find
 // the repository root, identified by the presence of go.mod.
 func findRepoRoot() (string, error) {
-	// Start from the directory of this source file.
 	_, filename, _, ok := runtime.Caller(0)
 	if !ok {
 		return findRepoRootFromWd()

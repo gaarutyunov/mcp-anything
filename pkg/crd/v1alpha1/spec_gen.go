@@ -4,173 +4,112 @@
 
 package v1alpha1
 
-// ProxyServerSpec configures the MCP HTTP server.
-type ProxyServerSpec struct {
-	// +kubebuilder:validation:Minimum=1
-	// +kubebuilder:validation:Maximum=65535
+// JWTAuthConfig configures JWT Bearer token validation via OIDC/JWKS.
+type JWTAuthSpec struct {
 	// +optional
-	// Port is the port the proxy server listens on. Defaults to 8080.
-	Port int32 `json:"port,omitempty"`
+	Issuer string `json:"issuer,omitempty"`
 	// +optional
-	// Transport is the list of MCP transport protocols to enable (e.g. sse, streamable-http).
-	Transport []string `json:"transport,omitempty"`
+	Audience string `json:"audience,omitempty"`
 	// +optional
-	// TLS configures TLS termination for the proxy server.
-	TLS *ProxyTLSSpec `json:"tls,omitempty"`
+	// optional; uses OIDC discovery if empty
+	JWKSURL string `json:"jwksUrl,omitempty"`
 }
 
-// ProxyTLSSpec references a Secret containing TLS credentials.
-type ProxyTLSSpec struct {
-	// SecretName is the name of the Secret containing tls.crt and tls.key.
-	SecretName string `json:"secretName"`
-}
-
-// ProxyNamingSpec configures tool name generation.
+// NamingConfig controls how tool names are generated.
 type ProxyNamingSpec struct {
 	// +optional
-	// Separator is the string inserted between tool name segments.
 	Separator string `json:"separator,omitempty"`
 	// +optional
-	// MaxLength is the maximum length of a generated tool name.
 	MaxLength int `json:"maxLength,omitempty"`
-	// +kubebuilder:validation:Enum=error;truncate;hash
 	// +optional
-	// ConflictResolution controls how naming conflicts are resolved.
 	ConflictResolution string `json:"conflictResolution,omitempty"`
-}
-
-// ProxyInboundAuthSpec configures inbound authentication.
-type ProxyInboundAuthSpec struct {
-	// +kubebuilder:validation:Enum=jwt;none
-	// Strategy is the auth strategy: jwt|none.
-	Strategy string `json:"strategy"`
 	// +optional
-	// JWT configures JWT-based inbound auth.
-	JWT *JWTAuthSpec `json:"jwt,omitempty"`
+	DescriptionMaxLength int `json:"descriptionMaxLength,omitempty"`
+	// +optional
+	DescriptionTruncationSuffix string `json:"descriptionTruncationSuffix,omitempty"`
+	// +optional
+	DefaultSlugRules ProxySlugRulesSpec `json:"defaultSlugRules,omitempty"`
 }
 
-// JWTAuthSpec configures JWT Bearer token validation.
-type JWTAuthSpec struct {
-	// JWKSUrl is the URL of the JWKS endpoint.
-	JWKSUrl string `json:"jwksUrl"`
+// SlugRulesConfig controls which slug transformations are applied.
+type ProxySlugRulesSpec struct {
+	// +optional
+	ReplaceSlashes bool `json:"replaceSlashes,omitempty"`
+	// +optional
+	ReplaceBraces bool `json:"replaceBraces,omitempty"`
+	// +optional
+	Lowercase bool `json:"lowercase,omitempty"`
+	// +optional
+	CollapseSeparators bool `json:"collapseSeparators,omitempty"`
 }
 
-// ProxyTelemetrySpec configures observability.
+// TelemetryConfig holds observability settings.
 type ProxyTelemetrySpec struct {
-	// Enabled enables telemetry export.
-	Enabled bool `json:"enabled"`
 	// +optional
-	// OTLPEndpoint is the OTLP gRPC endpoint (e.g. otel-collector:4317).
+	ServiceName string `json:"serviceName,omitempty"`
+	// +optional
+	ServiceVersion string `json:"serviceVersion,omitempty"`
+	// +optional
+	// e.g. "localhost:4317"; empty = no trace exporter
 	OTLPEndpoint string `json:"otlpEndpoint,omitempty"`
+	// +optional
+	// skip TLS for OTLP gRPC (useful in tests)
+	Insecure bool `json:"insecure,omitempty"`
 }
 
-// MCPUpstreamCommandSpec defines a single command-backed MCP tool in the CRD.
+// CommandConfig defines a single command-backed MCP tool within a command upstream.
 type MCPUpstreamCommandSpec struct {
-	// ToolName is the tool name (without prefix).
-	ToolName string `json:"toolName"`
 	// +optional
-	// Description is the human-readable tool description.
+	ToolName string `json:"toolName,omitempty"`
+	// +optional
 	Description string `json:"description,omitempty"`
-	// Command is the Go text/template command string.
-	Command string `json:"command"`
 	// +optional
-	// Shell enables shell mode (sh -c) with auto-quoting. Default false.
-	Shell bool `json:"shell,omitempty"`
+	Command string `json:"command,omitempty"`
 	// +optional
-	// WorkingDir sets the working directory for the child process.
-	WorkingDir string `json:"workingDir,omitempty"`
+	InputSchema MCPUpstreamCommandInputSchema `json:"inputSchema,omitempty"`
 	// +optional
-	// Timeout per execution (e.g. "30s").
 	Timeout string `json:"timeout,omitempty"`
 	// +optional
-	// MaxOutput caps bytes captured from stdout/stderr. 0 = 1 MiB default.
-	MaxOutput int64 `json:"maxOutput,omitempty"`
-	// +optional
-	// Env is a map of additional environment variables.
 	Env map[string]string `json:"env,omitempty"`
 	// +optional
-	// InputSchema defines the JSON Schema for tool arguments.
-	InputSchema *MCPUpstreamCommandInputSchema `json:"inputSchema,omitempty"`
+	WorkingDir string `json:"workingDir,omitempty"`
+	// +optional
+	// execute via sh -c; default false (direct exec)
+	Shell bool `json:"shell,omitempty"`
+	// +optional
+	// max bytes from stdout/stderr; 0 = 1 MiB default
+	MaxOutput int64 `json:"maxOutput,omitempty"`
 }
 
-// MCPUpstreamCommandInputSchema is the JSON Schema for a command tool's input.
+// CommandInputSchema is the JSON Schema definition for a command tool's input parameters.
 type MCPUpstreamCommandInputSchema struct {
 	// +optional
-	// Type is the JSON Schema type (default "object").
 	Type string `json:"type,omitempty"`
 	// +optional
-	// Properties defines the schema properties.
 	Properties map[string]MCPUpstreamCommandSchemaProperty `json:"properties,omitempty"`
 	// +optional
-	// Required lists required property names.
 	Required []string `json:"required,omitempty"`
 }
 
-// MCPUpstreamCommandSchemaProperty describes a single property in a command input schema.
+// CommandSchemaProperty describes a single property in a command tool's input schema.
 type MCPUpstreamCommandSchemaProperty struct {
 	// +optional
-	// Type is the JSON Schema type.
 	Type string `json:"type,omitempty"`
 	// +optional
-	// Description is the human-readable description.
 	Description string `json:"description,omitempty"`
 }
 
-// MCPUpstreamValidationSpec configures request/response validation against the OpenAPI schema.
+// ValidationConfig controls runtime request and response validation against the OpenAPI schema.
 type MCPUpstreamValidationSpec struct {
-	// ValidateRequest enables request validation against the OpenAPI schema.
+	// +optional
 	ValidateRequest bool `json:"validateRequest,omitempty"`
-	// ValidateResponse enables response validation against the OpenAPI schema.
+	// +optional
 	ValidateResponse bool `json:"validateResponse,omitempty"`
-}
-
-// MCPUpstreamTransportSpec configures HTTP transport settings for the upstream.
-type MCPUpstreamTransportSpec struct {
 	// +optional
-	// MaxIdleConns is the maximum number of idle connections.
-	MaxIdleConns int `json:"maxIdleConns,omitempty"`
+	// "warn" | "fail"
+	ResponseValidationFailure string `json:"responseValidationFailure,omitempty"`
 	// +optional
-	// TLS configures TLS for outbound connections.
-	TLS *UpstreamTLSSpec `json:"tls,omitempty"`
-}
-
-// UpstreamTLSSpec configures TLS for outbound connections.
-type UpstreamTLSSpec struct {
-	// SecretName is the name of the Secret containing CA/client TLS credentials.
-	SecretName string `json:"secretName"`
-}
-
-// MCPUpstreamOutboundAuthSpec configures outbound auth for the upstream.
-type MCPUpstreamOutboundAuthSpec struct {
-	// +kubebuilder:validation:Enum=bearer;oauth2_client_credentials;none
-	// Strategy is the outbound auth strategy: bearer|oauth2_client_credentials|none.
-	Strategy string `json:"strategy"`
+	SuccessStatus []int `json:"successStatus,omitempty"`
 	// +optional
-	// Bearer configures bearer token authentication.
-	Bearer *BearerSpec `json:"bearer,omitempty"`
-	// +optional
-	// OAuth2 configures OAuth2 client credentials flow.
-	OAuth2 *OAuth2Spec `json:"oauth2,omitempty"`
-}
-
-// BearerSpec holds config for bearer token authentication.
-type BearerSpec struct {
-	// +optional
-	// SecretRef references a Secret containing the bearer token (key: "token").
-	SecretRef *SecretRef `json:"secretRef,omitempty"`
-}
-
-// OAuth2Spec configures OAuth2 client credentials.
-type OAuth2Spec struct {
-	// TokenURL is the OAuth2 token endpoint.
-	TokenURL string `json:"tokenURL"`
-	// +optional
-	// SecretRef references a Secret containing client_id and client_secret.
-	SecretRef *SecretRef `json:"secretRef,omitempty"`
-}
-
-// SecretRef references a Kubernetes Secret.
-type SecretRef struct {
-	// Name is the name of the Secret.
-	Name string `json:"name"`
+	ErrorStatus []int `json:"errorStatus,omitempty"`
 }

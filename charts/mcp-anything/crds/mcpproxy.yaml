@@ -47,7 +47,7 @@ spec:
           metadata:
             type: object
           spec:
-            description: Spec is the desired state of MCPProxy.
+            description: MCPProxySpec defines the desired state of MCPProxy.
             properties:
               image:
                 description: Image is the proxy container image. Defaults to ghcr.io/gaarutyunov/mcp-anything:latest.
@@ -57,13 +57,17 @@ spec:
                   clients.
                 properties:
                   jwt:
-                    description: JWT configures JWT-based inbound auth.
+                    description: |-
+                      JWT configures JWT Bearer token validation.
+                      Generated from pkg/config.JWTAuthConfig.
                     properties:
-                      jwksUrl:
-                        description: JWKSUrl is the URL of the JWKS endpoint.
+                      audience:
                         type: string
-                    required:
-                    - jwksUrl
+                      issuer:
+                        type: string
+                      jwksUrl:
+                        description: optional; uses OIDC discovery if empty
+                        type: string
                     type: object
                   strategy:
                     description: 'Strategy is the auth strategy: jwt|none.'
@@ -75,9 +79,9 @@ spec:
                 - strategy
                 type: object
               namespaceSelector:
-                description: NamespaceSelector restricts which namespaces are searched
-                  for matching MCPUpstream resources. If empty, only the same namespace
-                  as the MCPProxy is searched.
+                description: |-
+                  NamespaceSelector restricts which namespaces are searched for matching
+                  MCPUpstream resources. If empty, only the same namespace as the MCPProxy is searched.
                 properties:
                   matchNames:
                     description: MatchNames is a list of namespace names to search
@@ -87,23 +91,32 @@ spec:
                     type: array
                 type: object
               naming:
-                description: Naming configures how MCP tool names are generated.
+                description: |-
+                  Naming configures how MCP tool names are generated.
+                  Generated from pkg/config.NamingConfig.
                 properties:
                   conflictResolution:
-                    description: ConflictResolution controls how naming conflicts
-                      are resolved.
-                    enum:
-                    - error
-                    - truncate
-                    - hash
+                    type: string
+                  defaultSlugRules:
+                    description: SlugRulesConfig controls which slug transformations
+                      are applied.
+                    properties:
+                      collapseSeparators:
+                        type: boolean
+                      lowercase:
+                        type: boolean
+                      replaceBraces:
+                        type: boolean
+                      replaceSlashes:
+                        type: boolean
+                    type: object
+                  descriptionMaxLength:
+                    type: integer
+                  descriptionTruncationSuffix:
                     type: string
                   maxLength:
-                    description: MaxLength is the maximum length of a generated tool
-                      name.
                     type: integer
                   separator:
-                    description: Separator is the string inserted between tool name
-                      segments.
                     type: string
                 type: object
               replicas:
@@ -179,11 +192,10 @@ spec:
                     description: Port is the port the proxy server listens on. Defaults
                       to 8080.
                     format: int32
-                    maximum: 65535
-                    minimum: 1
                     type: integer
                   tls:
-                    description: TLS configures TLS termination for the proxy server.
+                    description: TLS configures TLS termination for the proxy server
+                      using a Kubernetes Secret.
                     properties:
                       secretName:
                         description: SecretName is the name of the Secret containing
@@ -208,9 +220,9 @@ spec:
                       mcp-anything.ai/enabled=true.
                     type: boolean
                   namespaceSelector:
-                    description: NamespaceSelector restricts which namespaces are
-                      scanned for annotated Services. If not set, the same namespaces
-                      as NamespaceSelector are used.
+                    description: |-
+                      NamespaceSelector restricts which namespaces are scanned for annotated Services.
+                      If not set, the same namespaces as NamespaceSelector are used.
                     properties:
                       matchLabels:
                         additionalProperties:
@@ -227,16 +239,20 @@ spec:
                     type: object
                 type: object
               telemetry:
-                description: Telemetry configures observability settings.
+                description: |-
+                  Telemetry configures observability settings.
+                  Generated from pkg/config.TelemetryConfig.
                 properties:
-                  enabled:
-                    description: Enabled enables telemetry export.
+                  insecure:
+                    description: skip TLS for OTLP gRPC (useful in tests)
                     type: boolean
                   otlpEndpoint:
-                    description: OTLPEndpoint is the OTLP gRPC endpoint (e.g. otel-collector:4317).
+                    description: e.g. "localhost:4317"; empty = no trace exporter
                     type: string
-                required:
-                - enabled
+                  serviceName:
+                    type: string
+                  serviceVersion:
+                    type: string
                 type: object
               upstreamSelector:
                 description: UpstreamSelector selects MCPUpstream resources by label.
@@ -286,7 +302,7 @@ spec:
                 x-kubernetes-map-type: atomic
             type: object
           status:
-            description: Status is the observed state of MCPProxy.
+            description: MCPProxyStatus defines the observed state of MCPProxy.
             properties:
               annotatedServiceCount:
                 description: AnnotatedServiceCount is the number of annotated Services

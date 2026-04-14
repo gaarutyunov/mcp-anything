@@ -187,7 +187,7 @@ jobs:
   e2e-tests:
     name: E2E / ${{ matrix.name }}
     runs-on: ubuntu-latest
-    needs: [build-image, build-operator-image]
+    needs: [build-image, build-operator-image, build-workspace-image]
     timeout-minutes: 10
     strategy:
       fail-fast: false

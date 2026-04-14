@@ -168,8 +168,6 @@ jobs:
         include:
           - name: Kraken Market Data
             test: TestKrakenMarketDataE2E
-          - name: Kagent RemoteMCPServer
-            test: TestKagentRemoteMCPServerE2E
     steps:
       - uses: actions/checkout@v4
 

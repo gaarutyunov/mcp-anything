@@ -12,12 +12,17 @@ linters:
     - noctx
     - bodyclose
     - contextcheck
+    - crdlint
   settings:
     revive:
       rules:
         - name: exported
         - name: error-return
         - name: error-strings
+    custom:
+      crdlint:
+        type: module
+        description: checks that types_gen.go, spec_gen.go, and CRD YAML manifests are up to date with their sources
 formatters:
   enable:
     - gofmt

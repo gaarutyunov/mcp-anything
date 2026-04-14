@@ -10,7 +10,7 @@
 #     --build-arg PROXY_IMAGE=<proxy-image> \
 #     -t workspace:latest .
 
-ARG GO_VERSION=1.24
+ARG GO_VERSION=1.25
 ARG GOLANGCI_LINT_VERSION=v1.64.0
 ARG PROXY_IMAGE=mcp-anything:latest
 

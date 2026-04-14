@@ -155,7 +155,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: examples/remote-dev/Dockerfile.operator
+          file: examples/remote-dev/Dockerfile.workspace
           push: true
           tags: ${{ env.WORKSPACE_IMAGE }}
 

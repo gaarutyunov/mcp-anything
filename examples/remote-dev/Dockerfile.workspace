@@ -11,7 +11,7 @@
 #     -t workspace:latest .
 
 ARG GO_VERSION=1.25
-ARG GOLANGCI_LINT_VERSION=v1.64.0
+ARG GOLANGCI_LINT_VERSION=v2.7.2
 ARG PROXY_IMAGE=mcp-anything:latest
 
 # ── Stage 0: extract proxy binary from proxy image ───────────────────────────

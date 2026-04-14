@@ -490,7 +490,7 @@ func installKagentViaHelmChart(ctx context.Context, t *testing.T, dc dynamic.Int
 	}
 
 	t.Log("waiting for kagent-crds HelmChart job to complete")
-	if err := waitForHelmChartJob(ctx, t, dc, "kagent-crds"); err != nil {
+	if err := waitForHelmChartJob(ctx, t, dc, c, "kagent-crds"); err != nil {
 		return fmt.Errorf("kagent-crds HelmChart failed: %w", err)
 	}
 	t.Log("kagent-crds installed")
@@ -508,7 +508,7 @@ func installKagentViaHelmChart(ctx context.Context, t *testing.T, dc dynamic.Int
 	}
 
 	t.Log("waiting for kagent HelmChart job to complete")
-	if err := waitForHelmChartJob(ctx, t, dc, "kagent"); err != nil {
+	if err := waitForHelmChartJob(ctx, t, dc, c, "kagent"); err != nil {
 		return fmt.Errorf("kagent HelmChart failed: %w", err)
 	}
 	t.Log("kagent chart installed; waiting for controller deployment to be ready")
@@ -550,7 +550,7 @@ func createHelmChart(ctx context.Context, dc dynamic.Interface, name, chart, ver
 
 // waitForHelmChartJob polls until the Job created by the k3s Helm chart
 // controller completes successfully or the context expires.
-func waitForHelmChartJob(ctx context.Context, t *testing.T, dc dynamic.Interface, chartName string) error {
+func waitForHelmChartJob(ctx context.Context, t *testing.T, dc dynamic.Interface, c client.Client, chartName string) error {
 	t.Helper()
 	jobName := "helm-install-" + chartName
 	return wait.PollUntilContextTimeout(ctx, 10*time.Second, 8*time.Minute, false,
@@ -569,19 +569,8 @@ func waitForHelmChartJob(ctx context.Context, t *testing.T, dc dynamic.Interface
 				t.Logf("HelmChart %s: job created: %s", chartName, status)
 			}
 
-			// Check the associated batch/v1 Job directly.
-			scheme := buildOperatorScheme()
-			restCfg, err := clientcmd.RESTConfigFromKubeConfig(globalK3s.kubeConfigYAML)
-			if err != nil {
-				return false, err
-			}
-			k8sClient, err := client.New(restCfg, client.Options{Scheme: scheme})
-			if err != nil {
-				return false, err
-			}
-
 			job := &batchv1.Job{}
-			if err := k8sClient.Get(pollCtx, types.NamespacedName{Name: jobName, Namespace: "kube-system"}, job); err != nil {
+			if err := c.Get(pollCtx, types.NamespacedName{Name: jobName, Namespace: "kube-system"}, job); err != nil {
 				if apierrors.IsNotFound(err) {
 					t.Logf("HelmChart %s: job %s not yet created", chartName, jobName)
 					return false, nil

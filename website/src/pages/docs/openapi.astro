@@ -17,10 +17,10 @@ import DocsLayout from '../../layouts/DocsLayout.astro';
     tool_prefix: kraken
     base_url: https://api.kraken.com
     openapi:
-      source: deploy/examples/kraken/spec.yaml   # path or URL
+      source: examples/kraken/spec.yaml   # path or URL
       refresh_interval: 5m                        # re-fetch spec periodically
     overlay:
-      source: deploy/examples/kraken/overlay.yaml # optional customization</code></pre>
+      source: examples/kraken/overlay.yaml # optional customization</code></pre>
 
   <p>The <code>source</code> field accepts a local file path or a remote URL (<code>https://</code>). Remote specs are fetched with ETag/conditional GET to minimize bandwidth on refresh.</p>
 

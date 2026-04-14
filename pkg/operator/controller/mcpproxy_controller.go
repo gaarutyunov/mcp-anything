@@ -193,9 +193,13 @@ func (r *MCPProxyReconciler) reconcileConfigMap(ctx context.Context, proxy *v1al
 
 // reconcileUpstreamConfigMaps copies OpenAPI spec and overlay data from source ConfigMaps
 // (potentially in other namespaces) into local ConfigMaps mounted by the proxy pod.
+// Command upstreams (type: command) do not use spec or overlay ConfigMaps and are skipped.
 func (r *MCPProxyReconciler) reconcileUpstreamConfigMaps(ctx context.Context, proxy *v1alpha1.MCPProxy, upstreams []v1alpha1.MCPUpstream) error {
 	for i := range upstreams {
 		up := &upstreams[i]
+		if up.Spec.Type == "command" {
+			continue
+		}
 		if err := r.reconcileUpstreamSpecCM(ctx, proxy, up); err != nil {
 			return err
 		}
@@ -355,10 +359,14 @@ func (r *MCPProxyReconciler) buildDeployment(proxy *v1alpha1.MCPProxy, upstreams
 		},
 	}
 
-	// Add specs volume if any upstream uses a configMapRef for OpenAPI.
+	// Add specs volume if any HTTP upstream uses a configMapRef for OpenAPI.
+	// Command upstreams (type: command) never use spec or overlay ConfigMaps.
 	hasSpecs := false
 	hasOverlays := false
 	for i := range upstreams {
+		if upstreams[i].Spec.Type == "command" {
+			continue
+		}
 		if upstreams[i].Spec.OpenAPI.ConfigMapRef != nil {
 			hasSpecs = true
 		}

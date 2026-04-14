@@ -1,0 +1,14 @@
+apiVersion: mcp-anything.ai/v1alpha1
+kind: MCPProxy
+metadata:
+  name: remote-dev-proxy
+  namespace: remote-dev-e2e
+spec:
+  upstreamSelector:
+    matchLabels:
+      mcp-anything.ai/proxy: remote-dev-proxy
+  # image: <workspace-image>  # Custom image with Go + golangci-lint + write-file helper
+  server:
+    port: 8080
+  naming:
+    separator: "__"

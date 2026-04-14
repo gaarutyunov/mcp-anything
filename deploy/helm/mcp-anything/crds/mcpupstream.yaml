@@ -32,11 +32,68 @@ spec:
             spec:
               type: object
               description: MCPUpstreamSpec defines the desired state of MCPUpstream.
-              required: [openapi]
               properties:
+                type:
+                  type: string
+                  description: "Type is the upstream type: http (default) or command."
+                  default: http
+                  enum: [http, command]
                 toolPrefix:
                   type: string
                   description: ToolPrefix is prepended to all tool names from this upstream.
+                commands:
+                  type: array
+                  description: Commands defines command-backed MCP tools. Required when type is command.
+                  items:
+                    type: object
+                    required: [toolName, command]
+                    properties:
+                      toolName:
+                        type: string
+                        description: ToolName is the tool name (without prefix).
+                      description:
+                        type: string
+                        description: Description is the human-readable tool description.
+                      command:
+                        type: string
+                        description: Command is the Go text/template command string.
+                      shell:
+                        type: boolean
+                        description: Shell enables shell mode (sh -c) with auto-quoting.
+                      workingDir:
+                        type: string
+                        description: WorkingDir sets the working directory for the child process.
+                      timeout:
+                        type: string
+                        description: "Timeout per execution (e.g. 30s)."
+                      maxOutput:
+                        type: integer
+                        format: int64
+                        description: MaxOutput caps bytes captured from stdout/stderr.
+                      env:
+                        type: object
+                        additionalProperties:
+                          type: string
+                        description: Env is a map of additional environment variables.
+                      inputSchema:
+                        type: object
+                        description: InputSchema defines the JSON Schema for tool arguments.
+                        properties:
+                          type:
+                            type: string
+                          properties:
+                            type: object
+                            additionalProperties:
+                              type: object
+                              properties:
+                                type:
+                                  type: string
+                                description:
+                                  type: string
+                          required:
+                            type: array
+                            items:
+                              type: string
                 serviceRef:
                   type: object
                   description: ServiceRef references an in-cluster Kubernetes Service.

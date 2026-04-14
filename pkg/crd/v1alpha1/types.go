@@ -8,6 +8,9 @@ import (
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Namespaced
+// +kubebuilder:printcolumn:name="Upstreams",type=integer,JSONPath=".status.upstreamCount"
+// +kubebuilder:printcolumn:name="Tools",type=integer,JSONPath=".status.toolCount"
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"
 
 // MCPProxy is the Schema for the mcpproxies API.
 type MCPProxy struct {
@@ -35,6 +38,7 @@ type MCPProxySpec struct {
 
 	// Replicas is the number of proxy pod replicas. Defaults to 1.
 	// +optional
+	// +kubebuilder:validation:Minimum=1
 	Replicas *int32 `json:"replicas,omitempty"`
 
 	// Image is the proxy container image. Defaults to ghcr.io/gaarutyunov/mcp-anything:latest.
@@ -96,6 +100,8 @@ type ServiceDiscoveryNamespaceSelector struct {
 type ProxyServerSpec struct {
 	// Port is the port the proxy server listens on. Defaults to 8080.
 	// +optional
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=65535
 	Port int32 `json:"port,omitempty"`
 
 	// Transport is the list of MCP transport protocols to enable (e.g. sse, streamable-http).
@@ -125,12 +131,14 @@ type ProxyNamingSpec struct {
 
 	// ConflictResolution controls how naming conflicts are resolved.
 	// +optional
+	// +kubebuilder:validation:Enum=error;truncate;hash
 	ConflictResolution string `json:"conflictResolution,omitempty"`
 }
 
 // ProxyInboundAuthSpec configures inbound authentication.
 type ProxyInboundAuthSpec struct {
 	// Strategy is the auth strategy: jwt|none.
+	// +kubebuilder:validation:Enum=jwt;none
 	Strategy string `json:"strategy"`
 
 	// JWT configures JWT-based inbound auth.
@@ -185,6 +193,8 @@ type MCPProxyList struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Namespaced
+// +kubebuilder:printcolumn:name="Proxy",type=string,JSONPath=".status.assignedProxy"
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"
 
 // MCPUpstream is the Schema for the mcpupstreams API.
 type MCPUpstream struct {
@@ -313,6 +323,8 @@ type ServiceRefSpec struct {
 	Name string `json:"name"`
 
 	// Port is the port the service exposes.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=65535
 	Port int32 `json:"port"`
 }
 
@@ -359,6 +371,7 @@ type MCPUpstreamOverlaySpec struct {
 // MCPUpstreamOutboundAuthSpec configures outbound auth for the upstream.
 type MCPUpstreamOutboundAuthSpec struct {
 	// Strategy is the outbound auth strategy: bearer|oauth2_client_credentials|none.
+	// +kubebuilder:validation:Enum=bearer;oauth2_client_credentials;none
 	Strategy string `json:"strategy"`
 
 	// Bearer configures bearer token authentication.

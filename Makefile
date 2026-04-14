@@ -1,4 +1,4 @@
-.PHONY: all build build-operator lint vet test integration treeshake check clean helm-lint helm-package helm-push
+.PHONY: all build build-operator lint vet test integration treeshake check clean helm-lint helm-package helm-push generate-crds lint-crds
 
 BINARY := bin/proxy
 OPERATOR_BINARY := bin/operator
@@ -37,7 +37,13 @@ e2e:
 treeshake:
 	go test -tags treeshake -count=1 ./tests/treeshake/...
 
-check: lint vet test build build-operator treeshake
+generate-crds:
+	go run ./cmd/crdgen
+
+lint-crds:
+	go run ./cmd/crdlint
+
+check: lint vet test build build-operator treeshake lint-crds
 
 clean:
 	rm -rf bin/

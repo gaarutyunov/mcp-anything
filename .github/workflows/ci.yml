@@ -134,6 +134,7 @@ jobs:
           file: Dockerfile.operator
           push: true
           tags: ${{ env.OPERATOR_IMAGE }}
+          build-args: PROXY_IMAGE=${{ env.PROXY_IMAGE }}
 
   build-workspace-image:
     name: Build & Push Workspace Image

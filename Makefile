@@ -1,4 +1,4 @@
-.PHONY: all build build-operator lint vet test integration treeshake check clean helm-lint helm-package helm-push generate-crds lint-crds build-linter
+.PHONY: all build build-operator lint vet test integration treeshake osv check clean helm-lint helm-package helm-push generate-crds lint-crds build-linter
 
 BINARY := bin/proxy
 OPERATOR_BINARY := bin/operator
@@ -7,6 +7,8 @@ GOFLAGS := -race
 INTEGRATION_TIMEOUT := 600s
 E2E_TEST ?=
 E2E_RUN_FLAG = $(if $(E2E_TEST),-run $(E2E_TEST),)
+
+OSV_SCANNER_VERSION ?= v1.9.2
 
 HELM_CHART_DIR := charts/mcp-anything
 HELM_DIST_DIR := dist
@@ -41,13 +43,16 @@ e2e:
 treeshake:
 	go test -tags treeshake -count=1 ./tests/treeshake/...
 
+osv:
+	go run github.com/google/osv-scanner/cmd/osv-scanner@$(OSV_SCANNER_VERSION) scan .
+
 generate-crds:
 	go run ./cmd/crdgen
 
 lint-crds:
 	go run ./cmd/crdlint
 
-check: lint vet test build build-operator treeshake
+check: lint vet test build build-operator treeshake osv
 
 clean:
 	rm -rf bin/

@@ -2,7 +2,6 @@ package lua
 
 import (
 	"context"
-	"os"
 	"strconv"
 	"testing"
 	"time"
@@ -10,19 +9,6 @@ import (
 	"github.com/gaarutyunov/mcp-anything/pkg/config"
 	"github.com/gaarutyunov/mcp-anything/pkg/runtime"
 )
-
-func writeLuaScript(t *testing.T, content string) string {
-	t.Helper()
-	f, err := os.CreateTemp(t.TempDir(), "outbound_*.lua")
-	if err != nil {
-		t.Fatalf("create temp lua file: %v", err)
-	}
-	if _, err := f.WriteString(content); err != nil {
-		t.Fatalf("write lua script: %v", err)
-	}
-	_ = f.Close()
-	return f.Name()
-}
 
 func newTestProvider(t *testing.T, scriptPath string, timeout time.Duration) *Provider {
 	t.Helper()

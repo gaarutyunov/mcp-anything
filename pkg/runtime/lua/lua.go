@@ -1,5 +1,5 @@
-// Package lua registers the "outbound/lua" middleware strategy.
-// Import this package (blank import) to make the strategy available via middleware.New().
+// Package lua registers the "inbound/lua" and "outbound/lua" middleware strategies.
+// Import this package (blank import) to make both strategies available via middleware.New().
 package lua
 
 import (
@@ -14,6 +14,7 @@ import (
 	lua "github.com/yuin/gopher-lua"
 	"github.com/yuin/gopher-lua/parse"
 
+	"github.com/gaarutyunov/mcp-anything/pkg/auth/inbound"
 	"github.com/gaarutyunov/mcp-anything/pkg/auth/outbound"
 	"github.com/gaarutyunov/mcp-anything/pkg/config"
 	pkgmiddleware "github.com/gaarutyunov/mcp-anything/pkg/middleware"
@@ -27,6 +28,20 @@ const defaultTimeout = 500 * time.Millisecond
 const noCacheExpiry = int64(1)
 
 func init() {
+	pkgmiddleware.Register("inbound/lua", func(_ context.Context, cfg any) (func(http.Handler) http.Handler, error) {
+		ic, ok := cfg.(*config.InboundAuthConfig)
+		if !ok {
+			return nil, fmt.Errorf("inbound/lua: expected *config.InboundAuthConfig, got %T", cfg)
+		}
+		if ic.LuaAuthPool == nil {
+			return nil, fmt.Errorf("lua inbound auth requires runtime pools; set InboundAuthConfig.LuaAuthPool")
+		}
+		v, err := NewValidator(ic.Lua, ic.LuaAuthPool)
+		if err != nil {
+			return nil, err
+		}
+		return inbound.ValidatorMiddleware(v, ""), nil
+	})
 	pkgmiddleware.Register("outbound/lua", func(_ context.Context, cfg any) (func(http.Handler) http.Handler, error) {
 		oc, ok := cfg.(*config.OutboundAuthConfig)
 		if !ok {
@@ -43,7 +58,87 @@ func init() {
 	})
 }
 
-// Provider implements TokenProvider using a Lua script.
+// Validator implements inbound.TokenValidator using a sandboxed gopher-lua VM.
+// The Lua script receives the token as its first argument (via ...) and must return:
+// allowed (bool), status (int), extra_headers (table), error_msg (string).
+// The shared pool bounds the maximum number of concurrent Lua runtimes to prevent OOM.
+type Validator struct {
+	proto   *lua.FunctionProto
+	pool    config.PoolAcquirer
+	timeout time.Duration
+}
+
+// NewValidator creates a Validator by reading and pre-compiling the Lua
+// script at cfg.ScriptPath to bytecode. The bytecode is reused across calls.
+// pool bounds the number of concurrent Lua runtimes; it is shared with the outbound
+// Lua auth provider to enforce a single global limit for all auth scripts.
+func NewValidator(cfg config.LuaAuthConfig, pool config.PoolAcquirer) (*Validator, error) {
+	src, err := os.ReadFile(cfg.ScriptPath)
+	if err != nil {
+		return nil, fmt.Errorf("reading lua auth script %q: %w", cfg.ScriptPath, err)
+	}
+
+	proto, err := compileLuaSource(string(src), cfg.ScriptPath)
+	if err != nil {
+		return nil, fmt.Errorf("compiling lua auth script %q: %w", cfg.ScriptPath, err)
+	}
+
+	timeout := cfg.Timeout
+	if timeout <= 0 {
+		timeout = defaultTimeout
+	}
+
+	return &Validator{
+		proto:   proto,
+		timeout: timeout,
+		pool:    pool,
+	}, nil
+}
+
+// ValidateToken calls the Lua script with the token and returns identity info on success.
+func (v *Validator) ValidateToken(ctx context.Context, token string) (*inbound.TokenInfo, error) {
+	release, err := v.pool.Acquire(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("lua auth: %w", err)
+	}
+	defer release()
+
+	L := newSandboxedVM()
+	defer L.Close()
+
+	tctx, cancel := context.WithTimeout(ctx, v.timeout)
+	defer cancel()
+	L.SetContext(tctx)
+
+	fn := L.NewFunctionFromProto(v.proto)
+	L.Push(fn)
+	L.Push(lua.LString(token))
+	if err := L.PCall(1, 4, nil); err != nil {
+		return nil, fmt.Errorf("lua check_auth: %w", err)
+	}
+
+	// Pop 4 return values in reverse order (top of stack = last return value).
+	errMsg := L.ToString(-1)
+	L.Pop(1)
+	extraHeaders := luaTableToMap(L.ToTable(-1))
+	L.Pop(1)
+	status := int(L.ToInt(-1))
+	L.Pop(1)
+	allowed := L.ToBool(-1)
+	L.Pop(1)
+
+	if !allowed {
+		return nil, &inbound.DeniedError{Status: status, Message: errMsg}
+	}
+
+	info := &inbound.TokenInfo{Subject: "lua-authenticated", Extra: make(map[string]any)}
+	for k, val := range extraHeaders {
+		info.Extra["header:"+k] = val
+	}
+	return info, nil
+}
+
+// Provider implements outbound.TokenProvider using a Lua script.
 // The script receives (upstream, cached_token, cached_expiry) as arguments and must return:
 // token (string), expiry_unix (int), raw_headers (table), error_msg (string).
 // The shared pool bounds the maximum number of concurrent Lua runtimes to prevent OOM.
@@ -71,7 +166,7 @@ func NewProvider(upstreamName string, cfg config.LuaOutboundConfig, pool config.
 		return nil, fmt.Errorf("reading lua outbound script %q: %w", cfg.ScriptPath, err)
 	}
 
-	proto, err := compileSource(string(src), cfg.ScriptPath)
+	proto, err := compileLuaSource(string(src), cfg.ScriptPath)
 	if err != nil {
 		return nil, fmt.Errorf("compiling lua outbound script %q: %w", cfg.ScriptPath, err)
 	}
@@ -184,7 +279,7 @@ func (p *Provider) callLua(ctx context.Context, cachedToken string, cachedExpiry
 	if tp := L.Get(-1).Type(); tp != lua.LTTable && tp != lua.LTNil {
 		return "", 0, nil, fmt.Errorf("lua get_upstream_token: raw_headers (return 3) must be table or nil, got %s", tp)
 	}
-	rawHeaders = tableToMap(L.ToTable(-1))
+	rawHeaders = luaTableToMap(L.ToTable(-1))
 	L.Pop(1)
 
 	if tp := L.Get(-1).Type(); tp != lua.LTNumber {
@@ -205,7 +300,8 @@ func (p *Provider) callLua(ctx context.Context, cachedToken string, cachedExpiry
 	return token, expiry, rawHeaders, nil
 }
 
-// newSandboxedVM creates a new sandboxed LState for outbound use.
+// newSandboxedVM creates a new LState with only safe stdlib modules opened.
+// I/O, OS, package, debug, and coroutine modules are intentionally excluded.
 // dofile and loadfile are explicitly removed from the base library to prevent
 // scripts from reading local files via the base library's file-loading functions.
 func newSandboxedVM() *lua.LState {
@@ -220,8 +316,8 @@ func newSandboxedVM() *lua.LState {
 	return L
 }
 
-// compileSource parses and compiles a Lua source string to bytecode.
-func compileSource(src, name string) (*lua.FunctionProto, error) {
+// compileLuaSource parses and compiles a Lua source string to bytecode.
+func compileLuaSource(src, name string) (*lua.FunctionProto, error) {
 	chunk, err := parse.Parse(strings.NewReader(src), name)
 	if err != nil {
 		return nil, fmt.Errorf("parsing lua source %q: %w", name, err)
@@ -229,8 +325,9 @@ func compileSource(src, name string) (*lua.FunctionProto, error) {
 	return lua.Compile(chunk, name)
 }
 
-// tableToMap converts a *lua.LTable to map[string]string.
-func tableToMap(tbl *lua.LTable) map[string]string {
+// luaTableToMap converts a *lua.LTable to map[string]string.
+// Non-string keys and values are skipped.
+func luaTableToMap(tbl *lua.LTable) map[string]string {
 	m := make(map[string]string)
 	if tbl == nil {
 		return m

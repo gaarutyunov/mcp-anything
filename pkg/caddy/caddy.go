@@ -31,12 +31,27 @@ import (
 	pkgconfig "github.com/gaarutyunov/mcp-anything/pkg/config"
 	"github.com/gaarutyunov/mcp-anything/pkg/mcpanything"
 
-	// Pull in all built-in auth and upstream strategies so that the Caddy
-	// binary supports every feature without requiring explicit blank imports
-	// from the operator.
-	_ "github.com/gaarutyunov/mcp-anything/pkg/auth/inbound/all"
-	_ "github.com/gaarutyunov/mcp-anything/pkg/auth/outbound/all"
-	_ "github.com/gaarutyunov/mcp-anything/pkg/upstream/all"
+	// Pull in all built-in inbound auth strategies.
+	_ "github.com/gaarutyunov/mcp-anything/pkg/auth/inbound/apikey"
+	_ "github.com/gaarutyunov/mcp-anything/pkg/auth/inbound/introspection"
+	_ "github.com/gaarutyunov/mcp-anything/pkg/auth/inbound/jwt"
+
+	// Pull in all built-in outbound auth strategies.
+	_ "github.com/gaarutyunov/mcp-anything/pkg/auth/outbound/apikey"
+	_ "github.com/gaarutyunov/mcp-anything/pkg/auth/outbound/bearer"
+	_ "github.com/gaarutyunov/mcp-anything/pkg/auth/outbound/none"
+	_ "github.com/gaarutyunov/mcp-anything/pkg/auth/outbound/oauth2"
+	_ "github.com/gaarutyunov/mcp-anything/pkg/auth/outbound/oauth2usersession"
+
+	// Pull in scripting runtimes (JS and Lua for both inbound and outbound).
+	_ "github.com/gaarutyunov/mcp-anything/pkg/runtime/js"
+	_ "github.com/gaarutyunov/mcp-anything/pkg/runtime/lua"
+
+	// Pull in all built-in upstream builders.
+	_ "github.com/gaarutyunov/mcp-anything/pkg/upstream/command"
+	_ "github.com/gaarutyunov/mcp-anything/pkg/upstream/http"
+	_ "github.com/gaarutyunov/mcp-anything/pkg/upstream/http/withui"
+	_ "github.com/gaarutyunov/mcp-anything/pkg/upstream/script"
 )
 
 func init() {

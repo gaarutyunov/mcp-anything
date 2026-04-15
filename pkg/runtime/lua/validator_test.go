@@ -2,19 +2,21 @@ package lua
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/gaarutyunov/mcp-anything/pkg/auth/inbound"
 	"github.com/gaarutyunov/mcp-anything/pkg/config"
 	"github.com/gaarutyunov/mcp-anything/pkg/runtime"
 )
 
 func writeLuaScript(t *testing.T, content string) string {
 	t.Helper()
-	f, err := os.CreateTemp(t.TempDir(), "auth_*.lua")
+	f, err := os.CreateTemp(t.TempDir(), "lua_*.lua")
 	if err != nil {
 		t.Fatalf("create temp lua file: %v", err)
 	}
@@ -25,7 +27,7 @@ func writeLuaScript(t *testing.T, content string) string {
 	return f.Name()
 }
 
-func newValidator(t *testing.T, script string, timeout time.Duration) *Validator {
+func newTestValidator(t *testing.T, script string, timeout time.Duration) *Validator {
 	t.Helper()
 	path := writeLuaScript(t, script)
 	pool := runtime.NewPool(runtime.DefaultMaxAuthVMs)
@@ -37,7 +39,7 @@ func newValidator(t *testing.T, script string, timeout time.Duration) *Validator
 }
 
 func TestValidatorAllowsValidToken(t *testing.T) {
-	v := newValidator(t, `
+	v := newTestValidator(t, `
 local token = ...
 return true, 200, {}, ""
 `, 500*time.Millisecond)
@@ -55,7 +57,7 @@ return true, 200, {}, ""
 }
 
 func TestValidatorDeniesToken(t *testing.T) {
-	v := newValidator(t, `
+	v := newTestValidator(t, `
 local token = ...
 return false, 401, {}, "forbidden"
 `, 500*time.Millisecond)
@@ -64,10 +66,20 @@ return false, 401, {}, "forbidden"
 	if err == nil {
 		t.Fatal("expected error for denied token")
 	}
+	var denied *inbound.DeniedError
+	if !errors.As(err, &denied) {
+		t.Fatalf("expected *inbound.DeniedError, got %T: %v", err, err)
+	}
+	if denied.Status != 401 {
+		t.Errorf("denied.Status = %d, want 401", denied.Status)
+	}
+	if denied.Message != "forbidden" {
+		t.Errorf("denied.Message = %q, want %q", denied.Message, "forbidden")
+	}
 }
 
 func TestValidatorTimeoutEnforced(t *testing.T) {
-	v := newValidator(t, `
+	v := newTestValidator(t, `
 local token = ...
 while true do end
 return true, 200, {}, ""
@@ -95,7 +107,7 @@ func TestValidatorCompileError(t *testing.T) {
 
 func TestValidatorOsSandboxed(t *testing.T) {
 	// os.getenv should fail because os library is not loaded.
-	v := newValidator(t, `
+	v := newTestValidator(t, `
 local token = ...
 local val = os.getenv("HOME")
 return true, 200, {}, ""
@@ -109,7 +121,7 @@ return true, 200, {}, ""
 
 func TestValidatorIoSandboxed(t *testing.T) {
 	// io.open should fail because io library is not loaded.
-	v := newValidator(t, `
+	v := newTestValidator(t, `
 local token = ...
 local f = io.open("/etc/passwd", "r")
 return true, 200, {}, ""
@@ -122,7 +134,7 @@ return true, 200, {}, ""
 }
 
 func TestValidatorExtraHeaders(t *testing.T) {
-	v := newValidator(t, `
+	v := newTestValidator(t, `
 local token = ...
 return true, 200, {["X-User-ID"] = "user-42", ["X-Role"] = "admin"}, ""
 `, 500*time.Millisecond)
@@ -140,7 +152,7 @@ return true, 200, {["X-User-ID"] = "user-42", ["X-Role"] = "admin"}, ""
 }
 
 func TestValidatorConcurrentNoDataRace(t *testing.T) {
-	v := newValidator(t, `
+	v := newTestValidator(t, `
 local token = ...
 if token == "good" then
     return true, 200, {}, ""

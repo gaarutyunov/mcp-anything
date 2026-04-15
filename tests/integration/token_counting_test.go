@@ -178,9 +178,9 @@ func TestTokenCountingMetricEmitted(t *testing.T) {
 	}
 	defer session.Close()
 
-	result, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "tc__getdata"})
+	result, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "tc__get_data"})
 	if err != nil {
-		t.Fatalf("call tc__getdata: %v", err)
+		t.Fatalf("call tc__get_data: %v", err)
 	}
 	if result.IsError {
 		t.Fatalf("unexpected error result: %s", contentText(result.Content))
@@ -202,7 +202,7 @@ func TestTokenCountingMetricEmitted(t *testing.T) {
 	if !strings.Contains(metrics, "mcp_tool_result_tokens_bucket") {
 		t.Errorf("expected mcp_tool_result_tokens_bucket in /metrics; token counting not emitting histogram")
 	}
-	if !strings.Contains(metrics, `tool_name="tc__getdata"`) {
+	if !strings.Contains(metrics, `tool_name="tc__get_data"`) {
 		t.Errorf("expected tool_name label in mcp_tool_result_tokens metric")
 	}
 	if !strings.Contains(metrics, `upstream_name="tc"`) {
@@ -257,9 +257,9 @@ func TestTokenCountingDisabledNoMetric(t *testing.T) {
 	}
 	defer session.Close()
 
-	result, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "tc__getdata"})
+	result, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "tc__get_data"})
 	if err != nil {
-		t.Fatalf("call tc__getdata: %v", err)
+		t.Fatalf("call tc__get_data: %v", err)
 	}
 	if result.IsError {
 		t.Fatalf("unexpected error result: %s", contentText(result.Content))
@@ -330,9 +330,9 @@ func TestTokenCountingO200kEncoding(t *testing.T) {
 	}
 	defer session.Close()
 
-	result, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "tc__getdata"})
+	result, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "tc__get_data"})
 	if err != nil {
-		t.Fatalf("call tc__getdata: %v", err)
+		t.Fatalf("call tc__get_data: %v", err)
 	}
 	if result.IsError {
 		t.Fatalf("unexpected error result: %s", contentText(result.Content))

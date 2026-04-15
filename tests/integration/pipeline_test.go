@@ -197,9 +197,9 @@ upstreams:
 	if !nameSet["test__list_all_pets"] {
 		t.Errorf("expected tool test__list_all_pets, got %v", toolNames(toolsResult.Tools))
 	}
-	// createPet operationId → sanitized to "createpet".
-	if !nameSet["test__createpet"] {
-		t.Errorf("expected tool test__createpet, got %v", toolNames(toolsResult.Tools))
+	// createPet operationId → sanitized to "create_pet".
+	if !nameSet["test__create_pet"] {
+		t.Errorf("expected tool test__create_pet, got %v", toolNames(toolsResult.Tools))
 	}
 }
 

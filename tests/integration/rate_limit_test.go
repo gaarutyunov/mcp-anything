@@ -267,9 +267,9 @@ func TestRateLimitInMemory_ToolSucceedsUnderLimit(t *testing.T) {
 	session := connectMCPClient(callCtx, t, proxyURL)
 
 	// Call once — well under the strict limit of 2.
-	result, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "limited__listitems"})
+	result, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "limited__list_items"})
 	if err != nil {
-		t.Fatalf("call limited__listitems: %v", err)
+		t.Fatalf("call limited__list_items: %v", err)
 	}
 	if result.IsError {
 		t.Fatalf("expected success, got error: %s", contentText(result.Content))
@@ -302,7 +302,7 @@ func TestRateLimitInMemory_ExceedLimitReturnsError(t *testing.T) {
 	defer cancel()
 	session := connectMCPClient(callCtx, t, proxyURL)
 
-	const toolName = "limited__listitems"
+	const toolName = "limited__list_items"
 
 	// First 2 calls succeed (strict limit: average=2, burst=0 → capacity=2).
 	for i := 0; i < 2; i++ {
@@ -363,9 +363,9 @@ func TestRateLimitInMemory_PerToolOverrideOverridesUpstreamDefault(t *testing.T)
 	defer cancel()
 	session := connectMCPClient(callCtx, t, proxyURL)
 
-	// Exhaust the strict limit on rl__listitems (capacity=2).
+	// Exhaust the strict limit on rl__list_items (capacity=2).
 	for i := 0; i < 2; i++ {
-		result, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "rl__listitems"})
+		result, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "rl__list_items"})
 		if err != nil {
 			t.Fatalf("listitems call %d: %v", i+1, err)
 		}
@@ -375,7 +375,7 @@ func TestRateLimitInMemory_PerToolOverrideOverridesUpstreamDefault(t *testing.T)
 	}
 
 	// Third listitems call must be rejected (strict limit exhausted).
-	result, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "rl__listitems"})
+	result, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "rl__list_items"})
 	if err != nil {
 		t.Fatalf("listitems call 3: %v", err)
 	}
@@ -383,8 +383,8 @@ func TestRateLimitInMemory_PerToolOverrideOverridesUpstreamDefault(t *testing.T)
 		t.Fatal("listitems call 3: expected rate limit error (strict limit), got success")
 	}
 
-	// rl__getstatus uses standard (capacity=15) — still well under limit.
-	statusResult, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "rl__getstatus"})
+	// rl__get_status uses standard (capacity=15) — still well under limit.
+	statusResult, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "rl__get_status"})
 	if err != nil {
 		t.Fatalf("getstatus: %v", err)
 	}
@@ -419,14 +419,14 @@ func TestRateLimitInMemory_ToolWithoutRateLimitIsUnaffected(t *testing.T) {
 	defer cancel()
 	session := connectMCPClient(callCtx, t, proxyURL)
 
-	// Exhaust the strict limit on limited__listitems.
+	// Exhaust the strict limit on limited__list_items.
 	for i := 0; i < 3; i++ {
-		session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "limited__listitems"}) //nolint:errcheck
+		session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "limited__list_items"}) //nolint:errcheck
 	}
 
-	// unlimited__listitems has no rate limit — should always succeed.
+	// unlimited__list_items has no rate limit — should always succeed.
 	for i := 0; i < 5; i++ {
-		result, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "unlimited__listitems"})
+		result, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "unlimited__list_items"})
 		if err != nil {
 			t.Fatalf("unlimited call %d: %v", i+1, err)
 		}
@@ -474,7 +474,7 @@ func TestRateLimitRedis_EnforcedViaRedisStore(t *testing.T) {
 	defer cancel()
 	session := connectMCPClient(callCtx, t, proxyURL)
 
-	const toolName = "rl__listitems"
+	const toolName = "rl__list_items"
 
 	// First 2 calls succeed.
 	for i := 0; i < 2; i++ {
@@ -535,7 +535,7 @@ func TestRateLimitRedis_SharedCounterAcrossConnections(t *testing.T) {
 	callCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
-	const toolName = "rl__listitems"
+	const toolName = "rl__list_items"
 
 	// Session 1: make 1 call (consumes 1 of 2 limit slots).
 	session1 := connectMCPClient(callCtx, t, proxyURL)

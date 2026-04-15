@@ -158,7 +158,7 @@ upstreams:
 	}
 	defer session.Close()
 
-	result, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "test__getdata"})
+	result, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "test__get_data"})
 	if err != nil {
 		t.Fatalf("call tool: %v", err)
 	}
@@ -318,7 +318,7 @@ upstreams:
 	defer session.Close()
 
 	// Step 1: First call — should return IsError:true with auth URL.
-	result, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "test__getdata"})
+	result, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "test__get_data"})
 	if err != nil {
 		t.Fatalf("first call tool: %v", err)
 	}
@@ -355,7 +355,7 @@ upstreams:
 	}
 
 	// Step 3: Second call — token is now stored; should succeed.
-	result2, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "test__getdata"})
+	result2, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "test__get_data"})
 	if err != nil {
 		t.Fatalf("second call tool: %v", err)
 	}
@@ -556,7 +556,7 @@ upstreams:
 		t.Fatalf("connect to first proxy: %v", err)
 	}
 
-	result1, err := sess1.CallTool(callCtx1, &sdkmcp.CallToolParams{Name: "test__getdata"})
+	result1, err := sess1.CallTool(callCtx1, &sdkmcp.CallToolParams{Name: "test__get_data"})
 	if err != nil {
 		t.Fatalf("first call: %v", err)
 	}
@@ -583,7 +583,7 @@ upstreams:
 	}
 
 	// Verify first proxy works.
-	result1b, err := sess1.CallTool(callCtx1, &sdkmcp.CallToolParams{Name: "test__getdata"})
+	result1b, err := sess1.CallTool(callCtx1, &sdkmcp.CallToolParams{Name: "test__get_data"})
 	if err != nil {
 		t.Fatalf("second call on first proxy: %v", err)
 	}
@@ -614,7 +614,7 @@ upstreams:
 	defer sess2.Close()
 
 	// Token should be loaded from PostgreSQL — no re-auth needed.
-	result2, err := sess2.CallTool(callCtx2, &sdkmcp.CallToolParams{Name: "test__getdata"})
+	result2, err := sess2.CallTool(callCtx2, &sdkmcp.CallToolParams{Name: "test__get_data"})
 	if err != nil {
 		t.Fatalf("call on second proxy: %v", err)
 	}
@@ -782,7 +782,7 @@ upstreams:
 		t.Fatalf("connect to first proxy: %v", err)
 	}
 
-	result1, err := sess1.CallTool(callCtx1, &sdkmcp.CallToolParams{Name: "test__getdata"})
+	result1, err := sess1.CallTool(callCtx1, &sdkmcp.CallToolParams{Name: "test__get_data"})
 	if err != nil {
 		t.Fatalf("first call: %v", err)
 	}
@@ -809,7 +809,7 @@ upstreams:
 	}
 
 	// Verify first proxy works.
-	result1b, err := sess1.CallTool(callCtx1, &sdkmcp.CallToolParams{Name: "test__getdata"})
+	result1b, err := sess1.CallTool(callCtx1, &sdkmcp.CallToolParams{Name: "test__get_data"})
 	if err != nil {
 		t.Fatalf("second call on first proxy: %v", err)
 	}
@@ -840,7 +840,7 @@ upstreams:
 	defer sess2.Close()
 
 	// Token should be loaded from Redis — no re-auth needed.
-	result2, err := sess2.CallTool(callCtx2, &sdkmcp.CallToolParams{Name: "test__getdata"})
+	result2, err := sess2.CallTool(callCtx2, &sdkmcp.CallToolParams{Name: "test__get_data"})
 	if err != nil {
 		t.Fatalf("call on second proxy: %v", err)
 	}

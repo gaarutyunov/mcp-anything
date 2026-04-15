@@ -238,7 +238,7 @@ func TestRequestValidationBlocksInvalidArgs(t *testing.T) {
 
 	// Call the tool with empty arguments — petId is required but omitted.
 	result, callErr := session.CallTool(callCtx, &sdkmcp.CallToolParams{
-		Name:      "test__getpet",
+		Name:      "test__get_pet",
 		Arguments: map[string]any{},
 	})
 	if callErr != nil {
@@ -289,7 +289,7 @@ func TestResponseValidationWarnMode(t *testing.T) {
 	defer callCancel()
 
 	result, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{
-		Name: "test__listpets",
+		Name: "test__list_pets",
 	})
 	if err != nil {
 		t.Fatalf("CallTool returned error: %v", err)
@@ -338,7 +338,7 @@ func TestResponseValidationFailMode(t *testing.T) {
 	defer callCancel()
 
 	result, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{
-		Name: "test__listpets",
+		Name: "test__list_pets",
 	})
 	if err != nil {
 		t.Fatalf("CallTool returned error: %v", err)
@@ -388,7 +388,7 @@ func TestResponseValidationOnlyWarnMode(t *testing.T) {
 	defer callCancel()
 
 	result, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{
-		Name: "test__listpets",
+		Name: "test__list_pets",
 	})
 	if err != nil {
 		t.Fatalf("CallTool returned error: %v", err)
@@ -439,7 +439,7 @@ func TestResponseValidationOnlyFailMode(t *testing.T) {
 	defer callCancel()
 
 	result, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{
-		Name: "test__listpets",
+		Name: "test__list_pets",
 	})
 	if err != nil {
 		t.Fatalf("CallTool returned error: %v", err)
@@ -488,7 +488,7 @@ func TestUnexpectedStatusReturnsError(t *testing.T) {
 	defer callCancel()
 
 	result, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{
-		Name: "test__listpets",
+		Name: "test__list_pets",
 	})
 	if err != nil {
 		t.Fatalf("CallTool returned error: %v", err)

@@ -910,7 +910,7 @@ upstreams:
 
 	// Call the protected tool (listPets) with NO Authorization header — should get 401.
 	// Use raw HTTP because we expect the middleware to return 401 before MCP initialization.
-	respProtected := mcpPost(t, proxyURL, "tools/call", map[string]any{"name": "test__listpets", "arguments": map[string]any{}}, "")
+	respProtected := mcpPost(t, proxyURL, "tools/call", map[string]any{"name": "test__list_pets", "arguments": map[string]any{}}, "")
 	defer respProtected.Body.Close()
 	if respProtected.StatusCode != http.StatusUnauthorized {
 		body, _ := io.ReadAll(respProtected.Body)
@@ -921,7 +921,7 @@ upstreams:
 	// The middleware should detect x-mcp-auth-required=false and pass through.
 	// The MCP handler will process the call, but since there's no session, we
 	// verify at HTTP level that the middleware does NOT return 401 (i.e., HTTP != 401).
-	respPublic := mcpPost(t, proxyURL, "tools/call", map[string]any{"name": "test__healthcheck", "arguments": map[string]any{}}, "")
+	respPublic := mcpPost(t, proxyURL, "tools/call", map[string]any{"name": "test__health_check", "arguments": map[string]any{}}, "")
 	defer respPublic.Body.Close()
 	if respPublic.StatusCode == http.StatusUnauthorized {
 		body, _ := io.ReadAll(respPublic.Body)

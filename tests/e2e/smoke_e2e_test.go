@@ -140,7 +140,7 @@ spec:
         SMOKE_ENV: smoke-test-value
     - toolName: count_lines
       description: Count the number of lines in the provided text
-      command: "printf '%s' {{.text}} | wc -l"
+      command: "printf '%s' {{.text}} | grep -c '^'"
       shell: true
       timeout: 5s
       inputSchema:

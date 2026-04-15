@@ -252,9 +252,9 @@ func TestTracesExportedOnToolCall(t *testing.T) {
 	}
 	defer session.Close()
 
-	result, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "test__listitems"})
+	result, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "test__list_items"})
 	if err != nil {
-		t.Fatalf("call test__listitems: %v", err)
+		t.Fatalf("call test__list_items: %v", err)
 	}
 	if result.IsError {
 		t.Fatalf("tool call returned error: %s", contentText(result.Content))
@@ -339,9 +339,9 @@ func TestW3CTracePropagation(t *testing.T) {
 	}
 	defer session.Close()
 
-	result, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "test__listitems"})
+	result, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "test__list_items"})
 	if err != nil {
-		t.Fatalf("call test__listitems: %v", err)
+		t.Fatalf("call test__list_items: %v", err)
 	}
 	if result.IsError {
 		t.Fatalf("tool call returned error: %s", contentText(result.Content))
@@ -410,7 +410,7 @@ func TestMetricsEmitted(t *testing.T) {
 
 	// Make 3 successful tool calls.
 	for i := 0; i < 3; i++ {
-		result, callErr := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "test__listitems"})
+		result, callErr := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "test__list_items"})
 		if callErr != nil {
 			t.Fatalf("success call %d: %v", i, callErr)
 		}
@@ -420,7 +420,7 @@ func TestMetricsEmitted(t *testing.T) {
 	}
 
 	// Make 1 failing tool call (upstream returns 500).
-	failResult, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "test__failitem"})
+	failResult, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "test__fail_item"})
 	if err != nil {
 		t.Fatalf("fail call: %v", err)
 	}

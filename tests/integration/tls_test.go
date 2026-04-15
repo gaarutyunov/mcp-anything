@@ -139,7 +139,7 @@ upstreams:
 	}
 
 	// Find the listPets tool.
-	const toolListPets = "tlstest__listpets"
+	const toolListPets = "tlstest__list_pets"
 	var found bool
 	for _, tool := range toolsResult.Tools {
 		if tool.Name == toolListPets {

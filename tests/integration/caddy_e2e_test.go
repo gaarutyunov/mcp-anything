@@ -121,14 +121,14 @@ func TestCaddyModule(t *testing.T) {
 		t.Fatalf("ListTools: %v", err)
 	}
 	names := toolNames(toolsResult.Tools)
-	if len(names) != 1 || names[0] != "caddy__listpets" {
-		t.Fatalf("expected [caddy__listpets], got %v", names)
+	if len(names) != 1 || names[0] != "caddy__list_pets" {
+		t.Fatalf("expected [caddy__list_pets], got %v", names)
 	}
 
 	// 6. Assert tools/call proxies to WireMock correctly.
-	callResult, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "caddy__listpets"})
+	callResult, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "caddy__list_pets"})
 	if err != nil {
-		t.Fatalf("CallTool caddy__listpets: %v", err)
+		t.Fatalf("CallTool caddy__list_pets: %v", err)
 	}
 	if callResult.IsError {
 		t.Fatalf("CallTool returned error: %s", contentText(callResult.Content))

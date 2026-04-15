@@ -199,7 +199,7 @@ func TestCircuitBreaker_OpensAfterFailures(t *testing.T) {
 	defer cancel()
 	session := connectMCPClient(callCtx, t, proxyURL)
 
-	const toolName = "cb__listitems"
+	const toolName = "cb__list_items"
 
 	// First two calls reach WireMock and return 500 — the second one trips the circuit
 	// (2 requests, 100% failure rate ≥ threshold 50%).
@@ -267,7 +267,7 @@ func TestCircuitBreaker_ReadyzReflectsCircuitState(t *testing.T) {
 	defer cancel()
 	session := connectMCPClient(callCtx, t, proxyURL)
 
-	const toolName = "cb__listitems"
+	const toolName = "cb__list_items"
 
 	// Trigger 2 failures to open the circuit (min_requests=2, threshold=0.5).
 	for i := 0; i < 2; i++ {
@@ -335,7 +335,7 @@ func TestCircuitBreaker_UnprotectedUpstreamUnaffected(t *testing.T) {
 
 	// Exhaust protected upstream circuit (2 failures → circuit opens).
 	for i := 0; i < 2; i++ {
-		result, callErr := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "protected__listitems"})
+		result, callErr := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "protected__list_items"})
 		if callErr != nil {
 			t.Fatalf("protected call %d: %v", i+1, callErr)
 		}
@@ -345,7 +345,7 @@ func TestCircuitBreaker_UnprotectedUpstreamUnaffected(t *testing.T) {
 	}
 
 	// Protected circuit is open — further calls must fail fast with circuit message.
-	result, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "protected__listitems"})
+	result, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "protected__list_items"})
 	if err != nil {
 		t.Fatalf("protected open-circuit call: %v", err)
 	}
@@ -366,7 +366,7 @@ func TestCircuitBreaker_UnprotectedUpstreamUnaffected(t *testing.T) {
 	// Calls to the unprotected upstream must still reach WireMock — it has no circuit breaker.
 	// The upstream still returns 500 (error result), but the call must NOT be short-circuited.
 	for i := 0; i < 3; i++ {
-		result, callErr := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "unprotected__listitems"})
+		result, callErr := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "unprotected__list_items"})
 		if callErr != nil {
 			t.Fatalf("unprotected call %d: %v", i+1, callErr)
 		}

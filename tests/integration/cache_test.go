@@ -180,7 +180,7 @@ upstreams:
 	}
 	defer session.Close()
 
-	const tool = "test__listpets"
+	const tool = "test__list_pets"
 
 	// First call — cache miss, WireMock hit.
 	r1 := callTool(t, callCtx, session, tool)
@@ -296,7 +296,7 @@ upstreams:
 	}
 	defer session.Close()
 
-	const tool = "test__listpets"
+	const tool = "test__list_pets"
 
 	// First call — cache miss, WireMock hit 1.
 	r1 := callTool(t, callCtx, session, tool)
@@ -439,15 +439,15 @@ upstreams:
 	defer session.Close()
 
 	// Call /pets twice — cached by upstream default, WireMock hit once.
-	callTool(t, callCtx, session, "test__listpets")
-	callTool(t, callCtx, session, "test__listpets")
+	callTool(t, callCtx, session, "test__list_pets")
+	callTool(t, callCtx, session, "test__list_pets")
 	if count := wiremockRequestCount(t, wiremockURL, "/pets"); count != 1 {
 		t.Errorf("pets: expected WireMock hit 1 time, got %d (overlay should NOT have disabled cache)", count)
 	}
 
 	// Call /orders twice — overlay disabled cache (x-mcp-cache: ""), WireMock hit twice.
-	callTool(t, callCtx, session, "test__listorders")
-	callTool(t, callCtx, session, "test__listorders")
+	callTool(t, callCtx, session, "test__list_orders")
+	callTool(t, callCtx, session, "test__list_orders")
 	if count := wiremockRequestCount(t, wiremockURL, "/orders"); count != 2 {
 		t.Errorf("orders: expected WireMock hit 2 times, got %d (overlay should have disabled cache)", count)
 	}
@@ -542,7 +542,7 @@ upstreams:
 	}
 	defer session.Close()
 
-	const tool = "test__listpets"
+	const tool = "test__list_pets"
 
 	// Both calls should produce error results and both should hit WireMock.
 	r1 := callTool(t, callCtx, session, tool)
@@ -645,11 +645,11 @@ upstreams:
 	defer session.Close()
 
 	// Both calls should succeed and both should hit WireMock (no cache).
-	r1 := callTool(t, callCtx, session, "test__listpets")
+	r1 := callTool(t, callCtx, session, "test__list_pets")
 	if r1.IsError {
 		t.Fatalf("first call error: %s", contentText(r1.Content))
 	}
-	r2 := callTool(t, callCtx, session, "test__listpets")
+	r2 := callTool(t, callCtx, session, "test__list_pets")
 	if r2.IsError {
 		t.Fatalf("second call error: %s", contentText(r2.Content))
 	}
@@ -763,7 +763,7 @@ upstreams:
 	}
 	defer session.Close()
 
-	const tool = "test__listpets"
+	const tool = "test__list_pets"
 
 	// First call — cache miss, WireMock hit.
 	r1 := callTool(t, callCtx, session, tool)
@@ -890,7 +890,7 @@ upstreams:
 	}
 	defer session.Close()
 
-	const tool = "test__listpets"
+	const tool = "test__list_pets"
 
 	// First call — cache miss, WireMock hit 1.
 	r1 := callTool(t, callCtx, session, tool)

@@ -407,14 +407,14 @@ upstreams:
 
 	// Call list_pets with limit=5 (integer).
 	result, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{
-		Name:      "test__listpets",
+		Name:      "test__list_pets",
 		Arguments: map[string]any{"limit": 5},
 	})
 	if err != nil {
-		t.Fatalf("call test__listpets: %v", err)
+		t.Fatalf("call test__list_pets: %v", err)
 	}
 	if result.IsError {
-		t.Fatalf("test__listpets returned error: %s", contentText(result.Content))
+		t.Fatalf("test__list_pets returned error: %s", contentText(result.Content))
 	}
 
 	text := contentText(result.Content)

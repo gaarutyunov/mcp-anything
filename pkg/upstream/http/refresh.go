@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	nethttp "net/http"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -304,7 +305,7 @@ func (r *Refresher) buildEntriesFromBytes(ctx context.Context, mergedBytes []byt
 		return nil, nil, nil, nil, fmt.Errorf("building outbound auth: %w", err)
 	}
 
-	client, err := NewHTTPClient(r.cfg, provider)
+	client, err := NewHTTPClient(r.cfg)
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("building HTTP client: %w", err)
 	}
@@ -337,7 +338,18 @@ func (r *Refresher) buildEntriesFromBytes(ctx context.Context, mergedBytes []byt
 			ValidationCfg:  r.cfg.Validation,
 			OperationNode:  gt.OperationNode,
 		}
-		entry.Executor = &Executor{entry: entry}
+		executor := &Executor{entry: entry}
+		entry.Executor = executor
+
+		// Compose the per-tool middleware chain:
+		//   RequestMiddleware (transform) → outbound.Middleware (auth) → Executor (terminal handler)
+		var h nethttp.Handler = executor
+		h = pkgoutbound.Middleware(provider)(h)
+		if vt.Transforms != nil {
+			h = vt.Transforms.RequestMiddleware()(h)
+		}
+		entry.Handler = h
+
 		entries = append(entries, entry)
 	}
 

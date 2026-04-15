@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	pkginbound "github.com/gaarutyunov/mcp-anything/pkg/auth/inbound"
-	pkgoutbound "github.com/gaarutyunov/mcp-anything/pkg/auth/outbound"
 	"github.com/gaarutyunov/mcp-anything/pkg/config"
 	pkgtelemetry "github.com/gaarutyunov/mcp-anything/pkg/telemetry"
 	pkgtransport "github.com/gaarutyunov/mcp-anything/pkg/transport"
@@ -53,8 +52,9 @@ func (t *tokenInfoHeaderTransport) RoundTrip(req *nethttp.Request) (*nethttp.Res
 // It uses cfg.Transport for connection pooling, TLS, and dialing settings.
 // The legacy cfg.TLSSkipVerify field is honoured for backward compatibility.
 // Static headers from cfg.Headers are injected via a custom RoundTripper.
-// The provider wraps the transport to inject outbound authentication on every request.
-func NewHTTPClient(cfg *config.UpstreamConfig, provider pkgoutbound.TokenProvider) (*nethttp.Client, error) {
+// Outbound authentication is handled by the per-tool middleware chain (outbound.Middleware)
+// rather than a RoundTripper, so no auth transport is added here.
+func NewHTTPClient(cfg *config.UpstreamConfig) (*nethttp.Client, error) {
 	transportCfg := cfg.Transport
 	// Legacy tls_skip_verify field: propagate to transport TLS config for backward compat.
 	if cfg.TLSSkipVerify {
@@ -70,8 +70,6 @@ func NewHTTPClient(cfg *config.UpstreamConfig, provider pkgoutbound.TokenProvide
 	if len(cfg.Headers) > 0 {
 		rt = &headerRoundTripper{headers: cfg.Headers, wrapped: t}
 	}
-
-	rt = &pkgoutbound.AuthTransport{Base: rt, Provider: provider}
 
 	// Inject extra headers from the inbound TokenInfo (e.g. from Lua check_auth extra_headers).
 	rt = &tokenInfoHeaderTransport{wrapped: rt}

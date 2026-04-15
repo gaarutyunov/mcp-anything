@@ -58,6 +58,10 @@ type RegistryEntry struct {
 	ValidationCfg  config.ValidationConfig
 	OperationNode  *yaml.Node   // YAML node for JSONPath group filter evaluation (nil for command/script tools)
 	Executor       ToolExecutor // set by builders; dispatches tool execution
+	// Handler is the composed per-tool middleware chain assembled by HTTP builders.
+	// The chain applies request transforms and outbound auth before reaching the
+	// terminal executor handler. Nil for non-HTTP tools (command, script).
+	Handler http.Handler
 	// RateLimit is the name of a top-level rate_limits entry applied to this tool.
 	// Empty string means no rate limiting. Set by builders from the x-mcp-rate-limit
 	// overlay extension (per-tool override) or upstream-level rate_limit config (default).

@@ -40,9 +40,46 @@ Integration tests live in `tests/integration/` with build tag `//go:build integr
 
 **You MUST run `make integration` after implementing any feature or fix and ensure all integration tests pass.** If an integration test fails, diagnose and fix the issue before committing. Do not skip or ignore integration test failures.
 
+## No panicking
+
+**NEVER use `panic()` anywhere in this codebase — not in library code, not in `init()`, not in factories, not in tests.**
+
+All error conditions must be surfaced by returning an `error` value. Functions that can fail must return `(*T, error)` or `error`. Call sites must propagate or wrap errors using `fmt.Errorf("context: %w", err)`.
+
+The only acceptable alternative is a log-and-exit pattern in `main()` for truly unrecoverable startup failures (e.g. missing required env var before any server has started). Even then, prefer `log.Fatal` / `slog` + `os.Exit(1)` over `panic`.
+
+Examples of what to do instead of panicking:
+
+```go
+// BAD
+func NewPool(max int64) *Pool {
+    if max <= 0 { panic("max must be > 0") }
+    ...
+}
+
+// GOOD
+func NewPool(max int64) (*Pool, error) {
+    if max <= 0 { return nil, fmt.Errorf("new pool: max must be > 0, got %d", max) }
+    ...
+}
+```
+
+```go
+// BAD
+func Register(name string, f Factory) {
+    if name == "" { panic("name must not be empty") }
+    ...
+}
+
+// GOOD
+func Register(name string, f Factory) error {
+    if name == "" { return fmt.Errorf("register: name must not be empty") }
+    ...
+}
+```
+
 ## Code conventions
 - All errors must be wrapped with context: `fmt.Errorf("loading spec: %w", err)`
-- No `panic()` in library code; only in `main()` for unrecoverable startup failures
 - Structured logging via `log/slog` with `slog.Default()`; keys are snake_case
 - No global mutable state; pass dependencies explicitly
 - Interfaces are defined in the package that uses them, not the package that implements them

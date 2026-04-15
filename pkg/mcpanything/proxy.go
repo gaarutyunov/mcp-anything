@@ -85,17 +85,15 @@ func New(ctx context.Context, cfg *pkgconfig.ProxyConfig, opts ...Option) (*Prox
 		opt(p)
 	}
 
-	// Create bounded runtime pools for JS/Lua script execution.
-	pools, err := pkgruntime.NewRegistry(p.cfg.Runtime)
+	// Create bounded runtime pools for script execution.
+	pools, err := pkgruntime.NewRegistry(ctx, p.cfg.Runtime)
 	if err != nil {
 		return nil, fmt.Errorf("runtime pools: %w", err)
 	}
 	p.pools = pools
-	slog.Info("runtime pools configured",
-		"js_auth_vms", pools.JSAuth.Cap(),
-		"js_vms", pools.JSScript.Cap(),
-		"lua_auth_vms", pools.LuaAuth.Cap(),
-	)
+	for name, pool := range pools.All() {
+		slog.Info("runtime pool configured", "name", name, "cap", pool.Cap())
+	}
 
 	// Create the MCP manager.
 	p.manager = pkgmcp.NewManager(pools)
@@ -255,8 +253,8 @@ func (p *Proxy) buildAuth(ctx context.Context) (func(http.Handler) http.Handler,
 	}
 
 	authCfg := p.cfg.InboundAuth
-	authCfg.JSAuthPool = p.pools.JSAuth
-	authCfg.LuaAuthPool = p.pools.LuaAuth
+	authCfg.JSAuthPool = p.pools.Get("js/auth")
+	authCfg.LuaAuthPool = p.pools.Get("lua/auth")
 	globalMW, err := pkgmiddleware.New(ctx, "inbound/"+strategy, &authCfg)
 	if err != nil {
 		return nil, nil, fmt.Errorf("build inbound auth middleware: %w", err)
@@ -270,8 +268,8 @@ func (p *Proxy) buildAuth(ctx context.Context) (func(http.Handler) http.Handler,
 			continue
 		}
 		ovCfg := *up.InboundAuthOverride
-		ovCfg.JSAuthPool = p.pools.JSAuth
-		ovCfg.LuaAuthPool = p.pools.LuaAuth
+		ovCfg.JSAuthPool = p.pools.Get("js/auth")
+		ovCfg.LuaAuthPool = p.pools.Get("lua/auth")
 		ovMW, ovErr := pkgmiddleware.New(ctx, "inbound/"+ovCfg.Strategy, &ovCfg)
 		if ovErr != nil {
 			return nil, nil, fmt.Errorf("build inbound auth override for %q: %w", up.Name, ovErr)

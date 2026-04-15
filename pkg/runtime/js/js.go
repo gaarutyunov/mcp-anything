@@ -1,5 +1,6 @@
-// Package js registers the "inbound/js" and "outbound/js" middleware strategies.
-// Import this package (blank import) to make both strategies available via middleware.New().
+// Package js registers the "inbound/js" and "outbound/js" middleware strategies
+// and the "js/auth" and "js/script" runtime pools.
+// Import this package (blank import) to make all of the above available.
 package js
 
 import (
@@ -21,6 +22,7 @@ import (
 	"github.com/gaarutyunov/mcp-anything/pkg/auth/outbound"
 	"github.com/gaarutyunov/mcp-anything/pkg/config"
 	pkgmiddleware "github.com/gaarutyunov/mcp-anything/pkg/middleware"
+	pkgruntime "github.com/gaarutyunov/mcp-anything/pkg/runtime"
 )
 
 const defaultTimeout = 500 * time.Millisecond
@@ -32,6 +34,29 @@ const defaultFetchTimeout = 30 * time.Second
 const noCacheExpiry = int64(1)
 
 func init() {
+	// Register runtime pools for JS auth and script execution.
+	pkgruntime.Register("js/auth", func(_ context.Context, cfg config.RuntimeConfig) (pkgruntime.Runtime, error) {
+		max := cfg.JS.MaxAuthVMs
+		if max == 0 {
+			max = int(pkgruntime.DefaultMaxAuthVMs)
+		}
+		if max < 0 {
+			return nil, fmt.Errorf("runtime.js.max_auth_vms must be > 0, got %d", max)
+		}
+		return pkgruntime.NewPool(int64(max)), nil
+	})
+	pkgruntime.Register("js/script", func(_ context.Context, cfg config.RuntimeConfig) (pkgruntime.Runtime, error) {
+		max := cfg.JS.MaxScriptVMs
+		if max == 0 {
+			max = int(pkgruntime.DefaultMaxScriptVMs)
+		}
+		if max < 0 {
+			return nil, fmt.Errorf("runtime.js.max_script_vms must be > 0, got %d", max)
+		}
+		return pkgruntime.NewPool(int64(max)), nil
+	})
+
+	// Register inbound and outbound middleware strategies.
 	pkgmiddleware.Register("inbound/js", func(_ context.Context, cfg any) (func(http.Handler) http.Handler, error) {
 		ic, ok := cfg.(*config.InboundAuthConfig)
 		if !ok {

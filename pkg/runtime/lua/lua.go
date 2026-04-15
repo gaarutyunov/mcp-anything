@@ -39,7 +39,7 @@ func init() {
 		if max < 0 {
 			return nil, fmt.Errorf("runtime.lua.max_auth_vms must be > 0, got %d", max)
 		}
-		return pkgruntime.NewPool(int64(max)), nil
+		return pkgruntime.NewPool(int64(max))
 	})
 
 	// Register inbound and outbound middleware strategies.

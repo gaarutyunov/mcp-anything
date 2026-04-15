@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync"
 
 	"github.com/gaarutyunov/mcp-anything/pkg/config"
@@ -26,15 +27,17 @@ var (
 )
 
 // Register registers a Factory under the given name. Typically called from init()
-// in a scripting sub-package. Panics if name is empty or already registered.
+// in a scripting sub-package. Logs and skips if name is empty or already registered.
 func Register(name string, f Factory) {
 	mu.Lock()
 	defer mu.Unlock()
 	if name == "" {
-		panic("runtime.Register: name must not be empty")
+		slog.Error("runtime.Register: name must not be empty")
+		return
 	}
 	if _, dup := factories[name]; dup {
-		panic("runtime.Register: duplicate runtime name " + name)
+		slog.Error("runtime.Register: duplicate runtime name", "name", name)
+		return
 	}
 	factories[name] = f
 }

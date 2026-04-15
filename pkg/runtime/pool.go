@@ -21,16 +21,15 @@ type Pool struct {
 }
 
 // NewPool creates a Pool that permits at most max concurrent runtime instances.
-// If max <= 0 it panics; callers must supply a positive value (validated at
-// construction time by NewRegistry).
-func NewPool(max int64) *Pool {
+// Returns an error if max <= 0.
+func NewPool(max int64) (*Pool, error) {
 	if max <= 0 {
-		panic("runtime.NewPool: max must be > 0")
+		return nil, fmt.Errorf("runtime.NewPool: max must be > 0, got %d", max)
 	}
 	return &Pool{
 		sem: semaphore.NewWeighted(max),
 		cap: max,
-	}
+	}, nil
 }
 
 // Acquire waits for a slot and returns a release function.

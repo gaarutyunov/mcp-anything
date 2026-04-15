@@ -43,7 +43,7 @@ func init() {
 		if max < 0 {
 			return nil, fmt.Errorf("runtime.js.max_auth_vms must be > 0, got %d", max)
 		}
-		return pkgruntime.NewPool(int64(max)), nil
+		return pkgruntime.NewPool(int64(max))
 	})
 	pkgruntime.Register("js/script", func(_ context.Context, cfg config.RuntimeConfig) (pkgruntime.Runtime, error) {
 		max := cfg.JS.MaxScriptVMs
@@ -53,7 +53,7 @@ func init() {
 		if max < 0 {
 			return nil, fmt.Errorf("runtime.js.max_script_vms must be > 0, got %d", max)
 		}
-		return pkgruntime.NewPool(int64(max)), nil
+		return pkgruntime.NewPool(int64(max))
 	})
 
 	// Register inbound and outbound middleware strategies.

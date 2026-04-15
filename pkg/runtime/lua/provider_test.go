@@ -12,7 +12,10 @@ import (
 
 func newTestProvider(t *testing.T, scriptPath string, timeout time.Duration) *Provider {
 	t.Helper()
-	pool := runtime.NewPool(runtime.DefaultMaxAuthVMs)
+	pool, err := runtime.NewPool(runtime.DefaultMaxAuthVMs)
+	if err != nil {
+		t.Fatalf("NewPool: %v", err)
+	}
 	p, err := NewProvider("test-upstream", config.LuaOutboundConfig{ScriptPath: scriptPath, Timeout: timeout}, pool)
 	if err != nil {
 		t.Fatalf("NewProvider: %v", err)

@@ -7,9 +7,9 @@ package session
 import (
 	"context"
 	"fmt"
-	"sync"
 
 	"github.com/gaarutyunov/mcp-anything/pkg/config"
+	"github.com/gaarutyunov/mcp-anything/pkg/registry"
 )
 
 // Token is an alias for config.OAuthToken for convenience in session sub-packages.
@@ -21,17 +21,12 @@ type Store = config.OAuthTokenStore
 // StoreFactory creates a Store from a SessionStoreConfig.
 type StoreFactory func(ctx context.Context, cfg *config.SessionStoreConfig) (Store, error)
 
-var (
-	mu       sync.RWMutex
-	registry = make(map[string]StoreFactory)
-)
+var reg registry.Registry[StoreFactory]
 
 // Register adds a factory for the given provider name.
 // Typically called from init() in session sub-packages.
 func Register(provider string, f StoreFactory) {
-	mu.Lock()
-	defer mu.Unlock()
-	registry[provider] = f
+	reg.Register(provider, f)
 }
 
 // New creates a Store from the given config.
@@ -40,9 +35,7 @@ func New(ctx context.Context, cfg *config.SessionStoreConfig) (Store, error) {
 	if cfg.Provider == "" {
 		return nil, fmt.Errorf("session_store.provider is required")
 	}
-	mu.RLock()
-	f, ok := registry[cfg.Provider]
-	mu.RUnlock()
+	f, ok := reg.Get(cfg.Provider)
 	if !ok {
 		return nil, fmt.Errorf("unknown session store provider %q — import _ %q",
 			cfg.Provider,

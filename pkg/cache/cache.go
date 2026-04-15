@@ -12,12 +12,12 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/gaarutyunov/mcp-anything/pkg/config"
+	"github.com/gaarutyunov/mcp-anything/pkg/registry"
 )
 
 // Store is the interface for a cache backend.
@@ -32,17 +32,12 @@ type Store interface {
 // StoreFactory creates a Store from config.
 type StoreFactory func(ctx context.Context, cfg *config.CacheStoreConfig) (Store, error)
 
-var (
-	mu       sync.RWMutex
-	registry = make(map[string]StoreFactory)
-)
+var reg registry.Registry[StoreFactory]
 
 // Register adds a factory for the given provider name.
 // Typically called from init() in store sub-packages.
 func Register(provider string, factory StoreFactory) {
-	mu.Lock()
-	defer mu.Unlock()
-	registry[provider] = factory
+	reg.Register(provider, factory)
 }
 
 // New creates a Store from config.
@@ -52,9 +47,7 @@ func New(ctx context.Context, cfg *config.CacheStoreConfig) (Store, error) {
 	if provider == "" {
 		provider = "memory"
 	}
-	mu.RLock()
-	f, ok := registry[provider]
-	mu.RUnlock()
+	f, ok := reg.Get(provider)
 	if !ok {
 		return nil, fmt.Errorf("unknown cache store provider %q — did you forget to import _ %q?",
 			provider,

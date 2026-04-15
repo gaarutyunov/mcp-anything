@@ -13,11 +13,11 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"sync"
 
 	chromem "github.com/philippgille/chromem-go"
 
 	"github.com/gaarutyunov/mcp-anything/pkg/config"
+	"github.com/gaarutyunov/mcp-anything/pkg/registry"
 )
 
 // Func is the embedding function type used to embed text into a vector.
@@ -28,26 +28,19 @@ type Func = chromem.EmbeddingFunc
 // ProviderFactory creates an embedding Func from an EmbeddingConfig.
 type ProviderFactory func(ctx context.Context, cfg *config.EmbeddingConfig) (Func, error)
 
-var (
-	mu       sync.RWMutex
-	registry = make(map[string]ProviderFactory)
-)
+var reg registry.Registry[ProviderFactory]
 
 // Register adds a factory for the given provider name.
 // Typically called from init() in provider sub-packages.
 func Register(provider string, factory ProviderFactory) {
-	mu.Lock()
-	defer mu.Unlock()
-	registry[provider] = factory
+	reg.Register(provider, factory)
 }
 
 // New creates an embedding Func from the given config.
 // Returns an error for unknown providers.
 // Provider sub-packages must be imported (blank import) before calling New.
 func New(ctx context.Context, cfg *config.EmbeddingConfig) (Func, error) {
-	mu.RLock()
-	f, ok := registry[cfg.Provider]
-	mu.RUnlock()
+	f, ok := reg.Get(cfg.Provider)
 	if !ok {
 		return nil, fmt.Errorf("unknown embedding provider %q — import the provider package or pkg/embedding/all", cfg.Provider)
 	}

@@ -28,42 +28,113 @@ import (
 	pkgcb "github.com/gaarutyunov/mcp-anything/pkg/upstream/circuitbreaker"
 )
 
+// callState holds the mutable result of a per-tool execution pipeline.
+// It is allocated by Execute and shared via context with the handler chain
+// so any handler in the chain can write the final result.
+type callState struct {
+	result *sdkmcp.CallToolResult
+	err    error
+}
+
+// callStateKey is the unexported context key for callState.
+type callStateKey struct{}
+
+// withCallState stores s in ctx and returns the updated context.
+func withCallState(ctx context.Context, s *callState) context.Context {
+	return context.WithValue(ctx, callStateKey{}, s)
+}
+
+// callStateFromContext retrieves the callState from ctx, or nil if absent.
+func callStateFromContext(ctx context.Context) *callState {
+	s, _ := ctx.Value(callStateKey{}).(*callState)
+	return s
+}
+
+// noopResponseWriter discards all HTTP writes; results are communicated via callState.
+type noopResponseWriter struct{}
+
+func (noopResponseWriter) Header() nethttp.Header      { return nethttp.Header{} }
+func (noopResponseWriter) Write(b []byte) (int, error) { return len(b), nil }
+func (noopResponseWriter) WriteHeader(int)             {}
+
 // Executor executes an HTTP-backed tool by running the full request pipeline:
 // request transform → URL build → request validation → HTTP call → response validation → response transform.
 type Executor struct {
 	entry *pkgupstream.RegistryEntry
 }
 
-// Execute runs the HTTP request pipeline for the given tool args.
+// Execute runs the per-tool handler chain and returns the MCP result.
+// The chain (entry.Handler) applies request transforms and outbound auth before
+// reaching ServeHTTP (the terminal handler) which performs the upstream HTTP call.
 func (e *Executor) Execute(ctx context.Context, args map[string]any) (*sdkmcp.CallToolResult, error) {
+	state := &callState{}
+	ctx = withCallState(ctx, state)
+	ctx = transform.WithMCPArgs(ctx, args)
+
+	req, err := nethttp.NewRequestWithContext(ctx, nethttp.MethodPost, "http://internal/", nil)
+	if err != nil {
+		return nil, fmt.Errorf("creating internal pipeline request: %w", err)
+	}
+
+	e.entry.Handler.ServeHTTP(noopResponseWriter{}, req)
+
+	return state.result, state.err
+}
+
+// ServeHTTP is the terminal handler in the per-tool middleware chain.
+// It reads the RequestEnvelope and outbound auth headers from context,
+// builds and dispatches the upstream HTTP request, and writes the result
+// to the callState in context.
+func (e *Executor) ServeHTTP(w nethttp.ResponseWriter, r *nethttp.Request) {
+	ctx := r.Context()
+	state := callStateFromContext(ctx)
+	if state == nil {
+		slog.Error("ServeHTTP called without callState in context", "tool", e.entry.PrefixedName)
+		return
+	}
+
 	entry := e.entry
 	toolAttrs := metric.WithAttributes(attribute.String("mcp.tool.name", entry.PrefixedName))
 
-	// Get the typed transforms (set by the HTTP builder).
-	transforms, ok := entry.Transforms.(*transform.CompiledTransforms)
-	if !ok || transforms == nil {
-		return nil, fmt.Errorf("invalid transforms for tool %q: expected *transform.CompiledTransforms", entry.PrefixedName)
+	// Check for request transform error (set by RequestMiddleware on failure).
+	if tErr := transform.ErrorFromContext(ctx); tErr != nil {
+		if pkgtelemetry.ToolCallErrors != nil {
+			pkgtelemetry.ToolCallErrors.Add(ctx, 1, toolAttrs)
+		}
+		state.result = &sdkmcp.CallToolResult{
+			IsError: true,
+			Content: []sdkmcp.Content{
+				&sdkmcp.TextContent{Text: fmt.Sprintf("request transform: %v", tErr)},
+			},
+		}
+		return
 	}
 
-	// Apply request transform jq → RequestEnvelope.
-	reqStart := time.Now()
-	envelope, err := transforms.RunRequest(ctx, args)
-	if err != nil {
-		return nil, fmt.Errorf("request transform: %w", err)
+	// Check for outbound auth early-exit result (e.g. OAuth2 redirect needed).
+	if authResult := pkgoutbound.AuthResultFromContext(ctx); authResult != nil {
+		state.result = authResult
+		return
 	}
-	if pkgtelemetry.TransformDuration != nil {
-		pkgtelemetry.TransformDuration.Record(ctx, time.Since(reqStart).Seconds(),
-			metric.WithAttributes(
-				attribute.String("mcp.tool.name", entry.PrefixedName),
-				attribute.String("transform.stage", "request"),
-			),
-		)
+
+	// Get compiled transforms for response/error processing.
+	transforms, ok := entry.Transforms.(*transform.CompiledTransforms)
+	if !ok || transforms == nil {
+		state.err = fmt.Errorf("invalid transforms for tool %q: expected *transform.CompiledTransforms", entry.PrefixedName)
+		return
+	}
+
+	// Get the request envelope produced by RequestMiddleware.
+	envelope := transform.RequestEnvelopeFromContext(ctx)
+	if envelope == nil {
+		state.err = fmt.Errorf("no request envelope in context for tool %q", entry.PrefixedName)
+		return
 	}
 
 	// Build upstream URL from the envelope.
 	upstreamURL, err := buildUpstreamURL(entry.Upstream.BaseURL, entry.PathTemplate, envelope)
 	if err != nil {
-		return nil, fmt.Errorf("building upstream URL: %w", err)
+		state.err = fmt.Errorf("building upstream URL: %w", err)
+		return
 	}
 
 	// Build request body if present.
@@ -71,7 +142,8 @@ func (e *Executor) Execute(ctx context.Context, args map[string]any) (*sdkmcp.Ca
 	if envelope.Body != nil {
 		bodyBytes, marshalErr := json.Marshal(envelope.Body)
 		if marshalErr != nil {
-			return nil, fmt.Errorf("marshalling request body: %w", marshalErr)
+			state.err = fmt.Errorf("marshalling request body: %w", marshalErr)
+			return
 		}
 		bodyReader = bytes.NewReader(bodyBytes)
 	}
@@ -79,13 +151,20 @@ func (e *Executor) Execute(ctx context.Context, args map[string]any) (*sdkmcp.Ca
 	// Create HTTP request.
 	httpReq, err := nethttp.NewRequestWithContext(ctx, entry.Method, upstreamURL, bodyReader)
 	if err != nil {
-		return nil, fmt.Errorf("creating HTTP request: %w", err)
+		state.err = fmt.Errorf("creating HTTP request: %w", err)
+		return
 	}
 
 	// Add envelope headers; static upstream headers are injected by the RoundTripper.
 	for k, v := range envelope.Headers {
 		httpReq.Header.Set(k, v)
 	}
+
+	// Add outbound auth headers (from Middleware); these override envelope headers for auth.
+	for k, v := range pkgoutbound.HeadersFromContext(ctx) {
+		httpReq.Header.Set(k, v)
+	}
+
 	if bodyReader != nil {
 		httpReq.Header.Set("Content-Type", "application/json")
 	}
@@ -94,19 +173,18 @@ func (e *Executor) Execute(ctx context.Context, args map[string]any) (*sdkmcp.Ca
 	validator, _ := entry.Validator.(*openapi.Validator)
 
 	// Validate the outbound request against the OpenAPI spec (if configured).
-	// When only response validation is enabled, we still build the route metadata
-	// (BuildRequestInput) so that ValidateResponse has the required context.
 	var reqInput *openapi3filter.RequestValidationInput
 	if validator != nil {
 		if entry.ValidationCfg.ValidateRequest {
 			ri, valErr := validator.ValidateRequest(ctx, httpReq)
 			if valErr != nil {
-				return &sdkmcp.CallToolResult{
+				state.result = &sdkmcp.CallToolResult{
 					IsError: true,
 					Content: []sdkmcp.Content{
 						&sdkmcp.TextContent{Text: fmt.Sprintf("request validation failed: %v", valErr)},
 					},
-				}, nil
+				}
+				return
 			}
 			reqInput = ri
 		} else if entry.ValidationCfg.ValidateResponse {
@@ -119,41 +197,35 @@ func (e *Executor) Execute(ctx context.Context, args map[string]any) (*sdkmcp.Ca
 		}
 	}
 
-	// Inject outbound auth — no-op for now; TASK-10 fills this in.
-
 	// Dispatch: with or without circuit breaker.
 	cb := entry.Upstream.CircuitBreaker
 	if cb == nil {
-		// No circuit breaker — original flow.
 		result, _, dispErr := e.httpDispatchWithStatus(ctx, httpReq, reqInput, transforms, validator, toolAttrs)
-		return result, dispErr
+		state.result = result
+		state.err = dispErr
+		return
 	}
 
 	// Circuit-breaker-wrapped flow.
 	result, cbErr := cb.Execute(func() (*sdkmcp.CallToolResult, error) {
 		res, statusCode, dispErr := e.httpDispatchWithStatus(ctx, httpReq, reqInput, transforms, validator, toolAttrs)
 		if dispErr != nil {
-			// Network error or I/O failure → count as circuit failure.
 			return nil, dispErr
 		}
 		if statusCode >= 500 {
-			// 5xx response → count as circuit failure but preserve the result
-			// so the LLM receives the actual error body.
 			return res, pkgcb.ErrUpstreamFailure
 		}
-		// 2xx or 4xx → not a circuit failure (upstream is healthy or request was invalid).
 		return res, nil
 	})
 
 	switch {
 	case errors.Is(cbErr, gobreaker.ErrOpenState), errors.Is(cbErr, gobreaker.ErrTooManyRequests):
-		// Circuit is open or half-open limit reached — fail fast without hitting upstream.
-		return openCircuitResult(cb), nil
+		state.result = openCircuitResult(cb)
 	case errors.Is(cbErr, pkgcb.ErrUpstreamFailure):
-		// 5xx was counted as a circuit failure; return the preserved error result to the LLM.
-		return result, nil
+		state.result = result
 	default:
-		return result, cbErr
+		state.result = result
+		state.err = cbErr
 	}
 }
 
@@ -183,16 +255,6 @@ func (e *Executor) httpDispatchWithStatus(
 
 	resp, err := entry.Upstream.Client.Do(httpReq)
 	if err != nil {
-		// Check if the outbound auth strategy requires user authorization.
-		var authErr *pkgoutbound.AuthRequiredError
-		if errors.As(err, &authErr) {
-			return &sdkmcp.CallToolResult{
-				IsError: true,
-				Content: []sdkmcp.Content{
-					&sdkmcp.TextContent{Text: "Authorization required. Please visit the following URL to grant access:\n" + authErr.AuthURL},
-				},
-			}, 0, nil
-		}
 		return nil, 0, fmt.Errorf("executing HTTP request: %w", err)
 	}
 	defer func() {

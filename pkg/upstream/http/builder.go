@@ -8,7 +8,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"net/http"
+	nethttp "net/http"
 	"strings"
 	"time"
 
@@ -51,7 +51,7 @@ func (b *Builder) Build(ctx context.Context, cfg *config.UpstreamConfig, naming 
 		return nil, fmt.Errorf("build outbound auth for upstream %q: %w", cfg.Name, err)
 	}
 
-	client, err := NewHTTPClient(cfg, provider)
+	client, err := NewHTTPClient(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("building HTTP client for upstream %q: %w", cfg.Name, err)
 	}
@@ -68,7 +68,7 @@ func (b *Builder) Build(ctx context.Context, cfg *config.UpstreamConfig, naming 
 	if fetchTimeout <= 0 {
 		fetchTimeout = 30 * time.Second
 	}
-	uiFetchClient := &http.Client{Timeout: fetchTimeout}
+	uiFetchClient := &nethttp.Client{Timeout: fetchTimeout}
 
 	entries := make([]*pkgupstream.RegistryEntry, 0, len(tools))
 	for _, vt := range tools {
@@ -97,7 +97,17 @@ func (b *Builder) Build(ctx context.Context, cfg *config.UpstreamConfig, naming 
 			RateLimit:      rateLimit,
 			CacheName:      resolveCacheName(vt.Operation, cfg.Cache),
 		}
-		entry.Executor = &Executor{entry: entry}
+		executor := &Executor{entry: entry}
+		entry.Executor = executor
+
+		// Compose the per-tool middleware chain:
+		//   RequestMiddleware (transform) → outbound.Middleware (auth) → Executor (terminal handler)
+		var h nethttp.Handler = executor
+		h = pkgoutbound.Middleware(provider)(h)
+		if vt.Transforms != nil {
+			h = vt.Transforms.RequestMiddleware()(h)
+		}
+		entry.Handler = h
 
 		// Load and attach a UI handler when a UI source is configured for this tool.
 		// buildUIHandler returns nil, nil when no UI factory is registered (pkg/upstream/http/withui not imported).

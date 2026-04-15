@@ -103,6 +103,12 @@ spec:
                     properties:
                       collapseSeparators:
                         type: boolean
+                      expandCamelCase:
+                        description: |-
+                          ExpandCamelCase inserts underscores at camelCase word boundaries before
+                          other transformations, so operationIds like "getGreeting" become
+                          "get_greeting" rather than "getgreeting".
+                        type: boolean
                       lowercase:
                         type: boolean
                       replaceBraces:

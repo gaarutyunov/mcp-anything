@@ -217,6 +217,9 @@ func applyDefaults(k *koanf.Koanf) {
 	if !k.Exists("naming.default_slug_rules.replace_braces") {
 		_ = k.Set("naming.default_slug_rules.replace_braces", true)
 	}
+	if !k.Exists("naming.default_slug_rules.expand_camel_case") {
+		_ = k.Set("naming.default_slug_rules.expand_camel_case", true)
+	}
 	if !k.Exists("naming.default_slug_rules.lowercase") {
 		_ = k.Set("naming.default_slug_rules.lowercase", true)
 	}

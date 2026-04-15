@@ -38,6 +38,11 @@ type ProxySlugRulesSpec struct {
 	// +optional
 	ReplaceBraces bool `json:"replaceBraces,omitempty"`
 	// +optional
+	// ExpandCamelCase inserts underscores at camelCase word boundaries before
+	// other transformations, so operationIds like "getGreeting" become
+	// "get_greeting" rather than "getgreeting".
+	ExpandCamelCase bool `json:"expandCamelCase,omitempty"`
+	// +optional
 	Lowercase bool `json:"lowercase,omitempty"`
 	// +optional
 	CollapseSeparators bool `json:"collapseSeparators,omitempty"`

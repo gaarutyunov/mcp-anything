@@ -30,7 +30,7 @@ import (
 	_ "github.com/gaarutyunov/mcp-anything/pkg/auth/outbound/oauth2"
 	_ "github.com/gaarutyunov/mcp-anything/pkg/auth/outbound/oauth2usersession"
 
-	// Scripting runtimes (register both inbound and outbound JS/Lua strategies).
+	// Scripting runtimes (register runtime pools and inbound/outbound JS/Lua strategies).
 	_ "github.com/gaarutyunov/mcp-anything/pkg/runtime/js"
 	_ "github.com/gaarutyunov/mcp-anything/pkg/runtime/lua"
 

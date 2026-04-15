@@ -298,8 +298,8 @@ func (r *Refresher) buildEntriesFromBytes(ctx context.Context, mergedBytes []byt
 
 	outboundCfg := r.cfg.OutboundAuth
 	outboundCfg.Upstream = r.cfg.Name
-	outboundCfg.JSAuthPool = r.pools.JSAuth
-	outboundCfg.LuaAuthPool = r.pools.LuaAuth
+	outboundCfg.JSAuthPool = r.pools.Get("js/auth")
+	outboundCfg.LuaAuthPool = r.pools.Get("lua/auth")
 	outboundStrategy := outboundCfg.Strategy
 	if outboundStrategy == "" {
 		outboundStrategy = "none"

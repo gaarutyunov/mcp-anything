@@ -30,7 +30,10 @@ func writeLuaScript(t *testing.T, content string) string {
 func newTestValidator(t *testing.T, script string, timeout time.Duration) *Validator {
 	t.Helper()
 	path := writeLuaScript(t, script)
-	pool := runtime.NewPool(runtime.DefaultMaxAuthVMs)
+	pool, err := runtime.NewPool(runtime.DefaultMaxAuthVMs)
+	if err != nil {
+		t.Fatalf("NewPool: %v", err)
+	}
 	v, err := NewValidator(config.LuaAuthConfig{ScriptPath: path, Timeout: timeout}, pool)
 	if err != nil {
 		t.Fatalf("NewValidator: %v", err)
@@ -98,8 +101,11 @@ func TestValidatorCompileError(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`this is not valid lua @@##`), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	pool := runtime.NewPool(runtime.DefaultMaxAuthVMs)
-	_, err := NewValidator(config.LuaAuthConfig{ScriptPath: path, Timeout: 500 * time.Millisecond}, pool)
+	pool, err := runtime.NewPool(runtime.DefaultMaxAuthVMs)
+	if err != nil {
+		t.Fatalf("NewPool: %v", err)
+	}
+	_, err = NewValidator(config.LuaAuthConfig{ScriptPath: path, Timeout: 500 * time.Millisecond}, pool)
 	if err == nil {
 		t.Fatal("expected compile error for invalid Lua")
 	}

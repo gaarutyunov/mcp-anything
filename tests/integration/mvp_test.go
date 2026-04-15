@@ -22,8 +22,29 @@ import (
 )
 
 // proxyContainerRequest returns a ContainerRequest for the proxy.
-// If PROXY_IMAGE is set, it pulls that image. Otherwise, it builds from source using the Dockerfile.
+//
+// Priority order:
+//  1. PROXY_COV_IMAGE — a coverage-instrumented image (built with go build -cover).
+//     When COVERAGE_DIR is also set, the directory is bind-mounted into the
+//     container at /tmp/gocov so coverage data is written directly to the host.
+//  2. PROXY_IMAGE — a regular pre-built image (used in CI without coverage).
+//  3. Dockerfile — built from source (local development).
 func proxyContainerRequest() testcontainers.ContainerRequest {
+	if img := os.Getenv("PROXY_COV_IMAGE"); img != "" {
+		req := testcontainers.ContainerRequest{
+			Image: img,
+			Env:   map[string]string{"GOCOVERDIR": "/tmp/gocov"},
+		}
+		if covDir := os.Getenv("COVERAGE_DIR"); covDir != "" {
+			req.Mounts = testcontainers.ContainerMounts{
+				{
+					Source: testcontainers.GenericBindMountSource{HostPath: covDir},
+					Target: testcontainers.ContainerMountTarget("/tmp/gocov"),
+				},
+			}
+		}
+		return req
+	}
 	if img := os.Getenv("PROXY_IMAGE"); img != "" {
 		return testcontainers.ContainerRequest{Image: img}
 	}

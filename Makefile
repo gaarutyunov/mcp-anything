@@ -1,4 +1,4 @@
-.PHONY: all build build-operator lint vet test integration treeshake check clean helm-lint helm-package helm-push generate-crds lint-crds build-linter
+.PHONY: all build build-operator lint vet test integration treeshake check clean helm-lint helm-package helm-push generate-crds lint-crds build-linter test-cover integration-cover treeshake-cover cover-merge cover-report cover
 
 BINARY := bin/proxy
 OPERATOR_BINARY := bin/operator
@@ -7,6 +7,8 @@ GOFLAGS := -race
 INTEGRATION_TIMEOUT := 600s
 E2E_TEST ?=
 E2E_RUN_FLAG = $(if $(E2E_TEST),-run $(E2E_TEST),)
+
+COVERAGE_DIR ?= coverage
 
 HELM_CHART_DIR := charts/mcp-anything
 HELM_DIST_DIR := dist
@@ -51,6 +53,37 @@ check: lint vet test build build-operator treeshake
 
 clean:
 	rm -rf bin/
+
+# Coverage targets.
+# Unit tests: GOCOVERDIR writes binary covdata; -cover activates instrumentation.
+test-cover:
+	mkdir -p $(COVERAGE_DIR)/unit
+	GOCOVERDIR=$(COVERAGE_DIR)/unit go test $(GOFLAGS) -cover -coverpkg=./... -count=1 ./...
+
+# Integration tests with coverage: set PROXY_COV_IMAGE and COVERAGE_DIR so that
+# proxyContainerRequest() mounts $(COVERAGE_DIR)/integration into the container at
+# /tmp/gocov, and the instrumented proxy binary writes covdata there on exit.
+integration-cover:
+	mkdir -p $(COVERAGE_DIR)/integration
+	COVERAGE_DIR=$(COVERAGE_DIR)/integration go test $(GOFLAGS) -tags integration -count=1 -timeout $(INTEGRATION_TIMEOUT) ./tests/integration/...
+
+# Merge unit and integration covdata directories, then emit a text profile.
+# Integration coverage is only present when PROXY_COV_IMAGE was used during the
+# integration-cover run; the merge step handles an empty directory gracefully by
+# including only the non-empty inputs.
+cover-merge:
+	mkdir -p $(COVERAGE_DIR)/merged
+	go tool covdata merge \
+		-i $(COVERAGE_DIR)/unit,$(COVERAGE_DIR)/integration \
+		-o $(COVERAGE_DIR)/merged
+	go tool covdata textfmt -i $(COVERAGE_DIR)/merged -o $(COVERAGE_DIR)/coverage.out
+
+# Merge and print per-function coverage summary.
+cover-report: cover-merge
+	go tool cover -func=$(COVERAGE_DIR)/coverage.out
+
+# Run all coverage-enabled test suites and produce the final report.
+cover: test-cover integration-cover cover-report
 
 helm-lint:
 	helm lint $(HELM_CHART_DIR)

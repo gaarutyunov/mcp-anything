@@ -198,7 +198,7 @@ func (m *Manager) DispatchForGroup(ctx context.Context, groupName, toolName stri
 // and diffs the tool sets to call AddTool/RemoveTools on each MCP server.
 // Connected clients receive notifications/tools/list_changed automatically.
 // If any upstream validation fails, the existing registry and servers are unchanged.
-func (m *Manager) Rebuild(ctx context.Context, cfg *config.ProxyConfig) error {
+func (m *Manager) Rebuild(ctx context.Context, cfg *config.DynamicConfig) error {
 	// Set Implementation on first Rebuild.
 	if m.impl == nil {
 		m.impl = &sdkmcp.Implementation{
@@ -336,7 +336,7 @@ func (m *Manager) Rebuild(ctx context.Context, cfg *config.ProxyConfig) error {
 	}
 
 	// Build the rate limit enforcer.
-	newEnforcer, err := ratelimit.New(ctx, cfg)
+	newEnforcer, err := ratelimit.New(ctx, &cfg.ProxyConfig)
 	if err != nil {
 		return fmt.Errorf("building rate limit enforcer: %w", err)
 	}

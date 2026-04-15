@@ -49,6 +49,16 @@ spec:
           spec:
             description: MCPProxySpec defines the desired state of MCPProxy.
             properties:
+              extensions:
+                additionalProperties:
+                  x-kubernetes-preserve-unknown-fields: true
+                description: |-
+                  Extensions allows SDK consumers to extend the proxy configuration with
+                  package-specific config sections registered via config.RegisterProxySection.
+                  Each key must match a registered proxy section key; the JSON value is
+                  forwarded verbatim into the generated proxy config YAML at the top level.
+                  This enables extending proxy CRDs without modifying the core types.
+                type: object
               image:
                 description: Image is the proxy container image. Defaults to ghcr.io/gaarutyunov/mcp-anything:latest.
                 type: string

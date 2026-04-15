@@ -19,13 +19,13 @@ import (
 // Loader watches a config file and atomically updates the live configuration on change.
 type Loader struct {
 	path    string
-	current atomic.Pointer[ProxyConfig]
-	onLoad  func(*ProxyConfig) error
+	current atomic.Pointer[DynamicConfig]
+	onLoad  func(*DynamicConfig) error
 }
 
 // NewLoader creates a Loader, performs the initial load and validation, and returns.
 // If the initial load or validation fails, it returns an error (callers should treat this as fatal).
-func NewLoader(path string, onLoad func(*ProxyConfig) error) (*Loader, error) {
+func NewLoader(path string, onLoad func(*DynamicConfig) error) (*Loader, error) {
 	l := &Loader{
 		path:   path,
 		onLoad: onLoad,
@@ -42,7 +42,7 @@ func NewLoader(path string, onLoad func(*ProxyConfig) error) (*Loader, error) {
 }
 
 // Current returns the currently active configuration. Safe for concurrent reads.
-func (l *Loader) Current() *ProxyConfig {
+func (l *Loader) Current() *DynamicConfig {
 	return l.current.Load()
 }
 
@@ -119,9 +119,9 @@ func (l *Loader) tryReload(ctx context.Context) {
 	slog.Info("config reloaded", "upstreams", len(cfg.Upstreams))
 }
 
-// Load reads the YAML config file at path and returns a ProxyConfig with
-// defaults applied for any missing fields.
-func Load(path string) (*ProxyConfig, error) {
+// Load reads the YAML config file at path and returns a DynamicConfig with
+// defaults applied for any missing fields and all registered extension sections populated.
+func Load(path string) (*DynamicConfig, error) {
 	k := koanf.New(".")
 
 	if err := k.Load(file.Provider(path), yaml.Parser()); err != nil {
@@ -163,7 +163,12 @@ func Load(path string) (*ProxyConfig, error) {
 		applyValidationDefaults(rawUp, &up.Validation)
 	}
 
-	return &cfg, nil
+	d := &DynamicConfig{ProxyConfig: cfg}
+	if err := loadExtensions(d, k, rawUpstreams); err != nil {
+		return nil, fmt.Errorf("loading extension sections: %w", err)
+	}
+
+	return d, nil
 }
 
 // applyValidationDefaults sets defaults for a single upstream's ValidationConfig.

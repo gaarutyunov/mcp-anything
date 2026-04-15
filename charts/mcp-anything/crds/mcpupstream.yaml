@@ -104,6 +104,16 @@ spec:
                       type: string
                   type: object
                 type: array
+              extensions:
+                additionalProperties:
+                  x-kubernetes-preserve-unknown-fields: true
+                description: |-
+                  Extensions allows SDK consumers to extend the upstream configuration with
+                  package-specific config sections registered via config.RegisterUpstreamSection.
+                  Each key must match a registered upstream section key; the JSON value is
+                  forwarded verbatim into the generated upstream config YAML.
+                  This enables extending upstream CRDs without modifying the core types.
+                type: object
               openapi:
                 description: OpenAPI configures the OpenAPI spec source. Required
                   when Type is "http".

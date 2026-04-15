@@ -6,6 +6,7 @@ package v1alpha1
 
 import (
 	corev1 "k8s.io/api/core/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -62,6 +63,13 @@ type MCPProxySpec struct {
 	// Telemetry configures observability settings.
 	// Generated from pkg/config.TelemetryConfig.
 	Telemetry *ProxyTelemetrySpec `json:"telemetry,omitempty"`
+	// +optional
+	// Extensions allows SDK consumers to extend the proxy configuration with
+	// package-specific config sections registered via config.RegisterProxySection.
+	// Each key must match a registered proxy section key; the JSON value is
+	// forwarded verbatim into the generated proxy config YAML at the top level.
+	// This enables extending proxy CRDs without modifying the core types.
+	Extensions map[string]apiextensionsv1.JSON `json:"extensions,omitempty"`
 }
 
 // NamespaceSelectorSpec selects namespaces by name.
@@ -173,6 +181,13 @@ type MCPUpstreamSpec struct {
 	// Commands defines command-backed MCP tools. Required when Type is "command".
 	// Generated from pkg/config.CommandConfig.
 	Commands []MCPUpstreamCommandSpec `json:"commands,omitempty"`
+	// +optional
+	// Extensions allows SDK consumers to extend the upstream configuration with
+	// package-specific config sections registered via config.RegisterUpstreamSection.
+	// Each key must match a registered upstream section key; the JSON value is
+	// forwarded verbatim into the generated upstream config YAML.
+	// This enables extending upstream CRDs without modifying the core types.
+	Extensions map[string]apiextensionsv1.JSON `json:"extensions,omitempty"`
 }
 
 // ServiceRefSpec references a Kubernetes Service by name and port.

@@ -3,9 +3,11 @@ package configgen
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"gopkg.in/yaml.v3"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 
 	"github.com/gaarutyunov/mcp-anything/pkg/crd/v1alpha1"
 )
@@ -27,6 +29,10 @@ type generatedProxyConfig struct {
 	Telemetry   *generatedTelemetryConfig   `yaml:"telemetry,omitempty"`
 	InboundAuth *generatedInboundAuthConfig `yaml:"inbound_auth,omitempty"`
 	Upstreams   []generatedUpstreamConfig   `yaml:"upstreams"`
+	// Extensions holds additional top-level config keys from MCPProxy.Spec.Extensions.
+	// The inline tag merges the map keys into the top-level YAML output so that
+	// registered proxy section factories can find them at their expected paths.
+	Extensions map[string]interface{} `yaml:",inline"`
 }
 
 type generatedServerConfig struct {
@@ -64,6 +70,10 @@ type generatedUpstreamConfig struct {
 	Transport    *generatedTransportConfig  `yaml:"transport,omitempty"`
 	Validation   *generatedValidationConfig `yaml:"validation,omitempty"`
 	Commands     []generatedCommandConfig   `yaml:"commands,omitempty"`
+	// Extensions holds additional upstream-level config keys from MCPUpstream.Spec.Extensions.
+	// The inline tag merges the map keys into this upstream's YAML object so that
+	// registered upstream section factories can find them at their expected paths.
+	Extensions map[string]interface{} `yaml:",inline"`
 }
 
 type generatedOpenAPIConfig struct {
@@ -178,6 +188,15 @@ func Generate(ctx context.Context, proxy *v1alpha1.MCPProxy, upstreams []v1alpha
 	}
 	cfg.Upstreams = upstreamCfgs
 
+	// Inline proxy-level extensions at the top level of the generated config.
+	if len(proxy.Spec.Extensions) > 0 {
+		exts, err := decodeExtensions(proxy.Spec.Extensions)
+		if err != nil {
+			return nil, fmt.Errorf("decoding proxy extensions: %w", err)
+		}
+		cfg.Extensions = exts
+	}
+
 	data, err := yaml.Marshal(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("marshalling proxy config: %w", err)
@@ -199,12 +218,27 @@ func buildUpstreamConfig(up *v1alpha1.MCPUpstream) (generatedUpstreamConfig, err
 		upstreamType = "http"
 	}
 
+	var err error
 	switch upstreamType {
 	case "command":
-		return buildCommandUpstreamConfig(up, uc)
+		uc, err = buildCommandUpstreamConfig(up, uc)
 	default:
-		return buildHTTPUpstreamConfig(up, uc)
+		uc, err = buildHTTPUpstreamConfig(up, uc)
 	}
+	if err != nil {
+		return generatedUpstreamConfig{}, err
+	}
+
+	// Inline upstream-level extensions.
+	if len(up.Spec.Extensions) > 0 {
+		exts, extErr := decodeExtensions(up.Spec.Extensions)
+		if extErr != nil {
+			return generatedUpstreamConfig{}, fmt.Errorf("decoding extensions for upstream %s/%s: %w", up.Namespace, up.Name, extErr)
+		}
+		uc.Extensions = exts
+	}
+
+	return uc, nil
 }
 
 // buildCommandUpstreamConfig fills in a generatedUpstreamConfig for a command upstream.
@@ -342,4 +376,21 @@ func buildHTTPUpstreamConfig(up *v1alpha1.MCPUpstream, uc generatedUpstreamConfi
 	}
 
 	return uc, nil
+}
+
+// decodeExtensions converts a map of apiextensionsv1.JSON values to a plain
+// map[string]interface{} suitable for inline YAML marshalling.
+func decodeExtensions(raw map[string]apiextensionsv1.JSON) (map[string]interface{}, error) {
+	out := make(map[string]interface{}, len(raw))
+	for key, jsonVal := range raw {
+		if len(jsonVal.Raw) == 0 {
+			continue
+		}
+		var decoded interface{}
+		if err := json.Unmarshal(jsonVal.Raw, &decoded); err != nil {
+			return nil, fmt.Errorf("key %q: %w", key, err)
+		}
+		out[key] = decoded
+	}
+	return out, nil
 }

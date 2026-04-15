@@ -96,3 +96,6 @@ This project has no public users. There is no backward compatibility requirement
 ## No stubs
 Implementation tasks must produce complete, working code. Do not write placeholder functions that return `nil, nil` or `errors.New("not implemented")`. If a feature is not yet needed, do not create the function at all.
 
+## No "all" bundle packages
+NEVER create `<pkg>/all/all.go` packages that re-export sub-packages via blank imports. They are an anti-pattern: they couple every sub-package together, defeating tree-shaking, and obscure which dependencies are actually pulled in. Instead, import individual sub-packages directly wherever they are needed (e.g. in `cmd/proxy/deps/deps.go`).
+

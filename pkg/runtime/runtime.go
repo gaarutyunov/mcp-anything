@@ -5,7 +5,8 @@
 //
 // New runtime implementations (JS, Lua, Wasm, …) register themselves via init()
 // by calling Register with a unique name and a Factory function. The proxy binary
-// imports pkg/runtime/all (or individual sub-packages) to activate the desired runtimes.
+// imports individual sub-packages (e.g. pkg/runtime/js, pkg/runtime/lua) to activate
+// the desired runtimes.
 package runtime
 
 import "context"

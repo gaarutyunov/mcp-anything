@@ -178,7 +178,7 @@ actions:
 
 	session := connectMCPClient(callCtx, t, proxyURL)
 
-	result, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "test__getphoto"})
+	result, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "test__get_photo"})
 	if err != nil {
 		t.Fatalf("CallTool: %v", err)
 	}
@@ -246,7 +246,7 @@ actions:
 
 	session := connectMCPClient(callCtx, t, proxyURL)
 
-	result, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "test__getfile"})
+	result, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "test__get_file"})
 	if err != nil {
 		t.Fatalf("CallTool: %v", err)
 	}
@@ -301,7 +301,7 @@ func TestProblemJSONErrorParsed(t *testing.T) {
 
 	session := connectMCPClient(callCtx, t, proxyURL)
 
-	result, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "test__createorder"})
+	result, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "test__create_order"})
 	if err != nil {
 		t.Fatalf("CallTool: %v", err)
 	}
@@ -360,7 +360,7 @@ actions:
 
 	session := connectMCPClient(callCtx, t, proxyURL)
 
-	result, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "test__createorder"})
+	result, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "test__create_order"})
 	if err != nil {
 		t.Fatalf("CallTool: %v", err)
 	}
@@ -420,7 +420,7 @@ func TestPlainTextErrorResponse(t *testing.T) {
 
 	session := connectMCPClient(callCtx, t, proxyURL)
 
-	result, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "test__getbroken"})
+	result, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "test__get_broken"})
 	if err != nil {
 		t.Fatalf("CallTool: %v", err)
 	}

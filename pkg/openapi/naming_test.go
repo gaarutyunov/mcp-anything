@@ -10,6 +10,7 @@ import (
 var defaultRules = config.SlugRulesConfig{
 	ReplaceSlashes:     true,
 	ReplaceBraces:      true,
+	ExpandCamelCase:    true,
 	Lowercase:          true,
 	CollapseSeparators: true,
 }
@@ -179,5 +180,29 @@ func TestDetectConflicts_UnknownMode(t *testing.T) {
 	_, err := DetectConflicts(tools, "unknown_mode")
 	if err == nil {
 		t.Fatal("expected error for unknown resolution mode")
+	}
+}
+
+func TestSanitizeIdentifier_CamelCase(t *testing.T) {
+	tests := []struct {
+		id   string
+		want string
+	}{
+		{"getGreeting", "get_greeting"},
+		{"postEcho", "post_echo"},
+		{"JWTAuth", "jwt_auth"},
+		{"getHTTPSResponse", "get_https_response"},
+		{"listUserAccounts", "list_user_accounts"},
+		{"already_snake_case", "already_snake_case"},
+		{"MixedABC123Def", "mixed_abc123_def"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.id, func(t *testing.T) {
+			got := sanitizeIdentifier(tt.id, defaultRules)
+			if got != tt.want {
+				t.Errorf("sanitizeIdentifier(%q) = %q, want %q", tt.id, got, tt.want)
+			}
+		})
 	}
 }

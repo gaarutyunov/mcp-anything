@@ -274,8 +274,8 @@ func TestConfigHotReloadAddsNewTool(t *testing.T) {
 	if len(initialTools.Tools) != 1 {
 		t.Fatalf("expected 1 initial tool, got %d: %v", len(initialTools.Tools), toolNames(initialTools.Tools))
 	}
-	if initialTools.Tools[0].Name != "pets__listpets" {
-		t.Errorf("expected tool pets__listpets, got %s", initialTools.Tools[0].Name)
+	if initialTools.Tools[0].Name != "pets__list_pets" {
+		t.Errorf("expected tool pets__list_pets, got %s", initialTools.Tools[0].Name)
 	}
 
 	// Trigger reload: copy updated spec with new operation, then update config.
@@ -294,11 +294,11 @@ func TestConfigHotReloadAddsNewTool(t *testing.T) {
 	for _, tool := range reloadedTools {
 		nameSet[tool.Name] = true
 	}
-	if !nameSet["pets__listpets"] {
-		t.Errorf("missing tool pets__listpets after reload; got: %v", toolNames(reloadedTools))
+	if !nameSet["pets__list_pets"] {
+		t.Errorf("missing tool pets__list_pets after reload; got: %v", toolNames(reloadedTools))
 	}
-	if !nameSet["pets__listorders"] {
-		t.Errorf("missing tool pets__listorders after reload; got: %v", toolNames(reloadedTools))
+	if !nameSet["pets__list_orders"] {
+		t.Errorf("missing tool pets__list_orders after reload; got: %v", toolNames(reloadedTools))
 	}
 }
 
@@ -355,8 +355,8 @@ func TestConfigHotReloadRemovesTool(t *testing.T) {
 	if len(reloadedTools) != 1 {
 		t.Fatalf("expected 1 tool after reload, got %d: %v", len(reloadedTools), toolNames(reloadedTools))
 	}
-	if reloadedTools[0].Name != "pets__listpets" {
-		t.Errorf("expected pets__listpets to remain, got %s", reloadedTools[0].Name)
+	if reloadedTools[0].Name != "pets__list_pets" {
+		t.Errorf("expected pets__list_pets to remain, got %s", reloadedTools[0].Name)
 	}
 }
 
@@ -433,8 +433,8 @@ upstreams:
 	if len(afterTools.Tools) != 1 {
 		t.Fatalf("expected 1 tool after failed reload, got %d: %v", len(afterTools.Tools), toolNames(afterTools.Tools))
 	}
-	if afterTools.Tools[0].Name != "pets__listpets" {
-		t.Errorf("expected pets__listpets to remain, got %s", afterTools.Tools[0].Name)
+	if afterTools.Tools[0].Name != "pets__list_pets" {
+		t.Errorf("expected pets__list_pets to remain, got %s", afterTools.Tools[0].Name)
 	}
 
 	// /readyz must return 200 (AC-30.4).

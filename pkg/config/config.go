@@ -364,8 +364,12 @@ type TelemetryConfig struct {
 
 // SlugRulesConfig controls which slug transformations are applied.
 type SlugRulesConfig struct {
-	ReplaceSlashes     bool `koanf:"replace_slashes"`
-	ReplaceBraces      bool `koanf:"replace_braces"`
+	ReplaceSlashes bool `koanf:"replace_slashes"`
+	ReplaceBraces  bool `koanf:"replace_braces"`
+	// ExpandCamelCase inserts underscores at camelCase word boundaries before
+	// other transformations, so operationIds like "getGreeting" become
+	// "get_greeting" rather than "getgreeting".
+	ExpandCamelCase    bool `koanf:"expand_camel_case"`
 	Lowercase          bool `koanf:"lowercase"`
 	CollapseSeparators bool `koanf:"collapse_separators"`
 }

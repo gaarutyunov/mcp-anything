@@ -187,7 +187,7 @@ upstreams:
 
 	// Expect exactly 3 tools:
 	// - shop__list_pets (GET /pets, no operationId → default slug)
-	// - shop__fetchpet (GET /pets/{petId}, operationId: fetchPet → sanitized to fetchpet)
+	// - shop__fetch_pet (GET /pets/{petId}, operationId: fetchPet → sanitized to fetch_pet)
 	// - shop__place_order (POST /orders, x-mcp-tool-name: place_order)
 	// DELETE /orders/{orderId} is disabled by overlay.
 	if len(toolsResult.Tools) != 3 {
@@ -199,7 +199,7 @@ upstreams:
 		nameSet[tool.Name] = true
 	}
 
-	expectedTools := []string{"shop__list_pets", "shop__fetchpet", "shop__place_order"}
+	expectedTools := []string{"shop__list_pets", "shop__fetch_pet", "shop__place_order"}
 	for _, want := range expectedTools {
 		if !nameSet[want] {
 			t.Errorf("expected tool %q, got %v", want, toolNames(toolsResult.Tools))

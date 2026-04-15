@@ -1,9 +1,10 @@
+---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
-  name: mcpupstreams.mcp-anything.ai
   annotations:
     controller-gen.kubebuilder.io/version: v0.17.0
+  name: mcpupstreams.mcp-anything.ai
 spec:
   group: mcp-anything.ai
   names:
@@ -13,148 +14,346 @@ spec:
     singular: mcpupstream
   scope: Namespaced
   versions:
-    - name: v1alpha1
-      served: true
-      storage: true
-      subresources:
-        status: {}
-      schema:
-        openAPIV3Schema:
-          type: object
-          description: MCPUpstream is the Schema for the mcpupstreams API.
-          properties:
-            apiVersion:
-              type: string
-            kind:
-              type: string
-            metadata:
-              type: object
-            spec:
-              type: object
-              description: MCPUpstreamSpec defines the desired state of MCPUpstream.
-              required: [openapi]
-              properties:
-                toolPrefix:
-                  type: string
-                  description: ToolPrefix is prepended to all tool names from this upstream.
-                serviceRef:
-                  type: object
-                  description: ServiceRef references an in-cluster Kubernetes Service.
-                  required: [name, port]
+  - additionalPrinterColumns:
+    - jsonPath: .status.assignedProxy
+      name: Proxy
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: MCPUpstream is the Schema for the mcpupstreams API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: MCPUpstreamSpec defines the desired state of MCPUpstream.
+            properties:
+              baseURL:
+                description: |-
+                  BaseURL is the base URL for the upstream HTTP API.
+                  Mutually exclusive with ServiceRef. Only used when Type is "http".
+                type: string
+              commands:
+                description: |-
+                  Commands defines command-backed MCP tools. Required when Type is "command".
+                  Generated from pkg/config.CommandConfig.
+                items:
+                  description: CommandConfig defines a single command-backed MCP tool
+                    within a command upstream.
                   properties:
-                    name:
+                    command:
                       type: string
-                    port:
-                      type: integer
-                      format: int32
-                      minimum: 1
-                      maximum: 65535
-                baseURL:
-                  type: string
-                  description: BaseURL is the base URL for the upstream HTTP API.
-                openapi:
-                  type: object
-                  description: OpenAPI configures the OpenAPI spec source.
-                  properties:
-                    configMapRef:
-                      type: object
-                      required: [name, key]
-                      properties:
-                        name:
-                          type: string
-                        key:
-                          type: string
-                    url:
+                    description:
                       type: string
-                    autoDiscover:
+                    env:
+                      additionalProperties:
+                        type: string
                       type: object
+                    inputSchema:
+                      description: CommandInputSchema is the JSON Schema definition
+                        for a command tool's input parameters.
                       properties:
-                        path:
-                          type: string
-                overlay:
-                  type: object
-                  description: Overlay configures an optional OpenAPI Overlay document.
-                  properties:
-                    configMapRef:
-                      type: object
-                      required: [name, key]
-                      properties:
-                        name:
-                          type: string
-                        key:
-                          type: string
-                outboundAuth:
-                  type: object
-                  description: OutboundAuth configures authentication for outbound requests.
-                  required: [strategy]
-                  properties:
-                    strategy:
-                      type: string
-                      enum: [bearer, oauth2_client_credentials, none]
-                    oauth2:
-                      type: object
-                      required: [tokenURL]
-                      properties:
-                        tokenURL:
-                          type: string
-                        secretRef:
+                        properties:
+                          additionalProperties:
+                            description: CommandSchemaProperty describes a single
+                              property in a command tool's input schema.
+                            properties:
+                              description:
+                                type: string
+                              type:
+                                type: string
+                            type: object
                           type: object
-                          required: [name]
-                          properties:
-                            name:
-                              type: string
-                transport:
-                  type: object
-                  description: Transport configures HTTP transport settings.
-                  properties:
-                    maxIdleConns:
-                      type: integer
-                    tls:
-                      type: object
-                      required: [secretName]
-                      properties:
-                        secretName:
+                        required:
+                          items:
+                            type: string
+                          type: array
+                        type:
                           type: string
-                validation:
+                      type: object
+                    maxOutput:
+                      description: max bytes from stdout/stderr; 0 = 1 MiB default
+                      format: int64
+                      type: integer
+                    shell:
+                      description: execute via sh -c; default false (direct exec)
+                      type: boolean
+                    timeout:
+                      type: string
+                    toolName:
+                      type: string
+                    workingDir:
+                      type: string
                   type: object
-                  description: Validation configures request/response validation.
-                  properties:
-                    validateRequest:
-                      type: boolean
-                    validateResponse:
-                      type: boolean
-            status:
-              type: object
-              description: MCPUpstreamStatus defines the observed state of MCPUpstream.
-              properties:
-                conditions:
-                  type: array
-                  items:
-                    type: object
-                    required: [lastTransitionTime, message, reason, status, type]
+                type: array
+              openapi:
+                description: OpenAPI configures the OpenAPI spec source. Required
+                  when Type is "http".
+                properties:
+                  autoDiscover:
+                    description: |-
+                      AutoDiscover configures automatic OpenAPI spec discovery from the upstream.
+                      Mutually exclusive with ConfigMapRef and URL.
                     properties:
-                      lastTransitionTime:
+                      path:
+                        description: Path is the URL path at which the upstream serves
+                          its OpenAPI spec.
                         type: string
-                        format: date-time
-                      message:
+                    type: object
+                  configMapRef:
+                    description: |-
+                      ConfigMapRef references a ConfigMap containing the OpenAPI spec.
+                      Mutually exclusive with URL and AutoDiscover.
+                    properties:
+                      key:
+                        description: Key is the key in the ConfigMap data.
                         type: string
-                      observedGeneration:
-                        type: integer
-                        format: int64
-                      reason:
+                      name:
+                        description: Name is the name of the ConfigMap.
                         type: string
-                      status:
+                    required:
+                    - key
+                    - name
+                    type: object
+                  url:
+                    description: |-
+                      URL is the URL from which the OpenAPI spec is fetched.
+                      Mutually exclusive with ConfigMapRef and AutoDiscover.
+                    type: string
+                type: object
+              outboundAuth:
+                description: OutboundAuth configures authentication for outbound requests
+                  to the upstream.
+                properties:
+                  bearer:
+                    description: Bearer configures static Bearer token injection from
+                      a Kubernetes Secret.
+                    properties:
+                      secretRef:
+                        description: SecretRef references a Secret containing the
+                          bearer token under key "token".
+                        properties:
+                          name:
+                            description: Name is the name of the Secret.
+                            type: string
+                        required:
+                        - name
+                        type: object
+                    type: object
+                  oauth2:
+                    description: OAuth2 configures OAuth2 client credentials flow
+                      with credentials from a Kubernetes Secret.
+                    properties:
+                      secretRef:
+                        description: SecretRef references a Secret containing client_id
+                          and client_secret.
+                        properties:
+                          name:
+                            description: Name is the name of the Secret.
+                            type: string
+                        required:
+                        - name
+                        type: object
+                      tokenURL:
+                        description: TokenURL is the OAuth2 token endpoint.
                         type: string
-                      type:
+                    required:
+                    - tokenURL
+                    type: object
+                  strategy:
+                    description: 'Strategy is the outbound auth strategy: bearer|oauth2_client_credentials|none.'
+                    enum:
+                    - bearer
+                    - oauth2_client_credentials
+                    - none
+                    type: string
+                required:
+                - strategy
+                type: object
+              overlay:
+                description: Overlay configures an optional OpenAPI Overlay document.
+                properties:
+                  configMapRef:
+                    description: ConfigMapRef references a ConfigMap containing the
+                      overlay document.
+                    properties:
+                      key:
+                        description: Key is the key in the ConfigMap data.
                         type: string
-                assignedProxy:
-                  type: string
-                toolCount:
-                  type: integer
-      additionalPrinterColumns:
-        - name: Proxy
-          type: string
-          jsonPath: .status.assignedProxy
-        - name: Age
-          type: date
-          jsonPath: .metadata.creationTimestamp
+                      name:
+                        description: Name is the name of the ConfigMap.
+                        type: string
+                    required:
+                    - key
+                    - name
+                    type: object
+                type: object
+              serviceRef:
+                description: |-
+                  ServiceRef references an in-cluster Kubernetes Service.
+                  Mutually exclusive with BaseURL. Only used when Type is "http".
+                properties:
+                  name:
+                    description: Name is the name of the Service.
+                    type: string
+                  port:
+                    description: Port is the port the Service exposes.
+                    format: int32
+                    maximum: 65535
+                    minimum: 1
+                    type: integer
+                required:
+                - name
+                - port
+                type: object
+              toolPrefix:
+                description: ToolPrefix is prepended to all tool names from this upstream.
+                type: string
+              transport:
+                description: Transport configures HTTP transport settings for the
+                  upstream.
+                properties:
+                  maxIdleConns:
+                    description: 'MaxIdleConns is the maximum number of idle (keep-alive)
+                      connections. Default: 100.'
+                    type: integer
+                  maxIdleConnsPerHost:
+                    description: 'MaxIdleConnsPerHost is the maximum number of idle
+                      connections per host. Default: 10.'
+                    type: integer
+                  tls:
+                    description: TLS configures TLS for outbound connections using
+                      a Kubernetes Secret.
+                    properties:
+                      secretName:
+                        description: SecretName is the name of the Secret containing
+                          CA/client TLS credentials.
+                        type: string
+                    required:
+                    - secretName
+                    type: object
+                type: object
+              type:
+                default: http
+                description: |-
+                  Type is the upstream type: "http" (default) or "command".
+                  HTTP upstreams require baseURL/serviceRef and openapi.
+                  Command upstreams require commands and must not set baseURL/serviceRef/openapi.
+                enum:
+                - http
+                - command
+                type: string
+              validation:
+                description: |-
+                  Validation configures request/response validation against the OpenAPI schema.
+                  Generated from pkg/config.ValidationConfig.
+                properties:
+                  errorStatus:
+                    items:
+                      type: integer
+                    type: array
+                  responseValidationFailure:
+                    description: '"warn" | "fail"'
+                    type: string
+                  successStatus:
+                    items:
+                      type: integer
+                    type: array
+                  validateRequest:
+                    type: boolean
+                  validateResponse:
+                    type: boolean
+                type: object
+            type: object
+          status:
+            description: MCPUpstreamStatus defines the observed state of MCPUpstream.
+            properties:
+              assignedProxy:
+                description: AssignedProxy is the name of the MCPProxy this upstream
+                  is currently assigned to.
+                type: string
+              conditions:
+                description: Conditions represents the latest available observations
+                  of the MCPUpstream state.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              toolCount:
+                description: ToolCount is the number of MCP tools this upstream contributes.
+                type: integer
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

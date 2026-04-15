@@ -8,9 +8,9 @@ RUN CGO_ENABLED=0 go build -o /operator ./cmd/operator
 
 FROM alpine:3.21
 RUN apk add --no-cache ca-certificates \
-    && addgroup -S operator \
-    && adduser -S -G operator operator
+    && addgroup -S -g 65532 operator \
+    && adduser -S -u 65532 -G operator operator
 COPY --from=builder /operator /usr/local/bin/operator
-RUN chown operator:operator /usr/local/bin/operator
-USER operator:operator
+RUN chown 65532:65532 /usr/local/bin/operator
+USER 65532:65532
 ENTRYPOINT ["operator"]

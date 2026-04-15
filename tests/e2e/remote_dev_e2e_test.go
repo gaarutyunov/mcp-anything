@@ -431,7 +431,7 @@ func buildRemoteDevUpstream() *v1alpha1.MCPUpstream {
 					Description: "Write content to a file in the workspace",
 					Command:     "/usr/local/bin/write-file {{.path}} {{.content}}",
 					Timeout:     "10s",
-					InputSchema: &v1alpha1.MCPUpstreamCommandInputSchema{
+					InputSchema: v1alpha1.MCPUpstreamCommandInputSchema{
 						Type: "object",
 						Properties: map[string]v1alpha1.MCPUpstreamCommandSchemaProperty{
 							"path": {
@@ -451,7 +451,7 @@ func buildRemoteDevUpstream() *v1alpha1.MCPUpstream {
 					Description: "Read the contents of a file",
 					Command:     "cat {{.path}}",
 					Timeout:     "10s",
-					InputSchema: &v1alpha1.MCPUpstreamCommandInputSchema{
+					InputSchema: v1alpha1.MCPUpstreamCommandInputSchema{
 						Type: "object",
 						Properties: map[string]v1alpha1.MCPUpstreamCommandSchemaProperty{
 							"path": {
@@ -467,7 +467,7 @@ func buildRemoteDevUpstream() *v1alpha1.MCPUpstream {
 					Description: "List files matching a pattern in a directory",
 					Command:     "find {{.directory}} -type f -name {{.pattern}}",
 					Timeout:     "10s",
-					InputSchema: &v1alpha1.MCPUpstreamCommandInputSchema{
+					InputSchema: v1alpha1.MCPUpstreamCommandInputSchema{
 						Type: "object",
 						Properties: map[string]v1alpha1.MCPUpstreamCommandSchemaProperty{
 							"directory": {
@@ -487,7 +487,7 @@ func buildRemoteDevUpstream() *v1alpha1.MCPUpstream {
 					Description: "Search file contents for a pattern (grep)",
 					Command:     "grep -rn {{.pattern}} {{.directory}}",
 					Timeout:     "30s",
-					InputSchema: &v1alpha1.MCPUpstreamCommandInputSchema{
+					InputSchema: v1alpha1.MCPUpstreamCommandInputSchema{
 						Type: "object",
 						Properties: map[string]v1alpha1.MCPUpstreamCommandSchemaProperty{
 							"pattern": {
@@ -508,7 +508,7 @@ func buildRemoteDevUpstream() *v1alpha1.MCPUpstream {
 					Command:     "golangci-lint run {{.path}}",
 					WorkingDir:  "/workspace",
 					Timeout:     "60s",
-					InputSchema: &v1alpha1.MCPUpstreamCommandInputSchema{
+					InputSchema: v1alpha1.MCPUpstreamCommandInputSchema{
 						Type: "object",
 						Properties: map[string]v1alpha1.MCPUpstreamCommandSchemaProperty{
 							"path": {
@@ -525,7 +525,7 @@ func buildRemoteDevUpstream() *v1alpha1.MCPUpstream {
 					Command:     "go build {{.path}}",
 					WorkingDir:  "/workspace",
 					Timeout:     "60s",
-					InputSchema: &v1alpha1.MCPUpstreamCommandInputSchema{
+					InputSchema: v1alpha1.MCPUpstreamCommandInputSchema{
 						Type: "object",
 						Properties: map[string]v1alpha1.MCPUpstreamCommandSchemaProperty{
 							"path": {

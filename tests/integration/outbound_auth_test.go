@@ -159,7 +159,7 @@ upstreams:
 	}
 	defer session.Close()
 
-	result, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "test__getdata"})
+	result, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "test__get_data"})
 	if err != nil {
 		t.Fatalf("call tool: %v", err)
 	}
@@ -301,7 +301,7 @@ upstreams:
 	}
 	defer session.Close()
 
-	result, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "test__getdata"})
+	result, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "test__get_data"})
 	if err != nil {
 		t.Fatalf("call tool: %v", err)
 	}
@@ -454,7 +454,7 @@ upstreams:
 	}
 	defer session.Close()
 
-	result, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "test__getdata"})
+	result, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "test__get_data"})
 	if err != nil {
 		t.Fatalf("call tool: %v", err)
 	}
@@ -598,7 +598,7 @@ upstreams:
 	defer cancel()
 	session := connectMCPClientWithBearer(callCtx, t, proxyURL, inboundToken)
 
-	result, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "test__getdata"})
+	result, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "test__get_data"})
 	if err != nil {
 		t.Fatalf("call tool: %v", err)
 	}

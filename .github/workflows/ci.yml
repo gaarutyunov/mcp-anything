@@ -197,6 +197,8 @@ jobs:
             test: TestKrakenMarketDataE2E
           - name: Remote Dev Workspace
             test: TestRemoteDevWorkspaceE2E
+          - name: Helm Chart Smoke Test
+            test: TestHelmChartSmokeE2E
     steps:
       - uses: actions/checkout@v4
 

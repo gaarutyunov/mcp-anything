@@ -23,6 +23,13 @@ type PrefixedTool struct {
 var (
 	nonAlnumUnderscore = regexp.MustCompile(`[^a-zA-Z0-9_]+`)
 	runOfUnderscores   = regexp.MustCompile(`_+`)
+	// camelUpperLower matches an all-uppercase run followed by an UpperLower
+	// pair, e.g. "HTTPSRe" → "HTTPS_Re".  Applied first so that acronyms are
+	// correctly split: "JWTAuth" → "JWT_Auth".
+	camelUpperLower = regexp.MustCompile(`([A-Z]+)([A-Z][a-z])`)
+	// camelLowerUpper matches a lowercase/digit character followed by an
+	// uppercase letter, e.g. "getGreeting" → "get_Greeting".
+	camelLowerUpper = regexp.MustCompile(`([a-z0-9])([A-Z])`)
 )
 
 // Slugify derives a tool base name from HTTP method and path using the given slug rules.
@@ -108,6 +115,14 @@ func ToolBaseName(op *openapi3.Operation, method, path string, hasPathParams boo
 // (such as operationId) without prepending a verb prefix.
 func sanitizeIdentifier(id string, rules config.SlugRulesConfig) string {
 	s := id
+
+	if rules.ExpandCamelCase {
+		// Split camelCase/PascalCase on word boundaries before any other
+		// transformation so that "getGreeting" → "get_Greeting" and
+		// "JWTAuth" → "JWT_Auth".  Lowercasing happens later.
+		s = camelUpperLower.ReplaceAllString(s, "${1}_${2}")
+		s = camelLowerUpper.ReplaceAllString(s, "${1}_${2}")
+	}
 
 	if rules.ReplaceBraces {
 		s = strings.ReplaceAll(s, "{", "")

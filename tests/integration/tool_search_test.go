@@ -206,15 +206,15 @@ func TestToolSearchEnabled(t *testing.T) {
 
 	// 9. Assert actual tools are callable via tools/call even though hidden from tools/list.
 	callResult, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{
-		Name: "test__listpets",
+		Name: "test__list_pets",
 	})
 	if err != nil {
-		t.Fatalf("call test__listpets: %v", err)
+		t.Fatalf("call test__list_pets: %v", err)
 	}
 	if callResult.IsError {
-		t.Fatalf("test__listpets returned error: %s", contentText(callResult.Content))
+		t.Fatalf("test__list_pets returned error: %s", contentText(callResult.Content))
 	}
 	if !strings.Contains(contentText(callResult.Content), "Fido") {
-		t.Errorf("test__listpets response missing expected content: %s", contentText(callResult.Content))
+		t.Errorf("test__list_pets response missing expected content: %s", contentText(callResult.Content))
 	}
 }

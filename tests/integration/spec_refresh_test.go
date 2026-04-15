@@ -319,11 +319,11 @@ func TestBackgroundRefreshAddsNewTool(t *testing.T) {
 	for _, tool := range updatedTools {
 		nameSet[tool.Name] = true
 	}
-	if !nameSet["pets__listpets"] {
-		t.Errorf("missing pets__listpets; got: %v", toolNames(updatedTools))
+	if !nameSet["pets__list_pets"] {
+		t.Errorf("missing pets__list_pets; got: %v", toolNames(updatedTools))
 	}
-	if !nameSet["pets__listorders"] {
-		t.Errorf("missing pets__listorders; got: %v", toolNames(updatedTools))
+	if !nameSet["pets__list_orders"] {
+		t.Errorf("missing pets__list_orders; got: %v", toolNames(updatedTools))
 	}
 }
 

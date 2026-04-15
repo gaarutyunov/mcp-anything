@@ -202,9 +202,9 @@ upstreams:
 		t.Fatalf("expected 2 tools, got %d: %v", len(toolsResult.Tools), toolNames(toolsResult.Tools))
 	}
 
-	// listPets operationId → sanitized to "listpets"; getPet → "getpet".
-	const toolListPets = "test__listpets"
-	const toolGetPet = "test__getpet"
+	// listPets operationId → sanitized to "list_pets"; getPet → "get_pet".
+	const toolListPets = "test__list_pets"
+	const toolGetPet = "test__get_pet"
 
 	nameSet := make(map[string]bool)
 	for _, tool := range toolsResult.Tools {

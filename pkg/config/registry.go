@@ -30,9 +30,13 @@ var (
 // key is the koanf path in the proxy config (e.g. "tool_search", "session_store").
 // The factory is called with a koanf subtree scoped to that key on every Load.
 // Typically called from init() in packages that define their own proxy-level config.
+// Panics if a factory is already registered under the same key.
 func RegisterProxySection(key string, f SectionFactory) {
 	sectionMu.Lock()
 	defer sectionMu.Unlock()
+	if _, exists := proxyRegistry[key]; exists {
+		panic(fmt.Sprintf("config: proxy section %q is already registered — import conflict", key))
+	}
 	proxyRegistry[key] = f
 }
 
@@ -40,9 +44,13 @@ func RegisterProxySection(key string, f SectionFactory) {
 // key is the sub-key within each upstream config object in the YAML.
 // The factory is called once per upstream per Load for upstreams that contain the key.
 // Typically called from init() in packages that define upstream-level config.
+// Panics if a factory is already registered under the same key.
 func RegisterUpstreamSection(key string, f SectionFactory) {
 	sectionMu.Lock()
 	defer sectionMu.Unlock()
+	if _, exists := upstreamRegistry[key]; exists {
+		panic(fmt.Sprintf("config: upstream section %q is already registered — import conflict", key))
+	}
 	upstreamRegistry[key] = f
 }
 
@@ -117,6 +125,9 @@ func loadExtensions(d *DynamicConfig, k *koanf.Koanf, rawUpstreams []interface{}
 	// ── Proxy-level sections ──────────────────────────────────────────────────────
 	d.proxySections = make(map[string]any, len(proxyCopy))
 	for key, f := range proxyCopy {
+		if !k.Exists(key) {
+			continue
+		}
 		sub := k.Cut(key)
 		v, err := f(sub)
 		if err != nil {

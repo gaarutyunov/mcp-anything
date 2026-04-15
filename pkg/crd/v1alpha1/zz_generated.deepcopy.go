@@ -5,7 +5,6 @@
 package v1alpha1
 
 import (
-	"k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 )
@@ -161,13 +160,6 @@ func (in *MCPProxySpec) DeepCopyInto(out *MCPProxySpec) {
 		in, out := &in.Telemetry, &out.Telemetry
 		*out = new(ProxyTelemetrySpec)
 		**out = **in
-	}
-	if in.Extensions != nil {
-		in, out := &in.Extensions, &out.Extensions
-		*out = make(map[string]v1.JSON, len(*in))
-		for key, val := range *in {
-			(*out)[key] = *val.DeepCopy()
-		}
 	}
 }
 
@@ -431,13 +423,6 @@ func (in *MCPUpstreamSpec) DeepCopyInto(out *MCPUpstreamSpec) {
 		*out = make([]MCPUpstreamCommandSpec, len(*in))
 		for i := range *in {
 			(*in)[i].DeepCopyInto(&(*out)[i])
-		}
-	}
-	if in.Extensions != nil {
-		in, out := &in.Extensions, &out.Extensions
-		*out = make(map[string]v1.JSON, len(*in))
-		for key, val := range *in {
-			(*out)[key] = *val.DeepCopy()
 		}
 	}
 }

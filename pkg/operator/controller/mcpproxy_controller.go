@@ -25,6 +25,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/gaarutyunov/mcp-anything/pkg/crd/v1alpha1"
 	"github.com/gaarutyunov/mcp-anything/pkg/operator/configgen"
@@ -112,6 +113,11 @@ func (r *MCPProxyReconciler) Reconcile(ctx context.Context, req reconcile.Reques
 	// Reconcile Service.
 	if err := r.reconcileService(ctx, proxy); err != nil {
 		return reconcile.Result{}, fmt.Errorf("reconciling service: %w", err)
+	}
+
+	// Reconcile HTTPRoute (Gateway API).
+	if err := r.reconcileHTTPRoute(ctx, proxy); err != nil {
+		return reconcile.Result{}, fmt.Errorf("reconciling HTTPRoute: %w", err)
 	}
 
 	// Update status (including prefix conflict condition) in a single API call.
@@ -766,6 +772,120 @@ func (r *MCPProxyReconciler) proxiesForAnnotatedService(ctx context.Context, svc
 		}
 	}
 	return requests
+}
+
+// reconcileHTTPRoute creates, updates, or deletes the Gateway API HTTPRoute for the proxy.
+// When proxy.Spec.GatewayRef is nil the HTTPRoute is deleted if it exists.
+func (r *MCPProxyReconciler) reconcileHTTPRoute(ctx context.Context, proxy *v1alpha1.MCPProxy) error {
+	existing := &gatewayv1.HTTPRoute{}
+	err := r.Get(ctx, types.NamespacedName{Name: proxy.Name, Namespace: proxy.Namespace}, existing)
+
+	if proxy.Spec.GatewayRef == nil {
+		// No GatewayRef — delete any existing HTTPRoute.
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("fetching HTTPRoute: %w", err)
+		}
+		if deleteErr := r.Delete(ctx, existing); deleteErr != nil {
+			return fmt.Errorf("deleting HTTPRoute: %w", deleteErr)
+		}
+		slog.Info("deleted HTTPRoute (gatewayRef removed)", "name", proxy.Name)
+		return nil
+	}
+
+	desired := r.buildHTTPRoute(proxy)
+
+	if apierrors.IsNotFound(err) {
+		if createErr := r.Create(ctx, desired); createErr != nil {
+			return fmt.Errorf("creating HTTPRoute: %w", createErr)
+		}
+		slog.Info("created HTTPRoute", "name", proxy.Name, "gateway", proxy.Spec.GatewayRef.Name)
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("fetching HTTPRoute: %w", err)
+	}
+
+	if equality.Semantic.DeepEqual(existing.Spec, desired.Spec) {
+		slog.Debug("HTTPRoute spec unchanged, skipping update", "name", proxy.Name)
+		return nil
+	}
+	existing.Spec = desired.Spec
+	if updateErr := r.Update(ctx, existing); updateErr != nil {
+		return fmt.Errorf("updating HTTPRoute: %w", updateErr)
+	}
+	slog.Info("updated HTTPRoute", "name", proxy.Name)
+	return nil
+}
+
+// buildHTTPRoute constructs the desired Gateway API HTTPRoute for the proxy.
+func (r *MCPProxyReconciler) buildHTTPRoute(proxy *v1alpha1.MCPProxy) *gatewayv1.HTTPRoute {
+	port := proxy.Spec.Server.Port
+	if port == 0 {
+		port = defaultProxyPort
+	}
+
+	gwNamespace := proxy.Spec.GatewayRef.Namespace
+	if gwNamespace == "" {
+		gwNamespace = proxy.Namespace
+	}
+
+	gwNs := gatewayv1.Namespace(gwNamespace)
+	svcPort := gatewayv1.PortNumber(port)
+	pathPrefix := gatewayv1.PathMatchPathPrefix
+	pathValue := "/"
+
+	var hostnames []gatewayv1.Hostname
+	if proxy.Spec.GatewayRef.Hostname != "" {
+		hostnames = []gatewayv1.Hostname{gatewayv1.Hostname(proxy.Spec.GatewayRef.Hostname)}
+	}
+
+	route := &gatewayv1.HTTPRoute{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      proxy.Name,
+			Namespace: proxy.Namespace,
+		},
+		Spec: gatewayv1.HTTPRouteSpec{
+			CommonRouteSpec: gatewayv1.CommonRouteSpec{
+				ParentRefs: []gatewayv1.ParentReference{
+					{
+						Name:      gatewayv1.ObjectName(proxy.Spec.GatewayRef.Name),
+						Namespace: &gwNs,
+					},
+				},
+			},
+			Hostnames: hostnames,
+			Rules: []gatewayv1.HTTPRouteRule{
+				{
+					Matches: []gatewayv1.HTTPRouteMatch{
+						{
+							Path: &gatewayv1.HTTPPathMatch{
+								Type:  &pathPrefix,
+								Value: &pathValue,
+							},
+						},
+					},
+					BackendRefs: []gatewayv1.HTTPBackendRef{
+						{
+							BackendRef: gatewayv1.BackendRef{
+								BackendObjectReference: gatewayv1.BackendObjectReference{
+									Name: gatewayv1.ObjectName(proxy.Name),
+									Port: &svcPort,
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if err := ctrl.SetControllerReference(proxy, route, r.Scheme); err != nil {
+		slog.Error("setting owner reference on HTTPRoute", "error", err)
+	}
+	return route
 }
 
 // SetupWithManager registers the reconciler with a controller-runtime Manager.

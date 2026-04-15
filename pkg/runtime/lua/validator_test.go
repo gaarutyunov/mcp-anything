@@ -2,12 +2,14 @@ package lua
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/gaarutyunov/mcp-anything/pkg/auth/inbound"
 	"github.com/gaarutyunov/mcp-anything/pkg/config"
 	"github.com/gaarutyunov/mcp-anything/pkg/runtime"
 )
@@ -63,6 +65,16 @@ return false, 401, {}, "forbidden"
 	_, err := v.ValidateToken(context.Background(), "bad-token")
 	if err == nil {
 		t.Fatal("expected error for denied token")
+	}
+	var denied *inbound.DeniedError
+	if !errors.As(err, &denied) {
+		t.Fatalf("expected *inbound.DeniedError, got %T: %v", err, err)
+	}
+	if denied.Status != 401 {
+		t.Errorf("denied.Status = %d, want 401", denied.Status)
+	}
+	if denied.Message != "forbidden" {
+		t.Errorf("denied.Message = %q, want %q", denied.Message, "forbidden")
 	}
 }
 

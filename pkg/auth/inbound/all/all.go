@@ -9,6 +9,6 @@ import (
 	_ "github.com/gaarutyunov/mcp-anything/pkg/auth/inbound/apikey"
 	_ "github.com/gaarutyunov/mcp-anything/pkg/auth/inbound/introspection"
 	_ "github.com/gaarutyunov/mcp-anything/pkg/auth/inbound/jwt"
-	_ "github.com/gaarutyunov/mcp-anything/pkg/scripting/js"
-	_ "github.com/gaarutyunov/mcp-anything/pkg/scripting/lua"
+	_ "github.com/gaarutyunov/mcp-anything/pkg/runtime/js"
+	_ "github.com/gaarutyunov/mcp-anything/pkg/runtime/lua"
 )

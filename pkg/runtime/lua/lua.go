@@ -128,7 +128,7 @@ func (v *Validator) ValidateToken(ctx context.Context, token string) (*inbound.T
 	L.Pop(1)
 
 	if !allowed {
-		return nil, fmt.Errorf("lua auth denied (status %d): %s", status, errMsg)
+		return nil, &inbound.DeniedError{Status: status, Message: errMsg}
 	}
 
 	info := &inbound.TokenInfo{Subject: "lua-authenticated", Extra: make(map[string]any)}

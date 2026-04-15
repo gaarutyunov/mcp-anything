@@ -1,22 +1,31 @@
-// Package jwt registers the "jwt" inbound auth strategy.
-// Import this package (blank import) to make the strategy available via inbound.New().
+// Package jwt registers the "inbound/jwt" middleware strategy.
+// Import this package (blank import) to make the strategy available via middleware.New().
 package jwt
 
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 
 	"github.com/gaarutyunov/mcp-anything/pkg/auth/inbound"
 	"github.com/gaarutyunov/mcp-anything/pkg/config"
+	pkgmiddleware "github.com/gaarutyunov/mcp-anything/pkg/middleware"
 )
 
 func init() {
-	inbound.Register("jwt", func(ctx context.Context, cfg *config.InboundAuthConfig) (inbound.TokenValidator, string, error) {
-		v, err := NewValidator(ctx, cfg.JWT)
-		return v, "", err
+	pkgmiddleware.Register("inbound/jwt", func(ctx context.Context, cfg any) (func(http.Handler) http.Handler, error) {
+		ic, ok := cfg.(*config.InboundAuthConfig)
+		if !ok {
+			return nil, fmt.Errorf("inbound/jwt: expected *config.InboundAuthConfig, got %T", cfg)
+		}
+		v, err := NewValidator(ctx, ic.JWT)
+		if err != nil {
+			return nil, err
+		}
+		return inbound.ValidatorMiddleware(v, ""), nil
 	})
 }
 

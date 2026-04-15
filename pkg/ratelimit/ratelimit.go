@@ -6,6 +6,9 @@
 //	import _ "github.com/gaarutyunov/mcp-anything/pkg/ratelimit/all"   // all stores
 //	import _ "github.com/gaarutyunov/mcp-anything/pkg/ratelimit/memory" // in-memory only
 //	import _ "github.com/gaarutyunov/mcp-anything/pkg/ratelimit/redis"  // Redis only
+//
+// The ClientIPMiddleware is also available in the unified middleware registry under
+// the key "ratelimit/client_ip" for consumers that compose via pkg/middleware.
 package ratelimit
 
 import (
@@ -19,7 +22,14 @@ import (
 	"github.com/ulule/limiter/v3"
 
 	"github.com/gaarutyunov/mcp-anything/pkg/config"
+	pkgmiddleware "github.com/gaarutyunov/mcp-anything/pkg/middleware"
 )
+
+func init() {
+	pkgmiddleware.Register("ratelimit/client_ip", func(_ context.Context, _ any) (func(http.Handler) http.Handler, error) {
+		return ClientIPMiddleware, nil
+	})
+}
 
 // StoreFactory creates a limiter.Store from the proxy config.
 // Called from init() in store sub-packages.

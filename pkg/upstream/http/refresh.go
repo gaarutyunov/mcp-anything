@@ -13,8 +13,8 @@ import (
 	"github.com/getkin/kin-openapi/routers"
 	"gopkg.in/yaml.v3"
 
-	pkgoutbound "github.com/gaarutyunov/mcp-anything/pkg/auth/outbound"
 	"github.com/gaarutyunov/mcp-anything/pkg/config"
+	pkgmiddleware "github.com/gaarutyunov/mcp-anything/pkg/middleware"
 	"github.com/gaarutyunov/mcp-anything/pkg/openapi"
 	"github.com/gaarutyunov/mcp-anything/pkg/runtime"
 	pkgtelemetry "github.com/gaarutyunov/mcp-anything/pkg/telemetry"
@@ -300,7 +300,11 @@ func (r *Refresher) buildEntriesFromBytes(ctx context.Context, mergedBytes []byt
 	outboundCfg.Upstream = r.cfg.Name
 	outboundCfg.JSAuthPool = r.pools.JSAuth
 	outboundCfg.LuaAuthPool = r.pools.LuaAuth
-	provider, err := pkgoutbound.New(ctx, &outboundCfg)
+	outboundStrategy := outboundCfg.Strategy
+	if outboundStrategy == "" {
+		outboundStrategy = "none"
+	}
+	outboundMW, err := pkgmiddleware.New(ctx, "outbound/"+outboundStrategy, &outboundCfg)
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("building outbound auth: %w", err)
 	}
@@ -342,9 +346,9 @@ func (r *Refresher) buildEntriesFromBytes(ctx context.Context, mergedBytes []byt
 		entry.Executor = executor
 
 		// Compose the per-tool middleware chain:
-		//   RequestMiddleware (transform) → outbound.Middleware (auth) → Executor (terminal handler)
+		//   RequestMiddleware (transform) → outbound auth → Executor (terminal handler)
 		var h nethttp.Handler = executor
-		h = pkgoutbound.Middleware(provider)(h)
+		h = outboundMW(h)
 		if vt.Transforms != nil {
 			h = vt.Transforms.RequestMiddleware()(h)
 		}

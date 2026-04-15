@@ -1,5 +1,5 @@
-// Package js registers the "js" outbound auth strategy.
-// Import this package (blank import) to make the strategy available via outbound.New().
+// Package js registers the "outbound/js" middleware strategy.
+// Import this package (blank import) to make the strategy available via middleware.New().
 package js
 
 import (
@@ -19,6 +19,7 @@ import (
 
 	"github.com/gaarutyunov/mcp-anything/pkg/auth/outbound"
 	"github.com/gaarutyunov/mcp-anything/pkg/config"
+	pkgmiddleware "github.com/gaarutyunov/mcp-anything/pkg/middleware"
 )
 
 const defaultTimeout = 500 * time.Millisecond
@@ -30,11 +31,19 @@ const defaultFetchTimeout = 30 * time.Second
 const noCacheExpiry = int64(1)
 
 func init() {
-	outbound.Register("js", func(_ context.Context, cfg *config.OutboundAuthConfig) (outbound.TokenProvider, error) {
-		if cfg.JSAuthPool == nil {
+	pkgmiddleware.Register("outbound/js", func(_ context.Context, cfg any) (func(http.Handler) http.Handler, error) {
+		oc, ok := cfg.(*config.OutboundAuthConfig)
+		if !ok {
+			return nil, fmt.Errorf("outbound/js: expected *config.OutboundAuthConfig, got %T", cfg)
+		}
+		if oc.JSAuthPool == nil {
 			return nil, fmt.Errorf("js outbound auth requires runtime pools; set OutboundAuthConfig.JSAuthPool")
 		}
-		return NewProvider(cfg.Upstream, cfg.JS, cfg.JSAuthPool)
+		p, err := NewProvider(oc.Upstream, oc.JS, oc.JSAuthPool)
+		if err != nil {
+			return nil, err
+		}
+		return outbound.Middleware(p), nil
 	})
 }
 

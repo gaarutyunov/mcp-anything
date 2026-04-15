@@ -1,19 +1,25 @@
-// Package apikey registers the "api_key" outbound auth strategy.
-// Import this package (blank import) to make the strategy available via outbound.New().
+// Package apikey registers the "outbound/api_key" middleware strategy.
+// Import this package (blank import) to make the strategy available via middleware.New().
 package apikey
 
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 
 	"github.com/gaarutyunov/mcp-anything/pkg/auth/outbound"
 	"github.com/gaarutyunov/mcp-anything/pkg/config"
+	pkgmiddleware "github.com/gaarutyunov/mcp-anything/pkg/middleware"
 )
 
 func init() {
-	outbound.Register("api_key", func(_ context.Context, cfg *config.OutboundAuthConfig) (outbound.TokenProvider, error) {
-		return NewProvider(cfg.APIKey), nil
+	pkgmiddleware.Register("outbound/api_key", func(_ context.Context, cfg any) (func(http.Handler) http.Handler, error) {
+		oc, ok := cfg.(*config.OutboundAuthConfig)
+		if !ok {
+			return nil, fmt.Errorf("outbound/api_key: expected *config.OutboundAuthConfig, got %T", cfg)
+		}
+		return outbound.Middleware(NewProvider(oc.APIKey)), nil
 	})
 }
 

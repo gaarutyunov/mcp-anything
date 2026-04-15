@@ -1,19 +1,25 @@
-// Package bearer registers the "bearer" outbound auth strategy.
-// Import this package (blank import) to make the strategy available via outbound.New().
+// Package bearer registers the "outbound/bearer" middleware strategy.
+// Import this package (blank import) to make the strategy available via middleware.New().
 package bearer
 
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 
 	"github.com/gaarutyunov/mcp-anything/pkg/auth/outbound"
 	"github.com/gaarutyunov/mcp-anything/pkg/config"
+	pkgmiddleware "github.com/gaarutyunov/mcp-anything/pkg/middleware"
 )
 
 func init() {
-	outbound.Register("bearer", func(_ context.Context, cfg *config.OutboundAuthConfig) (outbound.TokenProvider, error) {
-		return NewProvider(cfg.Bearer), nil
+	pkgmiddleware.Register("outbound/bearer", func(_ context.Context, cfg any) (func(http.Handler) http.Handler, error) {
+		oc, ok := cfg.(*config.OutboundAuthConfig)
+		if !ok {
+			return nil, fmt.Errorf("outbound/bearer: expected *config.OutboundAuthConfig, got %T", cfg)
+		}
+		return outbound.Middleware(NewProvider(oc.Bearer)), nil
 	})
 }
 

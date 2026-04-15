@@ -1,22 +1,31 @@
-// Package apikey registers the "apikey" inbound auth strategy.
-// Import this package (blank import) to make the strategy available via inbound.New().
+// Package apikey registers the "inbound/apikey" middleware strategy.
+// Import this package (blank import) to make the strategy available via middleware.New().
 package apikey
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 
 	"github.com/gaarutyunov/mcp-anything/pkg/auth/inbound"
 	"github.com/gaarutyunov/mcp-anything/pkg/config"
+	pkgmiddleware "github.com/gaarutyunov/mcp-anything/pkg/middleware"
 )
 
 func init() {
-	inbound.Register("apikey", func(_ context.Context, cfg *config.InboundAuthConfig) (inbound.TokenValidator, string, error) {
-		v, err := NewValidator(cfg.APIKey)
-		return v, cfg.APIKey.Header, err
+	pkgmiddleware.Register("inbound/apikey", func(_ context.Context, cfg any) (func(http.Handler) http.Handler, error) {
+		ic, ok := cfg.(*config.InboundAuthConfig)
+		if !ok {
+			return nil, fmt.Errorf("inbound/apikey: expected *config.InboundAuthConfig, got %T", cfg)
+		}
+		v, err := NewValidator(ic.APIKey)
+		if err != nil {
+			return nil, err
+		}
+		return inbound.ValidatorMiddleware(v, ic.APIKey.Header), nil
 	})
 }
 

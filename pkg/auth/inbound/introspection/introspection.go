@@ -1,11 +1,12 @@
-// Package introspection registers the "introspection" inbound auth strategy.
-// Import this package (blank import) to make the strategy available via inbound.New().
+// Package introspection registers the "inbound/introspection" middleware strategy.
+// Import this package (blank import) to make the strategy available via middleware.New().
 package introspection
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"slices"
 
@@ -14,12 +15,20 @@ import (
 
 	"github.com/gaarutyunov/mcp-anything/pkg/auth/inbound"
 	"github.com/gaarutyunov/mcp-anything/pkg/config"
+	pkgmiddleware "github.com/gaarutyunov/mcp-anything/pkg/middleware"
 )
 
 func init() {
-	inbound.Register("introspection", func(ctx context.Context, cfg *config.InboundAuthConfig) (inbound.TokenValidator, string, error) {
-		v, err := NewValidator(ctx, cfg.Introspection)
-		return v, "", err
+	pkgmiddleware.Register("inbound/introspection", func(ctx context.Context, cfg any) (func(http.Handler) http.Handler, error) {
+		ic, ok := cfg.(*config.InboundAuthConfig)
+		if !ok {
+			return nil, fmt.Errorf("inbound/introspection: expected *config.InboundAuthConfig, got %T", cfg)
+		}
+		v, err := NewValidator(ctx, ic.Introspection)
+		if err != nil {
+			return nil, err
+		}
+		return inbound.ValidatorMiddleware(v, ""), nil
 	})
 }
 

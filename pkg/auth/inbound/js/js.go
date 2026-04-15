@@ -1,5 +1,5 @@
-// Package js registers the "js" inbound auth strategy.
-// Import this package (blank import) to make the strategy available via inbound.New().
+// Package js registers the "inbound/js" middleware strategy.
+// Import this package (blank import) to make the strategy available via middleware.New().
 package js
 
 import (
@@ -19,18 +19,26 @@ import (
 
 	"github.com/gaarutyunov/mcp-anything/pkg/auth/inbound"
 	"github.com/gaarutyunov/mcp-anything/pkg/config"
+	pkgmiddleware "github.com/gaarutyunov/mcp-anything/pkg/middleware"
 )
 
 const defaultTimeout = 500 * time.Millisecond
 const defaultFetchTimeout = 30 * time.Second
 
 func init() {
-	inbound.Register("js", func(_ context.Context, cfg *config.InboundAuthConfig) (inbound.TokenValidator, string, error) {
-		if cfg.JSAuthPool == nil {
-			return nil, "", fmt.Errorf("js inbound auth requires runtime pools; set InboundAuthConfig.JSAuthPool")
+	pkgmiddleware.Register("inbound/js", func(_ context.Context, cfg any) (func(http.Handler) http.Handler, error) {
+		ic, ok := cfg.(*config.InboundAuthConfig)
+		if !ok {
+			return nil, fmt.Errorf("inbound/js: expected *config.InboundAuthConfig, got %T", cfg)
 		}
-		v, err := NewValidator(cfg.JS, cfg.JSAuthPool)
-		return v, "", err
+		if ic.JSAuthPool == nil {
+			return nil, fmt.Errorf("js inbound auth requires runtime pools; set InboundAuthConfig.JSAuthPool")
+		}
+		v, err := NewValidator(ic.JS, ic.JSAuthPool)
+		if err != nil {
+			return nil, err
+		}
+		return inbound.ValidatorMiddleware(v, ""), nil
 	})
 }
 

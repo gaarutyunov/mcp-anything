@@ -1,14 +1,12 @@
-// Package inbound provides the IoC registry for inbound authentication strategies.
+// Package inbound provides the types and middleware logic for inbound authentication.
 // Strategy sub-packages (jwt, introspection, apikey, lua, js) register themselves
-// via init() when imported. Use the all sub-package to import all built-in strategies.
+// with pkg/middleware via init() when imported. Use the all sub-package to import
+// all built-in strategies.
 package inbound
 
 import (
 	"context"
 	"fmt"
-	"sync"
-
-	"github.com/gaarutyunov/mcp-anything/pkg/config"
 )
 
 // DeniedError is returned by a TokenValidator when access is explicitly denied
@@ -50,36 +48,4 @@ type contextKey struct{}
 func TokenInfoFromContext(ctx context.Context) *TokenInfo {
 	v, _ := ctx.Value(contextKey{}).(*TokenInfo)
 	return v
-}
-
-// ValidatorFactory creates a TokenValidator from InboundAuthConfig.
-// The second return value is the API key header name (non-empty only for the apikey strategy).
-type ValidatorFactory func(ctx context.Context, cfg *config.InboundAuthConfig) (TokenValidator, string, error)
-
-var (
-	mu       sync.RWMutex
-	registry = make(map[string]ValidatorFactory)
-)
-
-// Register adds a factory for the given strategy name.
-// Typically called from init() in strategy sub-packages.
-func Register(strategy string, factory ValidatorFactory) {
-	mu.Lock()
-	defer mu.Unlock()
-	registry[strategy] = factory
-}
-
-// New builds the appropriate TokenValidator from config.
-// Returns an error for unknown strategies.
-// Strategy sub-packages must be imported (blank import) before calling New.
-func New(ctx context.Context, cfg *config.InboundAuthConfig) (TokenValidator, string, error) {
-	mu.RLock()
-	f, ok := registry[cfg.Strategy]
-	mu.RUnlock()
-	if !ok {
-		return nil, "", fmt.Errorf("unknown inbound auth strategy %q — did you forget to import _ %q?",
-			cfg.Strategy,
-			"github.com/gaarutyunov/mcp-anything/pkg/auth/inbound/"+cfg.Strategy)
-	}
-	return f(ctx, cfg)
 }

@@ -11,41 +11,13 @@ import (
 	"strings"
 )
 
-// ValidatorSelector selects the appropriate validator and API key header for a given tool name.
-// toolName is empty when the request is not a tools/call (e.g. tools/list, initialize).
-type ValidatorSelector func(toolName string) (TokenValidator, string)
-
-// Middleware returns an HTTP middleware that validates inbound Bearer tokens (or API keys).
-// apiKeyHeader: when non-empty, the token is extracted from this header instead of Authorization: Bearer.
-// The middleware skips validation for tools/call requests where the tool has AuthRequired==false.
-// For all other requests (tools/list, initialize, etc.), auth is always enforced.
-func Middleware(validator TokenValidator, registry RegistryReader, apiKeyHeader string) func(http.Handler) http.Handler {
-	return MiddlewareWithSelector(func(_ string) (TokenValidator, string) {
-		return validator, apiKeyHeader
-	}, registry)
-}
-
-// MiddlewareWithSelector is like Middleware but selects the validator per tool name, enabling
-// per-upstream authentication overrides.
-func MiddlewareWithSelector(selectValidator ValidatorSelector, registry RegistryReader) func(http.Handler) http.Handler {
+// ValidatorMiddleware returns an HTTP middleware that validates inbound Bearer tokens
+// (or API keys when apiKeyHeader is non-empty).
+// It extracts the token, calls ValidateToken, and stores the resulting TokenInfo in ctx.
+// It does NOT implement per-tool auth bypass — use DispatchMiddleware for that.
+func ValidatorMiddleware(validator TokenValidator, apiKeyHeader string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Peek at the request body to detect tools/call with auth bypass.
-			toolName, isToolCall, body := peekToolCallName(r)
-			if body != nil {
-				// Restore the body so the downstream handler can read it.
-				r.Body = io.NopCloser(bytes.NewReader(body))
-			}
-
-			if isToolCall && !registry.AuthRequired(toolName) {
-				// Per-operation bypass: tool explicitly marked as public.
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			validator, apiKeyHeader := selectValidator(toolName)
-
-			// Extract token from the appropriate header.
 			var token string
 			if apiKeyHeader != "" {
 				token = r.Header.Get(apiKeyHeader)
@@ -74,6 +46,55 @@ func MiddlewareWithSelector(selectValidator ValidatorSelector, registry Registry
 
 			ctx := context.WithValue(r.Context(), contextKey{}, info)
 			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
+// DispatchMiddleware builds a middleware that:
+//  1. Peeks at the request body to detect tools/call with per-tool auth bypass.
+//  2. Routes to the per-upstream override middleware when one is configured, falling
+//     back to globalMW for all other tools.
+//
+// globalMW is the middleware used when no per-upstream override applies.
+// overrides maps upstream names to their specific validator middlewares.
+// registry is used to check whether auth is required for a given tool.
+// upstreamLookup maps a tool name to its upstream name; may be nil when overrides is empty.
+func DispatchMiddleware(
+	globalMW func(http.Handler) http.Handler,
+	overrides map[string]func(http.Handler) http.Handler,
+	registry RegistryReader,
+	upstreamLookup func(string) string,
+) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		// Pre-compute handlers to avoid allocating a new wrapper per request.
+		globalH := globalMW(next)
+		overrideHandlers := make(map[string]http.Handler, len(overrides))
+		for upstreamName, mw := range overrides {
+			overrideHandlers[upstreamName] = mw(next)
+		}
+
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			toolName, isToolCall, body := peekToolCallName(r)
+			if body != nil {
+				r.Body = io.NopCloser(bytes.NewReader(body))
+			}
+
+			// Per-operation bypass: tool explicitly marked as public.
+			if isToolCall && !registry.AuthRequired(toolName) {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			// Route to per-upstream override when configured.
+			if upstreamLookup != nil && toolName != "" && len(overrideHandlers) > 0 {
+				upstreamName := upstreamLookup(toolName)
+				if h, ok := overrideHandlers[upstreamName]; ok {
+					h.ServeHTTP(w, r)
+					return
+				}
+			}
+
+			globalH.ServeHTTP(w, r)
 		})
 	}
 }

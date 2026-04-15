@@ -14,8 +14,8 @@ import (
 
 	"github.com/getkin/kin-openapi/openapi3"
 
-	pkgoutbound "github.com/gaarutyunov/mcp-anything/pkg/auth/outbound"
 	"github.com/gaarutyunov/mcp-anything/pkg/config"
+	pkgmiddleware "github.com/gaarutyunov/mcp-anything/pkg/middleware"
 	"github.com/gaarutyunov/mcp-anything/pkg/openapi"
 	pkgupstream "github.com/gaarutyunov/mcp-anything/pkg/upstream"
 )
@@ -46,7 +46,11 @@ func (b *Builder) Build(ctx context.Context, cfg *config.UpstreamConfig, naming 
 
 	outboundCfg := cfg.OutboundAuth
 	outboundCfg.Upstream = cfg.Name
-	provider, err := pkgoutbound.New(ctx, &outboundCfg)
+	outboundStrategy := outboundCfg.Strategy
+	if outboundStrategy == "" {
+		outboundStrategy = "none"
+	}
+	outboundMW, err := pkgmiddleware.New(ctx, "outbound/"+outboundStrategy, &outboundCfg)
 	if err != nil {
 		return nil, fmt.Errorf("build outbound auth for upstream %q: %w", cfg.Name, err)
 	}
@@ -101,9 +105,9 @@ func (b *Builder) Build(ctx context.Context, cfg *config.UpstreamConfig, naming 
 		entry.Executor = executor
 
 		// Compose the per-tool middleware chain:
-		//   RequestMiddleware (transform) → outbound.Middleware (auth) → Executor (terminal handler)
+		//   RequestMiddleware (transform) → outbound auth → Executor (terminal handler)
 		var h nethttp.Handler = executor
-		h = pkgoutbound.Middleware(provider)(h)
+		h = outboundMW(h)
 		if vt.Transforms != nil {
 			h = vt.Transforms.RequestMiddleware()(h)
 		}

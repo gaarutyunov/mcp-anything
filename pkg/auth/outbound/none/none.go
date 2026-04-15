@@ -1,17 +1,23 @@
-// Package none registers the "none" outbound auth strategy (no authentication).
-// Import this package (blank import) to make the strategy available via outbound.New().
+// Package none registers the "outbound/none" middleware strategy (no authentication).
+// Import this package (blank import) to make the strategy available via middleware.New().
 package none
 
 import (
 	"context"
+	"fmt"
+	"net/http"
 
 	"github.com/gaarutyunov/mcp-anything/pkg/auth/outbound"
 	"github.com/gaarutyunov/mcp-anything/pkg/config"
+	pkgmiddleware "github.com/gaarutyunov/mcp-anything/pkg/middleware"
 )
 
 func init() {
-	outbound.Register("none", func(_ context.Context, _ *config.OutboundAuthConfig) (outbound.TokenProvider, error) {
-		return &Provider{}, nil
+	pkgmiddleware.Register("outbound/none", func(_ context.Context, cfg any) (func(http.Handler) http.Handler, error) {
+		if _, ok := cfg.(*config.OutboundAuthConfig); !ok {
+			return nil, fmt.Errorf("outbound/none: expected *config.OutboundAuthConfig, got %T", cfg)
+		}
+		return outbound.Middleware(&Provider{}), nil
 	})
 }
 

@@ -1,10 +1,11 @@
-// Package lua registers the "lua" outbound auth strategy.
-// Import this package (blank import) to make the strategy available via outbound.New().
+// Package lua registers the "outbound/lua" middleware strategy.
+// Import this package (blank import) to make the strategy available via middleware.New().
 package lua
 
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/gaarutyunov/mcp-anything/pkg/auth/outbound"
 	"github.com/gaarutyunov/mcp-anything/pkg/config"
+	pkgmiddleware "github.com/gaarutyunov/mcp-anything/pkg/middleware"
 )
 
 const defaultTimeout = 500 * time.Millisecond
@@ -25,11 +27,19 @@ const defaultTimeout = 500 * time.Millisecond
 const noCacheExpiry = int64(1)
 
 func init() {
-	outbound.Register("lua", func(_ context.Context, cfg *config.OutboundAuthConfig) (outbound.TokenProvider, error) {
-		if cfg.LuaAuthPool == nil {
+	pkgmiddleware.Register("outbound/lua", func(_ context.Context, cfg any) (func(http.Handler) http.Handler, error) {
+		oc, ok := cfg.(*config.OutboundAuthConfig)
+		if !ok {
+			return nil, fmt.Errorf("outbound/lua: expected *config.OutboundAuthConfig, got %T", cfg)
+		}
+		if oc.LuaAuthPool == nil {
 			return nil, fmt.Errorf("lua outbound auth requires runtime pools; set OutboundAuthConfig.LuaAuthPool")
 		}
-		return NewProvider(cfg.Upstream, cfg.Lua, cfg.LuaAuthPool)
+		p, err := NewProvider(oc.Upstream, oc.Lua, oc.LuaAuthPool)
+		if err != nil {
+			return nil, err
+		}
+		return outbound.Middleware(p), nil
 	})
 }
 

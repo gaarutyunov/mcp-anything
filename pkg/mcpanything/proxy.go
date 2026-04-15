@@ -26,6 +26,7 @@ import (
 	pkginbound "github.com/gaarutyunov/mcp-anything/pkg/auth/inbound"
 	pkgconfig "github.com/gaarutyunov/mcp-anything/pkg/config"
 	pkgmcp "github.com/gaarutyunov/mcp-anything/pkg/mcp"
+	pkgmiddleware "github.com/gaarutyunov/mcp-anything/pkg/middleware"
 	pkgoauthcallback "github.com/gaarutyunov/mcp-anything/pkg/oauth/callbackmux"
 	pkgratelimit "github.com/gaarutyunov/mcp-anything/pkg/ratelimit"
 	pkgruntime "github.com/gaarutyunov/mcp-anything/pkg/runtime"
@@ -256,17 +257,13 @@ func (p *Proxy) buildAuth(ctx context.Context) (func(http.Handler) http.Handler,
 	authCfg := p.cfg.InboundAuth
 	authCfg.JSAuthPool = p.pools.JSAuth
 	authCfg.LuaAuthPool = p.pools.LuaAuth
-	globalValidator, globalHeader, err := pkginbound.New(ctx, &authCfg)
+	globalMW, err := pkgmiddleware.New(ctx, "inbound/"+strategy, &authCfg)
 	if err != nil {
-		return nil, nil, fmt.Errorf("build inbound auth validator: %w", err)
+		return nil, nil, fmt.Errorf("build inbound auth middleware: %w", err)
 	}
 	slog.Info("inbound auth enabled", "strategy", strategy)
 
-	type overrideEntry struct {
-		validator    pkginbound.TokenValidator
-		apiKeyHeader string
-	}
-	overrides := make(map[string]overrideEntry)
+	overrideMWs := make(map[string]func(http.Handler) http.Handler)
 	for i := range p.cfg.Upstreams {
 		up := &p.cfg.Upstreams[i]
 		if !up.Enabled || up.InboundAuthOverride == nil {
@@ -275,32 +272,22 @@ func (p *Proxy) buildAuth(ctx context.Context) (func(http.Handler) http.Handler,
 		ovCfg := *up.InboundAuthOverride
 		ovCfg.JSAuthPool = p.pools.JSAuth
 		ovCfg.LuaAuthPool = p.pools.LuaAuth
-		ov, oh, ovErr := pkginbound.New(ctx, &ovCfg)
+		ovMW, ovErr := pkgmiddleware.New(ctx, "inbound/"+ovCfg.Strategy, &ovCfg)
 		if ovErr != nil {
 			return nil, nil, fmt.Errorf("build inbound auth override for %q: %w", up.Name, ovErr)
 		}
-		overrides[up.Name] = overrideEntry{ov, oh}
+		overrideMWs[up.Name] = ovMW
 		slog.Info("per-upstream auth override", "upstream", up.Name, "strategy", up.InboundAuthOverride.Strategy)
 	}
 
-	selectValidator := func(toolName string) (pkginbound.TokenValidator, string) {
-		if toolName != "" {
-			upstreamName := p.manager.ToolUpstreamName(toolName)
-			if entry, ok := overrides[upstreamName]; ok {
-				return entry.validator, entry.apiKeyHeader
-			}
-		}
-		return globalValidator, globalHeader
-	}
-
-	middleware := pkginbound.MiddlewareWithSelector(selectValidator, p.manager)
+	authMiddleware := pkginbound.DispatchMiddleware(globalMW, overrideMWs, p.manager, p.manager.ToolUpstreamName)
 
 	var wellKnown http.HandlerFunc
 	if strategy == "jwt" || strategy == "introspection" {
 		wellKnown = pkginbound.WellKnownHandler(p.cfg)
 	}
 
-	return middleware, wellKnown, nil
+	return authMiddleware, wellKnown, nil
 }
 
 // buildSessionStore creates the OAuth session store and callback mux when configured.

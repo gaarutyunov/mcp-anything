@@ -1,10 +1,11 @@
-// Package lua registers the "lua" inbound auth strategy.
-// Import this package (blank import) to make the strategy available via inbound.New().
+// Package lua registers the "inbound/lua" middleware strategy.
+// Import this package (blank import) to make the strategy available via middleware.New().
 package lua
 
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -14,17 +15,25 @@ import (
 
 	"github.com/gaarutyunov/mcp-anything/pkg/auth/inbound"
 	"github.com/gaarutyunov/mcp-anything/pkg/config"
+	pkgmiddleware "github.com/gaarutyunov/mcp-anything/pkg/middleware"
 )
 
 const defaultTimeout = 500 * time.Millisecond
 
 func init() {
-	inbound.Register("lua", func(_ context.Context, cfg *config.InboundAuthConfig) (inbound.TokenValidator, string, error) {
-		if cfg.LuaAuthPool == nil {
-			return nil, "", fmt.Errorf("lua inbound auth requires runtime pools; set InboundAuthConfig.LuaAuthPool")
+	pkgmiddleware.Register("inbound/lua", func(_ context.Context, cfg any) (func(http.Handler) http.Handler, error) {
+		ic, ok := cfg.(*config.InboundAuthConfig)
+		if !ok {
+			return nil, fmt.Errorf("inbound/lua: expected *config.InboundAuthConfig, got %T", cfg)
 		}
-		v, err := NewValidator(cfg.Lua, cfg.LuaAuthPool)
-		return v, "", err
+		if ic.LuaAuthPool == nil {
+			return nil, fmt.Errorf("lua inbound auth requires runtime pools; set InboundAuthConfig.LuaAuthPool")
+		}
+		v, err := NewValidator(ic.Lua, ic.LuaAuthPool)
+		if err != nil {
+			return nil, err
+		}
+		return inbound.ValidatorMiddleware(v, ""), nil
 	})
 }
 

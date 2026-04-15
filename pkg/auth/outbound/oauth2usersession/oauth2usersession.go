@@ -1,4 +1,4 @@
-// Package oauth2usersession registers the "oauth2_user_session" outbound auth strategy.
+// Package oauth2usersession registers the "outbound/oauth2_user_session" middleware strategy.
 // It stores per-user OAuth tokens in a session store and automatically refreshes them.
 // Import this package with a blank import to make the strategy available:
 //
@@ -20,11 +20,20 @@ import (
 	pkginbound "github.com/gaarutyunov/mcp-anything/pkg/auth/inbound"
 	"github.com/gaarutyunov/mcp-anything/pkg/auth/outbound"
 	"github.com/gaarutyunov/mcp-anything/pkg/config"
+	pkgmiddleware "github.com/gaarutyunov/mcp-anything/pkg/middleware"
 )
 
 func init() {
-	outbound.Register("oauth2_user_session", func(ctx context.Context, cfg *config.OutboundAuthConfig) (outbound.TokenProvider, error) {
-		return newProvider(ctx, cfg)
+	pkgmiddleware.Register("outbound/oauth2_user_session", func(ctx context.Context, cfg any) (func(http.Handler) http.Handler, error) {
+		oc, ok := cfg.(*config.OutboundAuthConfig)
+		if !ok {
+			return nil, fmt.Errorf("outbound/oauth2_user_session: expected *config.OutboundAuthConfig, got %T", cfg)
+		}
+		p, err := newProvider(ctx, oc)
+		if err != nil {
+			return nil, err
+		}
+		return outbound.Middleware(p), nil
 	})
 }
 

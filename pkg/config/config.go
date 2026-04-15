@@ -248,16 +248,31 @@ type GroupConfig struct {
 
 // InboundAuthConfig controls how inbound MCP clients are authenticated.
 type InboundAuthConfig struct {
-	Strategy      string              `koanf:"strategy"` // jwt|introspection|apikey|lua|js|none
+	Strategy      string              `koanf:"strategy"` // jwt|introspection|apikey|lua|js|ext_authz|none
 	JWT           JWTAuthConfig       `koanf:"jwt"`
 	Introspection IntrospectionConfig `koanf:"introspection"`
 	APIKey        APIKeyAuthConfig    `koanf:"apikey"`
 	Lua           LuaAuthConfig       `koanf:"lua"`
 	JS            JSAuthConfig        `koanf:"js"`
+	ExtAuthz      ExtAuthzConfig      `koanf:"ext_authz"`
 	// JSAuthPool and LuaAuthPool are set programmatically for script-based strategies.
 	// Not loaded from the config file. Nil is valid when no script strategy is configured.
 	JSAuthPool  PoolAcquirer `koanf:"-"`
 	LuaAuthPool PoolAcquirer `koanf:"-"`
+}
+
+// ExtAuthzConfig configures inbound authorization via an external Envoy ext_authz gRPC service.
+// The service must implement the envoy.service.auth.v3.Authorization/Check RPC.
+type ExtAuthzConfig struct {
+	// GRPCAddress is the host:port of the ext_authz gRPC server (required).
+	GRPCAddress string `koanf:"grpc_address"`
+	// Timeout is the per-check deadline. Defaults to 5s when zero.
+	Timeout time.Duration `koanf:"timeout"`
+	// TLS enables TLS for the gRPC connection. Defaults to plaintext.
+	TLS bool `koanf:"tls"`
+	// Metadata is optional static key/value pairs forwarded in every CheckRequest.context_extensions.
+	// Values support ${ENV_VAR} expansion.
+	Metadata map[string]string `koanf:"metadata"`
 }
 
 // LuaAuthConfig configures inbound token validation via a Lua script.

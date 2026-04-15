@@ -215,6 +215,41 @@ func main() {}
 	}
 }
 
+// TestExtAuthzInbound_TreeShake verifies that importing only pkg/auth/inbound/ext_authz
+// does NOT pull in heavy inbound auth deps (Sobek, gopher-lua, go-oidc, zitadel/oidc)
+// that belong to other strategy sub-packages.
+func TestExtAuthzInbound_TreeShake(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	repoRoot := findRepoRoot(t)
+
+	writeFile(t, filepath.Join(dir, "go.mod"), "module treeshaketest\n\ngo 1.21\n\nrequire github.com/gaarutyunov/mcp-anything v0.0.0\n\nreplace github.com/gaarutyunov/mcp-anything => "+repoRoot+"\n")
+	writeFile(t, filepath.Join(dir, "main.go"), `package main
+
+import (
+	_ "github.com/gaarutyunov/mcp-anything/pkg/auth/inbound/ext_authz"
+)
+
+func main() {}
+`)
+
+	runGoCmd(t, dir, "mod", "tidy")
+
+	gosum := readFile(t, filepath.Join(dir, "go.sum"))
+	forbidden := []string{
+		"grafana/sobek",
+		"gopher-lua",
+		"coreos/go-oidc",
+		"zitadel/oidc",
+	}
+	for _, pkg := range forbidden {
+		if strings.Contains(gosum, pkg) {
+			t.Errorf("tree-shaking failure: auth/inbound/ext_authz pulls in forbidden dep %q", pkg)
+		}
+	}
+}
+
 // findRepoRoot walks up from the test's working directory to find the go.mod root.
 func findRepoRoot(t *testing.T) string {
 	t.Helper()

@@ -7,6 +7,7 @@ require (
 	github.com/caddyserver/caddy/v2 v2.11.2
 	github.com/coreos/go-oidc/v3 v3.17.0
 	github.com/dgraph-io/ristretto v0.2.0
+	github.com/envoyproxy/go-control-plane/envoy v1.37.0
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/getkin/kin-openapi v0.134.0
 	github.com/go-chi/chi/v5 v5.2.5
@@ -129,6 +130,7 @@ require (
 	github.com/clipperhouse/displaywidth v0.11.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/cloudflare/circl v1.6.3 // indirect
+	github.com/cncf/xds/go v0.0.0-20251210132809-ee656c7534f5 // indirect
 	github.com/containerd/errdefs v1.0.0 // indirect
 	github.com/containerd/errdefs/pkg v0.3.0 // indirect
 	github.com/containerd/log v0.1.0 // indirect
@@ -154,6 +156,7 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/ebitengine/purego v0.10.0 // indirect
 	github.com/emicklei/go-restful/v3 v3.12.2 // indirect
+	github.com/envoyproxy/protoc-gen-validate v1.3.0 // indirect
 	github.com/ettle/strcase v0.2.0 // indirect
 	github.com/evanphx/json-patch/v5 v5.9.11 // indirect
 	github.com/fatih/color v1.18.0 // indirect
@@ -311,6 +314,7 @@ require (
 	github.com/perimeterx/marshmallow v1.1.5 // indirect
 	github.com/pires/go-proxyproto v0.11.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
+	github.com/planetscale/vtprotobuf v0.6.1-0.20240319094008-0393e58bdf10 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/polyfloyd/go-errorlint v1.8.0 // indirect
 	github.com/power-devops/perfstat v0.0.0-20240221224432-82ca36839d55 // indirect

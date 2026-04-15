@@ -45,23 +45,36 @@ func MiddlewareWithSelector(selectValidator ValidatorSelector, registry Registry
 
 			validator, apiKeyHeader := selectValidator(toolName)
 
-			// Extract token from the appropriate header.
-			var token string
-			if apiKeyHeader != "" {
-				token = r.Header.Get(apiKeyHeader)
+			var (
+				info            *TokenInfo
+				injectedHeaders map[string]string
+				err             error
+			)
+
+			// RequestValidator implementations (e.g. ext_authz) authorize the full
+			// HTTP request instead of a bare token; check for this interface first.
+			if rv, ok := validator.(RequestValidator); ok {
+				info, injectedHeaders, err = rv.ValidateRequest(r.Context(), r)
 			} else {
-				authHeader := r.Header.Get("Authorization")
-				if after, ok := strings.CutPrefix(authHeader, "Bearer "); ok {
-					token = strings.TrimSpace(after)
+				// Extract token from the appropriate header.
+				var token string
+				if apiKeyHeader != "" {
+					token = r.Header.Get(apiKeyHeader)
+				} else {
+					authHeader := r.Header.Get("Authorization")
+					if after, ok := strings.CutPrefix(authHeader, "Bearer "); ok {
+						token = strings.TrimSpace(after)
+					}
 				}
+
+				if token == "" {
+					writeUnauthorized(w, r, "missing_token")
+					return
+				}
+
+				info, err = validator.ValidateToken(r.Context(), token)
 			}
 
-			if token == "" {
-				writeUnauthorized(w, r, "missing_token")
-				return
-			}
-
-			info, err := validator.ValidateToken(r.Context(), token)
 			if err != nil {
 				var denied *DeniedError
 				if errors.As(err, &denied) {
@@ -70,6 +83,11 @@ func MiddlewareWithSelector(selectValidator ValidatorSelector, registry Registry
 					writeUnauthorized(w, r, "invalid_token")
 				}
 				return
+			}
+
+			// Inject any headers returned by the validator (e.g. from ext_authz OkResponse).
+			for k, v := range injectedHeaders {
+				r.Header.Set(k, v)
 			}
 
 			ctx := context.WithValue(r.Context(), contextKey{}, info)
@@ -126,6 +144,7 @@ func writeUnauthorized(w http.ResponseWriter, r *http.Request, errCode string) {
 
 // writeDenied writes an HTTP response for an explicit denial with a specific status code.
 // If the status is 401, it delegates to writeUnauthorized to preserve WWW-Authenticate semantics.
+// If denied.RawBody is set, it is written directly instead of a JSON-encoded error object.
 func writeDenied(w http.ResponseWriter, r *http.Request, denied *DeniedError) {
 	if denied.Status == 0 || denied.Status == http.StatusUnauthorized {
 		errCode := denied.Message
@@ -133,6 +152,16 @@ func writeDenied(w http.ResponseWriter, r *http.Request, denied *DeniedError) {
 			errCode = "access_denied"
 		}
 		writeUnauthorized(w, r, errCode)
+		return
+	}
+	if len(denied.RawBody) > 0 {
+		ct := denied.RawBodyType
+		if ct == "" {
+			ct = "text/plain"
+		}
+		w.Header().Set("Content-Type", ct)
+		w.WriteHeader(denied.Status)
+		_, _ = w.Write(denied.RawBody)
 		return
 	}
 	errCode := denied.Message

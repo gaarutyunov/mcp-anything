@@ -6,6 +6,7 @@ package inbound
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"sync"
 
 	"github.com/gaarutyunov/mcp-anything/pkg/config"
@@ -17,6 +18,12 @@ import (
 type DeniedError struct {
 	Status  int
 	Message string
+	// RawBody, when non-nil, is written directly as the response body instead of
+	// a JSON-encoded {"error": "..."} object. Used by the ext_authz strategy to
+	// forward the verbatim denial body from the authorization server.
+	RawBody []byte
+	// RawBodyType is the Content-Type for RawBody. Defaults to "text/plain" when empty.
+	RawBodyType string
 }
 
 func (e *DeniedError) Error() string {
@@ -34,6 +41,18 @@ type TokenInfo struct {
 // TokenValidator validates an inbound token and returns identity information.
 type TokenValidator interface {
 	ValidateToken(ctx context.Context, token string) (*TokenInfo, error)
+}
+
+// RequestValidator is implemented by auth strategies that need access to the full
+// HTTP request rather than just the bearer token (e.g. ext_authz gRPC services).
+// When a validator implements RequestValidator, the middleware calls ValidateRequest
+// instead of ValidateToken.
+//
+// The returned header map (may be nil) contains headers to inject into the inbound
+// request before it is forwarded downstream — for example, the headers_to_add from
+// an Envoy ext_authz OkResponse.
+type RequestValidator interface {
+	ValidateRequest(ctx context.Context, r *http.Request) (*TokenInfo, map[string]string, error)
 }
 
 // RegistryReader allows the middleware to check per-tool auth requirements.

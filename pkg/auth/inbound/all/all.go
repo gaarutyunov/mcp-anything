@@ -7,6 +7,7 @@ package all
 
 import (
 	_ "github.com/gaarutyunov/mcp-anything/pkg/auth/inbound/apikey"
+	_ "github.com/gaarutyunov/mcp-anything/pkg/auth/inbound/ext_authz"
 	_ "github.com/gaarutyunov/mcp-anything/pkg/auth/inbound/introspection"
 	_ "github.com/gaarutyunov/mcp-anything/pkg/auth/inbound/js"
 	_ "github.com/gaarutyunov/mcp-anything/pkg/auth/inbound/jwt"

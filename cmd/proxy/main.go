@@ -11,26 +11,8 @@ import (
 
 	"github.com/gaarutyunov/mcp-anything/pkg/mcpanything"
 
-	// Register all cache store backends.
-	_ "github.com/gaarutyunov/mcp-anything/pkg/cache/all"
-
-	// Register all upstream builders.
-	_ "github.com/gaarutyunov/mcp-anything/pkg/upstream/all"
-
-	// Register all outbound auth strategies.
-	_ "github.com/gaarutyunov/mcp-anything/pkg/auth/outbound/all"
-
-	// Register all inbound auth strategies.
-	_ "github.com/gaarutyunov/mcp-anything/pkg/auth/inbound/all"
-
-	// Register all rate limit stores (in-memory and Redis).
-	_ "github.com/gaarutyunov/mcp-anything/pkg/ratelimit/all"
-
-	// Register all embedding providers (including hugot for in-process ONNX).
-	_ "github.com/gaarutyunov/mcp-anything/pkg/embedding/all"
-
-	// Register all session store providers (memory, postgres, redis).
-	_ "github.com/gaarutyunov/mcp-anything/pkg/session/all"
+	// Register all built-in components (cache, upstream, auth, ratelimit, embedding, session).
+	_ "github.com/gaarutyunov/mcp-anything/cmd/proxy/deps"
 )
 
 // Set by goreleaser ldflags.

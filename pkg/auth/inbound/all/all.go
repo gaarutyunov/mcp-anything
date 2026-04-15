@@ -8,7 +8,7 @@ package all
 import (
 	_ "github.com/gaarutyunov/mcp-anything/pkg/auth/inbound/apikey"
 	_ "github.com/gaarutyunov/mcp-anything/pkg/auth/inbound/introspection"
-	_ "github.com/gaarutyunov/mcp-anything/pkg/auth/inbound/js"
 	_ "github.com/gaarutyunov/mcp-anything/pkg/auth/inbound/jwt"
-	_ "github.com/gaarutyunov/mcp-anything/pkg/auth/inbound/lua"
+	_ "github.com/gaarutyunov/mcp-anything/pkg/scripting/js"
+	_ "github.com/gaarutyunov/mcp-anything/pkg/scripting/lua"
 )

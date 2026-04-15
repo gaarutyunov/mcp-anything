@@ -1,5 +1,5 @@
-// Package js registers the "outbound/js" middleware strategy.
-// Import this package (blank import) to make the strategy available via middleware.New().
+// Package js registers the "inbound/js" and "outbound/js" middleware strategies.
+// Import this package (blank import) to make both strategies available via middleware.New().
 package js
 
 import (
@@ -17,6 +17,7 @@ import (
 
 	"github.com/grafana/sobek"
 
+	"github.com/gaarutyunov/mcp-anything/pkg/auth/inbound"
 	"github.com/gaarutyunov/mcp-anything/pkg/auth/outbound"
 	"github.com/gaarutyunov/mcp-anything/pkg/config"
 	pkgmiddleware "github.com/gaarutyunov/mcp-anything/pkg/middleware"
@@ -31,6 +32,20 @@ const defaultFetchTimeout = 30 * time.Second
 const noCacheExpiry = int64(1)
 
 func init() {
+	pkgmiddleware.Register("inbound/js", func(_ context.Context, cfg any) (func(http.Handler) http.Handler, error) {
+		ic, ok := cfg.(*config.InboundAuthConfig)
+		if !ok {
+			return nil, fmt.Errorf("inbound/js: expected *config.InboundAuthConfig, got %T", cfg)
+		}
+		if ic.JSAuthPool == nil {
+			return nil, fmt.Errorf("js inbound auth requires runtime pools; set InboundAuthConfig.JSAuthPool")
+		}
+		v, err := NewValidator(ic.JS, ic.JSAuthPool)
+		if err != nil {
+			return nil, err
+		}
+		return inbound.ValidatorMiddleware(v, ""), nil
+	})
 	pkgmiddleware.Register("outbound/js", func(_ context.Context, cfg any) (func(http.Handler) http.Handler, error) {
 		oc, ok := cfg.(*config.OutboundAuthConfig)
 		if !ok {
@@ -47,7 +62,182 @@ func init() {
 	})
 }
 
-// Provider implements TokenProvider using a JavaScript (Sobek) script.
+// scriptCache is a thread-safe key-value cache with optional TTL,
+// shared across JS script invocations to provide ctx.cache.get/set functionality.
+type scriptCache struct {
+	mu    sync.Mutex
+	items map[string]scriptCacheItem
+}
+
+type scriptCacheItem struct {
+	value     any
+	expiresAt time.Time
+}
+
+func newScriptCache() *scriptCache {
+	return &scriptCache{items: make(map[string]scriptCacheItem)}
+}
+
+func (c *scriptCache) get(key string) any {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	item, ok := c.items[key]
+	if !ok {
+		return nil
+	}
+	if !item.expiresAt.IsZero() && time.Now().After(item.expiresAt) {
+		delete(c.items, key)
+		return nil
+	}
+	return item.value
+}
+
+func (c *scriptCache) set(key string, value any, ttlSeconds float64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var exp time.Time
+	if ttlSeconds > 0 {
+		exp = time.Now().Add(time.Duration(ttlSeconds * float64(time.Second)))
+	}
+	c.items[key] = scriptCacheItem{value: value, expiresAt: exp}
+}
+
+// credentialCache caches the token, expiry, and raw headers returned by outbound JS scripts.
+type credentialCache struct {
+	mu         sync.Mutex
+	token      string
+	expiry     int64 // unix timestamp; 0 = fetch on next call
+	rawHeaders map[string]string
+}
+
+// Validator implements inbound.TokenValidator using a sandboxed Sobek JS runtime.
+// The JavaScript script receives (token, ctx) and must return an object:
+//
+//	{ allowed: bool, status?: number, error?: string, subject?: string, extra_headers?: object }
+//
+// A fresh sobek.Runtime is created per call (Sobek is not goroutine-safe).
+// The pre-compiled program is reused across calls. The shared pool bounds
+// the maximum number of concurrent JS runtimes to prevent OOM under load.
+type Validator struct {
+	program     *sobek.Program
+	timeout     time.Duration
+	env         map[string]string
+	scriptCache *scriptCache
+	httpClient  *http.Client
+	pool        config.PoolAcquirer
+}
+
+// NewValidator creates a Validator by reading and pre-compiling the JS script.
+// pool bounds the number of concurrent JS runtimes; it is shared with the outbound
+// JS auth provider to enforce a single global limit for all auth scripts.
+func NewValidator(cfg config.JSAuthConfig, pool config.PoolAcquirer) (*Validator, error) {
+	src, err := os.ReadFile(cfg.ScriptPath)
+	if err != nil {
+		return nil, fmt.Errorf("reading js auth script %q: %w", cfg.ScriptPath, err)
+	}
+	prog, err := compileScript(cfg.ScriptPath, string(src))
+	if err != nil {
+		return nil, fmt.Errorf("compiling js auth script %q: %w", cfg.ScriptPath, err)
+	}
+	timeout := cfg.Timeout
+	if timeout <= 0 {
+		timeout = defaultTimeout
+	}
+	return &Validator{
+		program:     prog,
+		timeout:     timeout,
+		env:         cfg.Env,
+		scriptCache: newScriptCache(),
+		httpClient:  &http.Client{Timeout: defaultFetchTimeout},
+		pool:        pool,
+	}, nil
+}
+
+// ValidateToken runs the JS script with the token and returns identity info on success.
+func (v *Validator) ValidateToken(ctx context.Context, token string) (*inbound.TokenInfo, error) {
+	release, err := v.pool.Acquire(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("js auth: %w", err)
+	}
+	defer release()
+
+	rt := sobek.New()
+
+	// scriptCtx bounds ctx.fetch HTTP calls to the script deadline.
+	scriptCtx := ctx
+	if v.timeout > 0 {
+		var cancel context.CancelFunc
+		scriptCtx, cancel = context.WithTimeout(ctx, v.timeout)
+		defer cancel()
+		timer := time.AfterFunc(v.timeout, func() {
+			rt.Interrupt("js auth script timed out")
+		})
+		defer timer.Stop()
+	}
+
+	ctxObj := buildCtxObject(scriptCtx, rt, v.env, v.scriptCache, v.httpClient)
+	if err := rt.Set("__mcp_ctx__", ctxObj); err != nil {
+		return nil, fmt.Errorf("setting js auth ctx: %w", err)
+	}
+
+	if _, err := rt.RunProgram(v.program); err != nil {
+		return nil, fmt.Errorf("running js auth script: %w", err)
+	}
+
+	mainFn, ok := sobek.AssertFunction(rt.Get("__mcp_default__"))
+	if !ok {
+		return nil, fmt.Errorf("js auth script does not export a callable default function")
+	}
+
+	result, err := mainFn(sobek.Undefined(), rt.ToValue(token), ctxObj)
+	if err != nil {
+		return nil, fmt.Errorf("js check_auth: %w", err)
+	}
+
+	return parseInboundResult(result)
+}
+
+// parseInboundResult extracts TokenInfo from the JS script's return value.
+func parseInboundResult(result sobek.Value) (*inbound.TokenInfo, error) {
+	exported := result.Export()
+	resMap, ok := exported.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("js check_auth: return value must be an object, got %T", exported)
+	}
+
+	allowed, _ := resMap["allowed"].(bool)
+	if !allowed {
+		status := 401
+		if s, ok := resMap["status"]; ok {
+			switch sv := s.(type) {
+			case int64:
+				status = int(sv)
+			case float64:
+				status = int(sv)
+			}
+		}
+		errMsg := ""
+		if e, ok := resMap["error"].(string); ok {
+			errMsg = e
+		}
+		return nil, &inbound.DeniedError{Status: status, Message: errMsg}
+	}
+
+	info := &inbound.TokenInfo{Subject: "js-authenticated", Extra: make(map[string]any)}
+	if sub, ok := resMap["subject"].(string); ok && sub != "" {
+		info.Subject = sub
+	}
+	if extraHeaders, ok := resMap["extra_headers"].(map[string]any); ok {
+		for k, val := range extraHeaders {
+			if vs, ok := val.(string); ok {
+				info.Extra["header:"+k] = vs
+			}
+		}
+	}
+	return info, nil
+}
+
+// Provider implements outbound.TokenProvider using a JavaScript (Sobek) script.
 // The script receives (upstream, ctx) and must return an object:
 //
 //	{ token?: string, raw_headers?: object, expiry?: number, error?: string }
@@ -61,17 +251,10 @@ type Provider struct {
 	program      *sobek.Program
 	timeout      time.Duration
 	env          map[string]string
-	cache        *jsCache
-	scriptCache  *jsScriptCache // persists across callScript invocations
+	credentials  credentialCache
+	scriptCache  *scriptCache // persists across callScript invocations
 	httpClient   *http.Client
 	pool         config.PoolAcquirer
-}
-
-type jsCache struct {
-	mu         sync.Mutex
-	token      string
-	expiry     int64 // unix timestamp; 0 = fetch on next call
-	rawHeaders map[string]string
 }
 
 // NewProvider creates a Provider by reading and pre-compiling the JS script.
@@ -95,8 +278,7 @@ func NewProvider(upstreamName string, cfg config.JSOutboundConfig, pool config.P
 		program:      prog,
 		timeout:      timeout,
 		env:          cfg.Env,
-		cache:        &jsCache{},
-		scriptCache:  newJSScriptCache(),
+		scriptCache:  newScriptCache(),
 		httpClient:   &http.Client{Timeout: defaultFetchTimeout},
 		pool:         pool,
 	}, nil
@@ -105,41 +287,41 @@ func NewProvider(upstreamName string, cfg config.JSOutboundConfig, pool config.P
 // Token returns the current Bearer token, invoking the JS script if the cache has expired.
 // Returns empty string if the script provides raw headers instead.
 func (p *Provider) Token(ctx context.Context) (string, error) {
-	if err := p.ensureToken(ctx); err != nil {
+	if err := p.ensureCredentials(ctx); err != nil {
 		return "", err
 	}
-	p.cache.mu.Lock()
-	defer p.cache.mu.Unlock()
-	if len(p.cache.rawHeaders) > 0 {
+	p.credentials.mu.Lock()
+	defer p.credentials.mu.Unlock()
+	if len(p.credentials.rawHeaders) > 0 {
 		return "", nil
 	}
-	return p.cache.token, nil
+	return p.credentials.token, nil
 }
 
 // RawHeaders returns the raw headers map, invoking the JS script if the cache has expired.
 func (p *Provider) RawHeaders(ctx context.Context) (map[string]string, error) {
-	if err := p.ensureToken(ctx); err != nil {
+	if err := p.ensureCredentials(ctx); err != nil {
 		return nil, err
 	}
-	p.cache.mu.Lock()
-	defer p.cache.mu.Unlock()
-	if len(p.cache.rawHeaders) == 0 {
+	p.credentials.mu.Lock()
+	defer p.credentials.mu.Unlock()
+	if len(p.credentials.rawHeaders) == 0 {
 		return nil, nil
 	}
-	out := make(map[string]string, len(p.cache.rawHeaders))
-	for k, v := range p.cache.rawHeaders {
+	out := make(map[string]string, len(p.credentials.rawHeaders))
+	for k, v := range p.credentials.rawHeaders {
 		out[k] = v
 	}
 	return out, nil
 }
 
-// ensureToken refreshes the cached credentials if expired or absent.
-func (p *Provider) ensureToken(ctx context.Context) error {
-	p.cache.mu.Lock()
-	defer p.cache.mu.Unlock()
+// ensureCredentials refreshes the cached credentials if expired or absent.
+func (p *Provider) ensureCredentials(ctx context.Context) error {
+	p.credentials.mu.Lock()
+	defer p.credentials.mu.Unlock()
 
 	now := time.Now().Unix()
-	if p.cache.expiry != 0 && now < p.cache.expiry {
+	if p.credentials.expiry != 0 && now < p.credentials.expiry {
 		return nil
 	}
 
@@ -148,13 +330,13 @@ func (p *Provider) ensureToken(ctx context.Context) error {
 		return err
 	}
 
-	p.cache.token = token
+	p.credentials.token = token
 	if expiry == 0 {
-		p.cache.expiry = now + noCacheExpiry
+		p.credentials.expiry = now + noCacheExpiry
 	} else {
-		p.cache.expiry = expiry
+		p.credentials.expiry = expiry
 	}
-	p.cache.rawHeaders = rawHeaders
+	p.credentials.rawHeaders = rawHeaders
 	return nil
 }
 
@@ -180,7 +362,7 @@ func (p *Provider) callScript(ctx context.Context) (token string, expiry int64, 
 		defer timer.Stop()
 	}
 
-	ctxObj := p.buildCtxObject(scriptCtx, rt, p.scriptCache)
+	ctxObj := buildCtxObject(scriptCtx, rt, p.env, p.scriptCache, p.httpClient)
 	if err := rt.Set("__mcp_ctx__", ctxObj); err != nil {
 		return "", 0, nil, fmt.Errorf("setting js outbound ctx: %w", err)
 	}
@@ -199,11 +381,11 @@ func (p *Provider) callScript(ctx context.Context) (token string, expiry int64, 
 		return "", 0, nil, fmt.Errorf("js get_upstream_token: %w", err)
 	}
 
-	return parseResult(result)
+	return parseOutboundResult(result)
 }
 
-// parseResult extracts token, expiry, and rawHeaders from the JS return value.
-func parseResult(result sobek.Value) (token string, expiry int64, rawHeaders map[string]string, err error) {
+// parseOutboundResult extracts token, expiry, and rawHeaders from the JS return value.
+func parseOutboundResult(result sobek.Value) (token string, expiry int64, rawHeaders map[string]string, err error) {
 	exported := result.Export()
 	resMap, ok := exported.(map[string]any)
 	if !ok {
@@ -243,21 +425,21 @@ func parseResult(result sobek.Value) (token string, expiry int64, rawHeaders map
 	return token, expiry, rawHeaders, nil
 }
 
-// buildCtxObject constructs the JS ctx object for outbound auth scripts.
+// buildCtxObject constructs the JS ctx object exposed to auth scripts.
 // Provides: ctx.env, ctx.log, ctx.jwt.decode, ctx.cache.get/set, ctx.fetch.
-func (p *Provider) buildCtxObject(ctx context.Context, rt *sobek.Runtime, sc *jsScriptCache) *sobek.Object {
+func buildCtxObject(ctx context.Context, rt *sobek.Runtime, env map[string]string, sc *scriptCache, client *http.Client) *sobek.Object {
 	ctxObj := rt.NewObject()
 
 	// ctx.env — read-only environment variables.
 	envObj := rt.NewObject()
-	for k, val := range p.env {
+	for k, val := range env {
 		expanded := os.ExpandEnv(val)
 		if err := envObj.Set(k, expanded); err != nil {
-			slog.Warn("js outbound auth: failed to set env var", "key", k, "error", err)
+			slog.Warn("js auth: failed to set env var", "key", k, "error", err)
 		}
 	}
 	if err := ctxObj.Set("env", envObj); err != nil {
-		slog.Warn("js outbound auth: failed to set ctx.env", "error", err)
+		slog.Warn("js auth: failed to set ctx.env", "error", err)
 	}
 
 	// ctx.log(level, msg) — structured logging.
@@ -273,7 +455,7 @@ func (p *Provider) buildCtxObject(ctx context.Context, rt *sobek.Runtime, sc *js
 			slog.Info(msg)
 		}
 	}); err != nil {
-		slog.Warn("js outbound auth: failed to set ctx.log", "error", err)
+		slog.Warn("js auth: failed to set ctx.log", "error", err)
 	}
 
 	// ctx.jwt.decode(token) — decode a JWT payload without verification.
@@ -297,10 +479,10 @@ func (p *Provider) buildCtxObject(ctx context.Context, rt *sobek.Runtime, sc *js
 		}
 		return rt.ToValue(claims)
 	}); err != nil {
-		slog.Warn("js outbound auth: failed to set ctx.jwt.decode", "error", err)
+		slog.Warn("js auth: failed to set ctx.jwt.decode", "error", err)
 	}
 	if err := ctxObj.Set("jwt", jwtObj); err != nil {
-		slog.Warn("js outbound auth: failed to set ctx.jwt", "error", err)
+		slog.Warn("js auth: failed to set ctx.jwt", "error", err)
 	}
 
 	// ctx.cache.get(key) / ctx.cache.set(key, value, ttlSeconds) — shared in-memory cache.
@@ -316,7 +498,7 @@ func (p *Provider) buildCtxObject(ctx context.Context, rt *sobek.Runtime, sc *js
 		}
 		return rt.ToValue(val)
 	}); err != nil {
-		slog.Warn("js outbound auth: failed to set ctx.cache.get", "error", err)
+		slog.Warn("js auth: failed to set ctx.cache.get", "error", err)
 	}
 	if err := cacheObj.Set("set", func(call sobek.FunctionCall) sobek.Value {
 		if len(call.Arguments) < 2 {
@@ -331,23 +513,23 @@ func (p *Provider) buildCtxObject(ctx context.Context, rt *sobek.Runtime, sc *js
 		sc.set(key, val, ttl)
 		return sobek.Undefined()
 	}); err != nil {
-		slog.Warn("js outbound auth: failed to set ctx.cache.set", "error", err)
+		slog.Warn("js auth: failed to set ctx.cache.set", "error", err)
 	}
 	if err := ctxObj.Set("cache", cacheObj); err != nil {
-		slog.Warn("js outbound auth: failed to set ctx.cache", "error", err)
+		slog.Warn("js auth: failed to set ctx.cache", "error", err)
 	}
 
 	// ctx.fetch(url, opts) — sandboxed HTTP client.
 	if err := ctxObj.Set("fetch", func(call sobek.FunctionCall) sobek.Value {
-		return jsFetch(ctx, rt, p.httpClient, call)
+		return jsFetch(ctx, rt, client, call)
 	}); err != nil {
-		slog.Warn("js outbound auth: failed to set ctx.fetch", "error", err)
+		slog.Warn("js auth: failed to set ctx.fetch", "error", err)
 	}
 
 	return ctxObj
 }
 
-// jsFetch implements ctx.fetch(url, opts) for outbound auth scripts.
+// jsFetch implements ctx.fetch(url, opts) for auth scripts.
 func jsFetch(ctx context.Context, rt *sobek.Runtime, client *http.Client, call sobek.FunctionCall) sobek.Value {
 	if len(call.Arguments) == 0 {
 		panic(rt.NewTypeError("ctx.fetch requires a URL argument"))
@@ -388,7 +570,7 @@ func jsFetch(ctx context.Context, rt *sobek.Runtime, client *http.Client, call s
 	}
 	defer func() {
 		if closeErr := resp.Body.Close(); closeErr != nil {
-			slog.Warn("js outbound auth: closing fetch response body", "error", closeErr)
+			slog.Warn("js auth: closing fetch response body", "error", closeErr)
 		}
 	}()
 
@@ -406,47 +588,6 @@ func jsFetch(ctx context.Context, rt *sobek.Runtime, client *http.Client, call s
 		return rt.ToValue(parsed)
 	}
 	return rt.ToValue(string(body))
-}
-
-// jsScriptCache is a thread-safe key-value cache with optional TTL.
-// It is shared across callScript invocations within the same Provider,
-// allowing scripts to cache tokens between invocations via ctx.cache.get/set.
-type jsScriptCache struct {
-	mu    sync.Mutex
-	items map[string]jsScriptCacheItem
-}
-
-type jsScriptCacheItem struct {
-	value     any
-	expiresAt time.Time
-}
-
-func newJSScriptCache() *jsScriptCache {
-	return &jsScriptCache{items: make(map[string]jsScriptCacheItem)}
-}
-
-func (c *jsScriptCache) get(key string) any {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	item, ok := c.items[key]
-	if !ok {
-		return nil
-	}
-	if !item.expiresAt.IsZero() && time.Now().After(item.expiresAt) {
-		delete(c.items, key)
-		return nil
-	}
-	return item.value
-}
-
-func (c *jsScriptCache) set(key string, value any, ttlSeconds float64) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	var exp time.Time
-	if ttlSeconds > 0 {
-		exp = time.Now().Add(time.Duration(ttlSeconds * float64(time.Second)))
-	}
-	c.items[key] = jsScriptCacheItem{value: value, expiresAt: exp}
 }
 
 // compileScript pre-processes and compiles a JavaScript script source into a

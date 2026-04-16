@@ -782,7 +782,9 @@ func (r *MCPProxyReconciler) reconcileHTTPRoute(ctx context.Context, proxy *v1al
 
 	if proxy.Spec.GatewayRef == nil {
 		// No GatewayRef — delete any existing HTTPRoute.
-		if apierrors.IsNotFound(err) {
+		// Treat "Gateway API CRDs not installed" the same as "resource not found":
+		// there is nothing to clean up.
+		if apierrors.IsNotFound(err) || apimeta.IsNoMatchError(err) {
 			return nil
 		}
 		if err != nil {

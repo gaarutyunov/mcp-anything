@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"sync"
 
 	"github.com/gaarutyunov/mcp-anything/pkg/config"
+	"github.com/gaarutyunov/mcp-anything/pkg/registry"
 )
 
 const (
@@ -21,25 +21,18 @@ const (
 // via Register in its init() function.
 type Factory func(ctx context.Context, cfg config.RuntimeConfig) (Runtime, error)
 
-var (
-	mu        sync.RWMutex
-	factories = map[string]Factory{}
-)
+var factories registry.Registry[Factory]
 
 // Register registers a Factory under the given name. Typically called from init()
 // in a scripting sub-package. Logs and skips if name is empty or already registered.
 func Register(name string, f Factory) {
-	mu.Lock()
-	defer mu.Unlock()
 	if name == "" {
 		slog.Error("runtime.Register: name must not be empty")
 		return
 	}
-	if _, dup := factories[name]; dup {
+	if !factories.RegisterIfAbsent(name, f) {
 		slog.Error("runtime.Register: duplicate runtime name", "name", name)
-		return
 	}
-	factories[name] = f
 }
 
 // Registry holds a bounded Runtime pool for every registered scripting runtime.
@@ -53,12 +46,7 @@ type Registry struct {
 // NewRegistry creates a Registry by calling every registered Factory.
 // Returns an error if any factory returns an error.
 func NewRegistry(ctx context.Context, cfg config.RuntimeConfig) (*Registry, error) {
-	mu.RLock()
-	snap := make(map[string]Factory, len(factories))
-	for k, v := range factories {
-		snap[k] = v
-	}
-	mu.RUnlock()
+	snap := factories.Snapshot()
 
 	pools := make(map[string]Runtime, len(snap))
 	for name, f := range snap {

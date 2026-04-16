@@ -31,3 +31,18 @@ type AuthRequiredError struct {
 func (e *AuthRequiredError) Error() string {
 	return "authorization required: visit " + e.AuthURL
 }
+
+// ProviderBase can be embedded in any concrete TokenProvider struct to provide
+// the Middleware() method directly on the struct.
+// Call NewProviderBase(p) in the constructor to wire the self-reference.
+type ProviderBase struct {
+	self TokenProvider
+}
+
+// NewProviderBase creates a ProviderBase wired to p.
+// Assign the result to the embedded ProviderBase field of your concrete type:
+//
+//	p.ProviderBase = outbound.NewProviderBase(p)
+func NewProviderBase(p TokenProvider) ProviderBase {
+	return ProviderBase{self: p}
+}

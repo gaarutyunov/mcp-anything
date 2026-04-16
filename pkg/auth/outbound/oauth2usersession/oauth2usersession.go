@@ -33,12 +33,13 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
-		return outbound.Middleware(p), nil
+		return p.Middleware(), nil
 	})
 }
 
 // Provider implements the oauth2_user_session outbound auth strategy.
 type Provider struct {
+	outbound.ProviderBase
 	store       config.OAuthTokenStore
 	callbackReg config.OAuthCallbackRegistrar
 	upstream    string
@@ -88,13 +89,15 @@ func newProvider(ctx context.Context, cfg *config.OutboundAuthConfig) (*Provider
 		cfg.Upstream, authURL, tokenURL, ocfg.ClientID, clientSecret, ocfg.Scopes, ocfg.CallbackURL,
 	)
 
-	return &Provider{
+	p := &Provider{
 		store:       cfg.OAuthTokenStore,
 		callbackReg: cfg.OAuthCallbackReg,
 		upstream:    cfg.Upstream,
 		oauth2Cfg:   oauth2Cfg,
 		httpClient:  &http.Client{Timeout: 30 * time.Second},
-	}, nil
+	}
+	p.ProviderBase = outbound.NewProviderBase(p)
+	return p, nil
 }
 
 // Token returns the current access token for the user, refreshing or prompting OAuth flow as needed.

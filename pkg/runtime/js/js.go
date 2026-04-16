@@ -69,7 +69,7 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
-		return inbound.ValidatorMiddleware(v, ""), nil
+		return v.Middleware(""), nil
 	})
 	pkgmiddleware.Register("outbound/js", func(_ context.Context, cfg any) (func(http.Handler) http.Handler, error) {
 		oc, ok := cfg.(*config.OutboundAuthConfig)
@@ -83,7 +83,7 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
-		return outbound.Middleware(p), nil
+		return p.Middleware(), nil
 	})
 }
 
@@ -144,6 +144,7 @@ type credentialCache struct {
 // The pre-compiled program is reused across calls. The shared pool bounds
 // the maximum number of concurrent JS runtimes to prevent OOM under load.
 type Validator struct {
+	inbound.ValidatorBase
 	program     *sobek.Program
 	timeout     time.Duration
 	env         map[string]string
@@ -168,14 +169,16 @@ func NewValidator(cfg config.JSAuthConfig, pool config.PoolAcquirer) (*Validator
 	if timeout <= 0 {
 		timeout = defaultTimeout
 	}
-	return &Validator{
+	v := &Validator{
 		program:     prog,
 		timeout:     timeout,
 		env:         cfg.Env,
 		scriptCache: newScriptCache(),
 		httpClient:  &http.Client{Timeout: defaultFetchTimeout},
 		pool:        pool,
-	}, nil
+	}
+	v.ValidatorBase = inbound.NewValidatorBase(v)
+	return v, nil
 }
 
 // ValidateToken runs the JS script with the token and returns identity info on success.
@@ -272,6 +275,7 @@ func parseInboundResult(result sobek.Value) (*inbound.TokenInfo, error) {
 // re-invoking the script on every request. The shared pool bounds the maximum number
 // of concurrent JS runtimes to prevent OOM under load.
 type Provider struct {
+	outbound.ProviderBase
 	upstreamName string
 	program      *sobek.Program
 	timeout      time.Duration
@@ -298,7 +302,7 @@ func NewProvider(upstreamName string, cfg config.JSOutboundConfig, pool config.P
 	if timeout <= 0 {
 		timeout = defaultTimeout
 	}
-	return &Provider{
+	p := &Provider{
 		upstreamName: upstreamName,
 		program:      prog,
 		timeout:      timeout,
@@ -306,7 +310,9 @@ func NewProvider(upstreamName string, cfg config.JSOutboundConfig, pool config.P
 		scriptCache:  newScriptCache(),
 		httpClient:   &http.Client{Timeout: defaultFetchTimeout},
 		pool:         pool,
-	}, nil
+	}
+	p.ProviderBase = outbound.NewProviderBase(p)
+	return p, nil
 }
 
 // Token returns the current Bearer token, invoking the JS script if the cache has expired.

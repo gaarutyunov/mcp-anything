@@ -55,7 +55,7 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
-		return inbound.ValidatorMiddleware(v, ""), nil
+		return v.Middleware(""), nil
 	})
 	pkgmiddleware.Register("outbound/lua", func(_ context.Context, cfg any) (func(http.Handler) http.Handler, error) {
 		oc, ok := cfg.(*config.OutboundAuthConfig)
@@ -69,7 +69,7 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
-		return outbound.Middleware(p), nil
+		return p.Middleware(), nil
 	})
 }
 
@@ -78,6 +78,7 @@ func init() {
 // allowed (bool), status (int), extra_headers (table), error_msg (string).
 // The shared pool bounds the maximum number of concurrent Lua runtimes to prevent OOM.
 type Validator struct {
+	inbound.ValidatorBase
 	proto   *lua.FunctionProto
 	pool    config.PoolAcquirer
 	timeout time.Duration
@@ -103,11 +104,13 @@ func NewValidator(cfg config.LuaAuthConfig, pool config.PoolAcquirer) (*Validato
 		timeout = defaultTimeout
 	}
 
-	return &Validator{
+	v := &Validator{
 		proto:   proto,
 		timeout: timeout,
 		pool:    pool,
-	}, nil
+	}
+	v.ValidatorBase = inbound.NewValidatorBase(v)
+	return v, nil
 }
 
 // ValidateToken calls the Lua script with the token and returns identity info on success.
@@ -158,6 +161,7 @@ func (v *Validator) ValidateToken(ctx context.Context, token string) (*inbound.T
 // token (string), expiry_unix (int), raw_headers (table), error_msg (string).
 // The shared pool bounds the maximum number of concurrent Lua runtimes to prevent OOM.
 type Provider struct {
+	outbound.ProviderBase
 	upstreamName string
 	proto        *lua.FunctionProto
 	pool         config.PoolAcquirer
@@ -191,12 +195,14 @@ func NewProvider(upstreamName string, cfg config.LuaOutboundConfig, pool config.
 		timeout = defaultTimeout
 	}
 
-	return &Provider{
+	p := &Provider{
 		upstreamName: upstreamName,
 		proto:        proto,
 		timeout:      timeout,
 		pool:         pool,
-	}, nil
+	}
+	p.ProviderBase = outbound.NewProviderBase(p)
+	return p, nil
 }
 
 // Token returns the current token, invoking the Lua script if the cache has expired.

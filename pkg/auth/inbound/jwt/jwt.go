@@ -25,12 +25,13 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
-		return inbound.ValidatorMiddleware(v, ""), nil
+		return v.Middleware(""), nil
 	})
 }
 
 // Validator validates JWT Bearer tokens using OIDC/JWKS.
 type Validator struct {
+	inbound.ValidatorBase
 	verifier *oidc.IDTokenVerifier
 }
 
@@ -51,7 +52,9 @@ func NewValidator(ctx context.Context, cfg config.JWTAuthConfig) (*Validator, er
 		verifier = provider.Verifier(oidcConfig)
 	}
 
-	return &Validator{verifier: verifier}, nil
+	v := &Validator{verifier: verifier}
+	v.ValidatorBase = inbound.NewValidatorBase(v)
+	return v, nil
 }
 
 // ValidateToken verifies the JWT signature, expiry, and audience, then returns TokenInfo.

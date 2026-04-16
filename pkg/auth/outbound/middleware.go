@@ -8,8 +8,9 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// Middleware wraps a TokenProvider as an HTTP middleware for the per-tool execution chain.
-// It resolves outbound credentials and stores them in context for the terminal handler.
+// Middleware returns an HTTP middleware for the per-tool execution chain.
+// It resolves outbound credentials from the embedded provider and stores them in context
+// for the terminal handler.
 //
 // On success, auth headers are stored via withHeaders.
 // On AuthRequiredError (e.g. OAuth2 user redirect needed), a CallToolResult is stored
@@ -18,12 +19,12 @@ import (
 //
 // next is always called so that the terminal handler can write the result to the pipeline state.
 // The terminal handler must check AuthResultFromContext before proceeding with the HTTP call.
-func Middleware(provider TokenProvider) func(http.Handler) http.Handler {
+func (pb *ProviderBase) Middleware() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ctx := r.Context()
 
-			rawHeaders, err := provider.RawHeaders(ctx)
+			rawHeaders, err := pb.self.RawHeaders(ctx)
 			if err != nil {
 				ctx = withAuthResult(ctx, authErrResult(err))
 				next.ServeHTTP(w, r.WithContext(ctx))
@@ -33,7 +34,7 @@ func Middleware(provider TokenProvider) func(http.Handler) http.Handler {
 			if len(rawHeaders) > 0 {
 				ctx = withHeaders(ctx, rawHeaders)
 			} else {
-				token, tokenErr := provider.Token(ctx)
+				token, tokenErr := pb.self.Token(ctx)
 				if tokenErr != nil {
 					ctx = withAuthResult(ctx, authErrResult(tokenErr))
 					next.ServeHTTP(w, r.WithContext(ctx))

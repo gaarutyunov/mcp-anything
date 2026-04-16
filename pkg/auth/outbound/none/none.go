@@ -17,12 +17,21 @@ func init() {
 		if _, ok := cfg.(*config.OutboundAuthConfig); !ok {
 			return nil, fmt.Errorf("outbound/none: expected *config.OutboundAuthConfig, got %T", cfg)
 		}
-		return outbound.Middleware(&Provider{}), nil
+		return NewProvider().Middleware(), nil
 	})
 }
 
 // Provider is a no-op provider that adds no authentication headers.
-type Provider struct{}
+type Provider struct {
+	outbound.ProviderBase
+}
+
+// NewProvider creates a no-op Provider.
+func NewProvider() *Provider {
+	p := &Provider{}
+	p.ProviderBase = outbound.NewProviderBase(p)
+	return p
+}
 
 // Token returns an empty token; no authentication is injected.
 func (p *Provider) Token(_ context.Context) (string, error) { return "", nil }

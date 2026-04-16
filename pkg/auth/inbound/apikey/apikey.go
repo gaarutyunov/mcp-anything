@@ -25,13 +25,14 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
-		return inbound.ValidatorMiddleware(v, ic.APIKey.Header), nil
+		return v.Middleware(ic.APIKey.Header), nil
 	})
 }
 
 // Validator validates tokens by checking them against a set of allowed API keys.
 // The "token" passed to ValidateToken is the value of the configured header.
 type Validator struct {
+	inbound.ValidatorBase
 	keys map[string]struct{}
 }
 
@@ -49,7 +50,9 @@ func NewValidator(cfg config.APIKeyAuthConfig) (*Validator, error) {
 	if len(keys) == 0 {
 		return nil, fmt.Errorf("no API keys found in environment variable %q", cfg.KeysEnv)
 	}
-	return &Validator{keys: keys}, nil
+	v := &Validator{keys: keys}
+	v.ValidatorBase = inbound.NewValidatorBase(v)
+	return v, nil
 }
 
 // ValidateToken checks whether token (the API key value) is in the allowed key set.

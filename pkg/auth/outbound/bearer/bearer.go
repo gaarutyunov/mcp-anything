@@ -19,18 +19,21 @@ func init() {
 		if !ok {
 			return nil, fmt.Errorf("outbound/bearer: expected *config.OutboundAuthConfig, got %T", cfg)
 		}
-		return outbound.Middleware(NewProvider(oc.Bearer)), nil
+		return NewProvider(oc.Bearer).Middleware(), nil
 	})
 }
 
 // Provider injects a static Bearer token read from an environment variable.
 type Provider struct {
+	outbound.ProviderBase
 	tokenEnv string
 }
 
 // NewProvider creates a Provider from config.
 func NewProvider(cfg config.BearerOutboundConfig) *Provider {
-	return &Provider{tokenEnv: cfg.TokenEnv}
+	p := &Provider{tokenEnv: cfg.TokenEnv}
+	p.ProviderBase = outbound.NewProviderBase(p)
+	return p
 }
 
 // Token returns the Bearer token value from the configured environment variable.

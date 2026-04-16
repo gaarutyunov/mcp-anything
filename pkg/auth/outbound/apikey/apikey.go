@@ -19,12 +19,13 @@ func init() {
 		if !ok {
 			return nil, fmt.Errorf("outbound/api_key: expected *config.OutboundAuthConfig, got %T", cfg)
 		}
-		return outbound.Middleware(NewProvider(oc.APIKey)), nil
+		return NewProvider(oc.APIKey).Middleware(), nil
 	})
 }
 
 // Provider injects an API key into a configured request header.
 type Provider struct {
+	outbound.ProviderBase
 	header   string
 	valueEnv string
 	prefix   string
@@ -32,11 +33,13 @@ type Provider struct {
 
 // NewProvider creates a Provider from config.
 func NewProvider(cfg config.APIKeyOutboundConfig) *Provider {
-	return &Provider{
+	p := &Provider{
 		header:   cfg.Header,
 		valueEnv: cfg.ValueEnv,
 		prefix:   cfg.Prefix,
 	}
+	p.ProviderBase = outbound.NewProviderBase(p)
+	return p
 }
 
 // Token returns empty string because API key auth uses RawHeaders().

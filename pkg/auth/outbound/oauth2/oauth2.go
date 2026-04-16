@@ -26,13 +26,14 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
-		return outbound.Middleware(p), nil
+		return p.Middleware(), nil
 	})
 }
 
 // Provider obtains tokens via the OAuth2 client credentials flow.
 // It caches the token and refreshes it automatically before expiry.
 type Provider struct {
+	outbound.ProviderBase
 	src gooauth2.TokenSource
 }
 
@@ -46,7 +47,9 @@ func NewProvider(ctx context.Context, cfg config.OAuth2CCConfig) (*Provider, err
 		Scopes:       cfg.Scopes,
 	}
 	src := gooauth2.ReuseTokenSource(nil, ccCfg.TokenSource(ctx))
-	return &Provider{src: src}, nil
+	p := &Provider{src: src}
+	p.ProviderBase = outbound.NewProviderBase(p)
+	return p, nil
 }
 
 // Token returns a valid access token, refreshing if the cached token has expired.

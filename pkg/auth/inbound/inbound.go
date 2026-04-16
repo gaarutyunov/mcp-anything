@@ -49,3 +49,18 @@ func TokenInfoFromContext(ctx context.Context) *TokenInfo {
 	v, _ := ctx.Value(contextKey{}).(*TokenInfo)
 	return v
 }
+
+// ValidatorBase can be embedded in any concrete TokenValidator struct to provide
+// the Middleware() method directly on the struct.
+// Call NewValidatorBase(v) in the constructor to wire the self-reference.
+type ValidatorBase struct {
+	self TokenValidator
+}
+
+// NewValidatorBase creates a ValidatorBase wired to v.
+// Assign the result to the embedded ValidatorBase field of your concrete type:
+//
+//	v.ValidatorBase = inbound.NewValidatorBase(v)
+func NewValidatorBase(v TokenValidator) ValidatorBase {
+	return ValidatorBase{self: v}
+}

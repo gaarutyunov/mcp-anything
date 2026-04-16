@@ -11,11 +11,12 @@ import (
 	"strings"
 )
 
-// ValidatorMiddleware returns an HTTP middleware that validates inbound Bearer tokens
+// Middleware returns an HTTP middleware that validates inbound Bearer tokens
 // (or API keys when apiKeyHeader is non-empty).
-// It extracts the token, calls ValidateToken, and stores the resulting TokenInfo in ctx.
+// It extracts the token, calls ValidateToken on the embedded validator, and stores
+// the resulting TokenInfo in the request context.
 // It does NOT implement per-tool auth bypass — use DispatchMiddleware for that.
-func ValidatorMiddleware(validator TokenValidator, apiKeyHeader string) func(http.Handler) http.Handler {
+func (vb *ValidatorBase) Middleware(apiKeyHeader string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var token string
@@ -33,7 +34,7 @@ func ValidatorMiddleware(validator TokenValidator, apiKeyHeader string) func(htt
 				return
 			}
 
-			info, err := validator.ValidateToken(r.Context(), token)
+			info, err := vb.self.ValidateToken(r.Context(), token)
 			if err != nil {
 				var denied *DeniedError
 				if errors.As(err, &denied) {

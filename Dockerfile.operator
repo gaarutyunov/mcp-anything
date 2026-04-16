@@ -4,12 +4,16 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -o /operator ./cmd/operator
+RUN CGO_ENABLED=0 go build -cover -coverpkg=github.com/gaarutyunov/mcp-anything/... -o /operator ./cmd/operator
 
 FROM alpine:3.21
 RUN apk add --no-cache ca-certificates \
     && addgroup -S -g 65532 operator \
     && adduser -S -u 65532 -G operator operator
+# GOCOVERDIR is where the coverage-instrumented binary writes its data on exit.
+# Bind-mount a host directory here to collect coverage from the container.
+ENV GOCOVERDIR=/tmp/gocov
+RUN mkdir -p /tmp/gocov && chown 65532:65532 /tmp/gocov
 COPY --from=builder /operator /usr/local/bin/operator
 RUN chown 65532:65532 /usr/local/bin/operator
 USER 65532:65532

@@ -1,0 +1,12 @@
+coverage:
+  status:
+    project:
+      default:
+        # 80% threshold for the overall project (existing code).
+        target: 80%
+        threshold: 1%
+    patch:
+      default:
+        # 100% threshold for new/changed lines in PRs.
+        target: 100%
+        threshold: 0%

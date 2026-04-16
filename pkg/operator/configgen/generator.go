@@ -27,6 +27,10 @@ type generatedProxyConfig struct {
 	Telemetry   *generatedTelemetryConfig   `yaml:"telemetry,omitempty"`
 	InboundAuth *generatedInboundAuthConfig `yaml:"inbound_auth,omitempty"`
 	Upstreams   []generatedUpstreamConfig   `yaml:"upstreams"`
+	// Extensions holds additional top-level config keys contributed by registered
+	// proxy section factories. The inline tag merges them into the top-level YAML
+	// output so that registered proxy section factories can find them at their expected paths.
+	Extensions map[string]interface{} `yaml:",inline"`
 }
 
 type generatedServerConfig struct {
@@ -64,6 +68,9 @@ type generatedUpstreamConfig struct {
 	Transport    *generatedTransportConfig  `yaml:"transport,omitempty"`
 	Validation   *generatedValidationConfig `yaml:"validation,omitempty"`
 	Commands     []generatedCommandConfig   `yaml:"commands,omitempty"`
+	// Extensions holds additional upstream-level config keys contributed by registered
+	// upstream section factories. The inline tag merges them into this upstream's YAML object.
+	Extensions map[string]interface{} `yaml:",inline"`
 }
 
 type generatedOpenAPIConfig struct {
@@ -126,8 +133,6 @@ type generatedValidationConfig struct {
 // Generate translates MCPProxy and its selected MCPUpstream resources into a
 // config.ProxyConfig and returns it serialised as YAML bytes.
 func Generate(ctx context.Context, proxy *v1alpha1.MCPProxy, upstreams []v1alpha1.MCPUpstream) ([]byte, error) {
-	_ = ctx // reserved for future async lookups
-
 	cfg := generatedProxyConfig{}
 
 	// Server configuration.
@@ -170,13 +175,22 @@ func Generate(ctx context.Context, proxy *v1alpha1.MCPProxy, upstreams []v1alpha
 	upstreamCfgs := make([]generatedUpstreamConfig, 0, len(upstreams))
 	for i := range upstreams {
 		up := &upstreams[i]
-		upCfg, err := buildUpstreamConfig(up)
+		upCfg, err := buildUpstreamConfig(ctx, up)
 		if err != nil {
 			return nil, fmt.Errorf("building upstream config for %s/%s: %w", up.Namespace, up.Name, err)
 		}
 		upstreamCfgs = append(upstreamCfgs, upCfg)
 	}
 	cfg.Upstreams = upstreamCfgs
+
+	// Apply registered proxy section factories.
+	proxyExts := make(map[string]interface{})
+	if err := applyProxyExtensions(ctx, proxy, upstreams, proxyExts); err != nil {
+		return nil, fmt.Errorf("applying proxy extensions: %w", err)
+	}
+	if len(proxyExts) > 0 {
+		cfg.Extensions = proxyExts
+	}
 
 	data, err := yaml.Marshal(cfg)
 	if err != nil {
@@ -186,7 +200,7 @@ func Generate(ctx context.Context, proxy *v1alpha1.MCPProxy, upstreams []v1alpha
 }
 
 // buildUpstreamConfig converts a single MCPUpstream into a generatedUpstreamConfig.
-func buildUpstreamConfig(up *v1alpha1.MCPUpstream) (generatedUpstreamConfig, error) {
+func buildUpstreamConfig(ctx context.Context, up *v1alpha1.MCPUpstream) (generatedUpstreamConfig, error) {
 	uc := generatedUpstreamConfig{
 		Name:       fmt.Sprintf("%s-%s", up.Namespace, up.Name),
 		Enabled:    true,
@@ -199,12 +213,27 @@ func buildUpstreamConfig(up *v1alpha1.MCPUpstream) (generatedUpstreamConfig, err
 		upstreamType = "http"
 	}
 
+	var err error
 	switch upstreamType {
 	case "command":
-		return buildCommandUpstreamConfig(up, uc)
+		uc, err = buildCommandUpstreamConfig(up, uc)
 	default:
-		return buildHTTPUpstreamConfig(up, uc)
+		uc, err = buildHTTPUpstreamConfig(up, uc)
 	}
+	if err != nil {
+		return generatedUpstreamConfig{}, err
+	}
+
+	// Apply registered upstream section factories.
+	upstreamExts := make(map[string]interface{})
+	if err := applyUpstreamExtensions(ctx, up, upstreamExts); err != nil {
+		return generatedUpstreamConfig{}, fmt.Errorf("applying extensions for upstream %s/%s: %w", up.Namespace, up.Name, err)
+	}
+	if len(upstreamExts) > 0 {
+		uc.Extensions = upstreamExts
+	}
+
+	return uc, nil
 }
 
 // buildCommandUpstreamConfig fills in a generatedUpstreamConfig for a command upstream.

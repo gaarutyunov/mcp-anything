@@ -35,7 +35,7 @@ const noCacheExpiry = int64(1)
 
 func init() {
 	// Register runtime pools for JS auth and script execution.
-	pkgruntime.Register("js/auth", func(_ context.Context, cfg config.RuntimeConfig) (pkgruntime.Runtime, error) {
+	if err := pkgruntime.Register("js/auth", func(_ context.Context, cfg config.RuntimeConfig) (pkgruntime.Runtime, error) {
 		max := cfg.JS.MaxAuthVMs
 		if max == 0 {
 			max = int(pkgruntime.DefaultMaxAuthVMs)
@@ -44,8 +44,11 @@ func init() {
 			return nil, fmt.Errorf("runtime.js.max_auth_vms must be > 0, got %d", max)
 		}
 		return pkgruntime.NewPool(int64(max))
-	})
-	pkgruntime.Register("js/script", func(_ context.Context, cfg config.RuntimeConfig) (pkgruntime.Runtime, error) {
+	}); err != nil {
+		slog.Error("registering js/auth runtime", "error", err)
+		os.Exit(1)
+	}
+	if err := pkgruntime.Register("js/script", func(_ context.Context, cfg config.RuntimeConfig) (pkgruntime.Runtime, error) {
 		max := cfg.JS.MaxScriptVMs
 		if max == 0 {
 			max = int(pkgruntime.DefaultMaxScriptVMs)
@@ -54,7 +57,10 @@ func init() {
 			return nil, fmt.Errorf("runtime.js.max_script_vms must be > 0, got %d", max)
 		}
 		return pkgruntime.NewPool(int64(max))
-	})
+	}); err != nil {
+		slog.Error("registering js/script runtime", "error", err)
+		os.Exit(1)
+	}
 
 	// Register inbound and outbound middleware strategies.
 	pkgmiddleware.Register("inbound/js", func(_ context.Context, cfg any) (func(http.Handler) http.Handler, error) {

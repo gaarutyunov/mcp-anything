@@ -6,6 +6,7 @@ package lua
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -31,7 +32,7 @@ const noCacheExpiry = int64(1)
 
 func init() {
 	// Register runtime pool for Lua auth execution.
-	pkgruntime.Register("lua/auth", func(_ context.Context, cfg config.RuntimeConfig) (pkgruntime.Runtime, error) {
+	if err := pkgruntime.Register("lua/auth", func(_ context.Context, cfg config.RuntimeConfig) (pkgruntime.Runtime, error) {
 		max := cfg.Lua.MaxAuthVMs
 		if max == 0 {
 			max = int(pkgruntime.DefaultMaxAuthVMs)
@@ -40,7 +41,10 @@ func init() {
 			return nil, fmt.Errorf("runtime.lua.max_auth_vms must be > 0, got %d", max)
 		}
 		return pkgruntime.NewPool(int64(max))
-	})
+	}); err != nil {
+		slog.Error("registering lua/auth runtime", "error", err)
+		os.Exit(1)
+	}
 
 	// Register inbound and outbound middleware strategies.
 	pkgmiddleware.Register("inbound/lua", func(_ context.Context, cfg any) (func(http.Handler) http.Handler, error) {

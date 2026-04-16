@@ -3,7 +3,6 @@ package runtime
 import (
 	"context"
 	"fmt"
-	"log/slog"
 
 	"github.com/gaarutyunov/mcp-anything/pkg/config"
 	"github.com/gaarutyunov/mcp-anything/pkg/registry"
@@ -24,15 +23,15 @@ type Factory func(ctx context.Context, cfg config.RuntimeConfig) (Runtime, error
 var factories registry.Registry[Factory]
 
 // Register registers a Factory under the given name. Typically called from init()
-// in a scripting sub-package. Logs and skips if name is empty or already registered.
-func Register(name string, f Factory) {
+// in a scripting sub-package. Returns an error if name is empty or already registered.
+func Register(name string, f Factory) error {
 	if name == "" {
-		slog.Error("runtime.Register: name must not be empty")
-		return
+		return fmt.Errorf("register runtime: name must not be empty")
 	}
 	if !factories.RegisterIfAbsent(name, f) {
-		slog.Error("runtime.Register: duplicate runtime name", "name", name)
+		return fmt.Errorf("register runtime %q: duplicate name", name)
 	}
+	return nil
 }
 
 // Registry holds a bounded Runtime pool for every registered scripting runtime.

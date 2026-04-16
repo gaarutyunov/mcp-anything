@@ -37,6 +37,12 @@ jobs:
       - name: check
         run: make check
 
+      - name: upload unit coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-unit
+          path: coverage/unit
+
   push-helm-chart:
     name: Push Helm Chart (OCI)
     runs-on: ubuntu-latest
@@ -183,6 +189,13 @@ jobs:
         env:
           PROXY_IMAGE: ${{ env.PROXY_IMAGE }}
           CADDY_IMAGE: ${{ env.CADDY_IMAGE }}
+          COVERAGE_DIR: ${{ github.workspace }}/coverage
+     
+      - name: upload integration coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-integration
+          path: coverage/integration
     
   e2e-tests:
     name: E2E / ${{ matrix.name }}
@@ -219,3 +232,32 @@ jobs:
           OPERATOR_IMAGE: ${{ env.OPERATOR_IMAGE }}
           E2E_TEST: ${{ matrix.test }}
           WORKSPACE_IMAGE: ${{ env.WORKSPACE_IMAGE }}
+
+  coverage:
+    name: Coverage Report
+    runs-on: ubuntu-latest
+    needs: [lint-and-test, integration-test, e2e-tests]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: download unit coverage
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-unit
+          path: coverage/unit
+      - name: download integration coverage
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-integration
+          path: coverage/integration
+      - name: merge and report
+        run: make cover-merge cover-report
+      - name: upload to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: coverage/coverage.out
+          fail_ci_if_error: true
+          token: ${{ secrets.CODECOV_TOKEN }}

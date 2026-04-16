@@ -44,7 +44,7 @@ treeshake:
 	go test -tags treeshake -count=1 ./tests/treeshake/...
 
 osv:
-	go run github.com/google/osv-scanner/cmd/osv-scanner@$(OSV_SCANNER_VERSION) scan .
+	go run github.com/google/osv-scanner/cmd/osv-scanner@$(OSV_SCANNER_VERSION) scan --call-analysis=go .
 
 generate-crds:
 	go run ./cmd/crdgen

@@ -212,6 +212,8 @@ jobs:
             test: TestRemoteDevWorkspaceE2E
           - name: Helm Chart Smoke Test
             test: TestHelmChartSmokeE2E
+          - name: Gateway API E2E
+            test: TestGatewayAPIE2E
     steps:
       - uses: actions/checkout@v4
 

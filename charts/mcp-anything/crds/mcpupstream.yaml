@@ -206,6 +206,12 @@ spec:
                     - name
                     type: object
                 type: object
+              rateLimit:
+                description: |-
+                  RateLimit is the name of a rate limit policy defined in the owning MCPProxy's
+                  rateLimits.policies map. When set, the named policy is applied to all tool calls
+                  from this upstream.
+                type: string
               serviceRef:
                 description: |-
                   ServiceRef references an in-cluster Kubernetes Service.

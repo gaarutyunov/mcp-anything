@@ -22,11 +22,19 @@ const (
 // (config.ProxyConfig uses koanf tags only; marshaling it directly produces PascalCase keys.)
 
 type generatedProxyConfig struct {
-	Server      generatedServerConfig       `yaml:"server"`
-	Naming      generatedNamingConfig       `yaml:"naming"`
-	Telemetry   *generatedTelemetryConfig   `yaml:"telemetry,omitempty"`
-	InboundAuth *generatedInboundAuthConfig `yaml:"inbound_auth,omitempty"`
-	Upstreams   []generatedUpstreamConfig   `yaml:"upstreams"`
+	Server      generatedServerConfig               `yaml:"server"`
+	Naming      generatedNamingConfig               `yaml:"naming"`
+	RateLimits  map[string]generatedRateLimitConfig `yaml:"rate_limits,omitempty"`
+	Telemetry   *generatedTelemetryConfig           `yaml:"telemetry,omitempty"`
+	InboundAuth *generatedInboundAuthConfig         `yaml:"inbound_auth,omitempty"`
+	Upstreams   []generatedUpstreamConfig           `yaml:"upstreams"`
+}
+
+type generatedRateLimitConfig struct {
+	Average int64  `yaml:"average"`
+	Period  string `yaml:"period"`
+	Burst   int64  `yaml:"burst,omitempty"`
+	Source  string `yaml:"source,omitempty"`
 }
 
 type generatedServerConfig struct {
@@ -64,6 +72,7 @@ type generatedUpstreamConfig struct {
 	Transport    *generatedTransportConfig  `yaml:"transport,omitempty"`
 	Validation   *generatedValidationConfig `yaml:"validation,omitempty"`
 	Commands     []generatedCommandConfig   `yaml:"commands,omitempty"`
+	RateLimit    string                     `yaml:"rate_limit,omitempty"`
 }
 
 type generatedOpenAPIConfig struct {
@@ -144,6 +153,20 @@ func Generate(ctx context.Context, proxy *v1alpha1.MCPProxy, upstreams []v1alpha
 		Separator:          proxy.Spec.Naming.Separator,
 		MaxLength:          proxy.Spec.Naming.MaxLength,
 		ConflictResolution: proxy.Spec.Naming.ConflictResolution,
+	}
+
+	// Rate limit policies.
+	if proxy.Spec.RateLimits != nil && len(proxy.Spec.RateLimits.Policies) > 0 {
+		rl := make(map[string]generatedRateLimitConfig, len(proxy.Spec.RateLimits.Policies))
+		for name, policy := range proxy.Spec.RateLimits.Policies {
+			rl[name] = generatedRateLimitConfig{
+				Average: policy.Average,
+				Period:  policy.Period,
+				Burst:   policy.Burst,
+				Source:  policy.Source,
+			}
+		}
+		cfg.RateLimits = rl
 	}
 
 	// Telemetry configuration.
@@ -340,6 +363,9 @@ func buildHTTPUpstreamConfig(up *v1alpha1.MCPUpstream, uc generatedUpstreamConfi
 			ValidateResponse: up.Spec.Validation.ValidateResponse,
 		}
 	}
+
+	// Rate limit policy reference.
+	uc.RateLimit = up.Spec.RateLimit
 
 	return uc, nil
 }

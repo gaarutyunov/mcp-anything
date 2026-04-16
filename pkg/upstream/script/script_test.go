@@ -37,8 +37,13 @@ func TestCompileScript_SyntaxError(t *testing.T) {
 }
 
 // testPool returns a small runtime pool suitable for unit tests.
-func testPool() *runtime.Pool {
-	return runtime.NewPool(runtime.DefaultMaxScriptVMs)
+func testPool(t *testing.T) *runtime.Pool {
+	t.Helper()
+	pool, err := runtime.NewPool(runtime.DefaultMaxScriptVMs)
+	if err != nil {
+		t.Fatalf("NewPool: %v", err)
+	}
+	return pool
 }
 
 // TestDef_Execute_SimpleReturn verifies that a simple return value is serialized as JSON.
@@ -49,7 +54,7 @@ func TestDef_Execute_SimpleReturn(t *testing.T) {
 		t.Fatalf("compile: %v", err)
 	}
 
-	def := &script.Def{Program: prog, Pool: testPool()}
+	def := &script.Def{Program: prog, Pool: testPool(t)}
 
 	out, err := def.Execute(context.Background(), map[string]any{"greeting": "hello"})
 	if err != nil {
@@ -73,7 +78,7 @@ func TestDef_Execute_ModuleExports(t *testing.T) {
 		t.Fatalf("compile: %v", err)
 	}
 
-	def := &script.Def{Program: prog, Pool: testPool()}
+	def := &script.Def{Program: prog, Pool: testPool(t)}
 	out, err := def.Execute(context.Background(), map[string]any{"n": 5})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
@@ -97,7 +102,7 @@ func TestDef_Execute_JSException(t *testing.T) {
 		t.Fatalf("compile: %v", err)
 	}
 
-	def := &script.Def{Program: prog, Pool: testPool()}
+	def := &script.Def{Program: prog, Pool: testPool(t)}
 	_, err = def.Execute(context.Background(), nil)
 	if err == nil {
 		t.Fatal("expected error from JS exception")
@@ -122,7 +127,7 @@ func TestDef_Execute_Timeout(t *testing.T) {
 	def := &script.Def{
 		Program: prog,
 		Timeout: 100 * time.Millisecond,
-		Pool:    testPool(),
+		Pool:    testPool(t),
 	}
 	_, err = def.Execute(context.Background(), nil)
 	if err == nil {
@@ -138,7 +143,7 @@ func TestDef_Execute_NoDefaultExport(t *testing.T) {
 		t.Fatalf("compile: %v", err)
 	}
 
-	def := &script.Def{Program: prog, Pool: testPool()}
+	def := &script.Def{Program: prog, Pool: testPool(t)}
 	_, err = def.Execute(context.Background(), nil)
 	if err == nil {
 		t.Fatal("expected error for missing default export")
@@ -156,7 +161,7 @@ func TestDef_Execute_CtxEnv(t *testing.T) {
 	def := &script.Def{
 		Program: prog,
 		Env:     map[string]string{"MY_VAR": "hello_from_env"},
-		Pool:    testPool(),
+		Pool:    testPool(t),
 	}
 	out, err := def.Execute(context.Background(), nil)
 	if err != nil {
@@ -193,7 +198,7 @@ func TestDef_Execute_CtxFetch(t *testing.T) {
 		Program:    prog,
 		Env:        map[string]string{"BASE_URL": server.URL},
 		HTTPClient: server.Client(),
-		Pool:       testPool(),
+		Pool:       testPool(t),
 	}
 	out, err := def.Execute(context.Background(), nil)
 	if err != nil {
@@ -228,7 +233,7 @@ func TestDef_Execute_CtxFetchError(t *testing.T) {
 		Program:    prog,
 		Env:        map[string]string{"BASE_URL": server.URL},
 		HTTPClient: server.Client(),
-		Pool:       testPool(),
+		Pool:       testPool(t),
 	}
 	_, err = def.Execute(context.Background(), nil)
 	if err == nil {
@@ -260,7 +265,10 @@ func TestBuildTools_Valid(t *testing.T) {
 	upCfg := &config.UpstreamConfig{Name: "test", ToolPrefix: "test"}
 	namingCfg := &config.NamingConfig{Separator: "__"}
 
-	pool := runtime.NewPool(runtime.DefaultMaxScriptVMs)
+	pool, err := runtime.NewPool(runtime.DefaultMaxScriptVMs)
+	if err != nil {
+		t.Fatalf("NewPool: %v", err)
+	}
 	tools, err := script.BuildTools(cfgs, upCfg, namingCfg, nil, pool)
 	if err != nil {
 		t.Fatalf("BuildTools: %v", err)
@@ -278,9 +286,12 @@ func TestBuildTools_MissingToolName(t *testing.T) {
 	cfgs := []config.ScriptConfig{{ScriptPath: "/some/path.js"}}
 	upCfg := &config.UpstreamConfig{Name: "test", ToolPrefix: "test"}
 	namingCfg := &config.NamingConfig{Separator: "__"}
-	pool := runtime.NewPool(runtime.DefaultMaxScriptVMs)
+	pool, err := runtime.NewPool(runtime.DefaultMaxScriptVMs)
+	if err != nil {
+		t.Fatalf("NewPool: %v", err)
+	}
 
-	_, err := script.BuildTools(cfgs, upCfg, namingCfg, nil, pool)
+	_, err = script.BuildTools(cfgs, upCfg, namingCfg, nil, pool)
 	if err == nil {
 		t.Fatal("expected error for missing tool_name")
 	}
@@ -291,9 +302,12 @@ func TestBuildTools_MissingScriptPath(t *testing.T) {
 	cfgs := []config.ScriptConfig{{ToolName: "my_tool"}}
 	upCfg := &config.UpstreamConfig{Name: "test", ToolPrefix: "test"}
 	namingCfg := &config.NamingConfig{Separator: "__"}
-	pool := runtime.NewPool(runtime.DefaultMaxScriptVMs)
+	pool, err := runtime.NewPool(runtime.DefaultMaxScriptVMs)
+	if err != nil {
+		t.Fatalf("NewPool: %v", err)
+	}
 
-	_, err := script.BuildTools(cfgs, upCfg, namingCfg, nil, pool)
+	_, err = script.BuildTools(cfgs, upCfg, namingCfg, nil, pool)
 	if err == nil {
 		t.Fatal("expected error for missing script_path")
 	}
@@ -310,9 +324,12 @@ func TestBuildTools_ScriptSyntaxError(t *testing.T) {
 	cfgs := []config.ScriptConfig{{ToolName: "bad", ScriptPath: scriptPath}}
 	upCfg := &config.UpstreamConfig{Name: "test", ToolPrefix: "test"}
 	namingCfg := &config.NamingConfig{Separator: "__"}
-	pool := runtime.NewPool(runtime.DefaultMaxScriptVMs)
+	pool, err := runtime.NewPool(runtime.DefaultMaxScriptVMs)
+	if err != nil {
+		t.Fatalf("NewPool: %v", err)
+	}
 
-	_, err := script.BuildTools(cfgs, upCfg, namingCfg, nil, pool)
+	_, err = script.BuildTools(cfgs, upCfg, namingCfg, nil, pool)
 	if err == nil {
 		t.Fatal("expected error for syntax error in script")
 	}

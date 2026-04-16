@@ -1,63 +1,80 @@
 package runtime
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/gaarutyunov/mcp-anything/pkg/config"
+	"github.com/gaarutyunov/mcp-anything/pkg/registry"
 )
 
 const (
 	// DefaultMaxAuthVMs is the default maximum concurrent runtimes for auth scripts.
-	DefaultMaxAuthVMs = 10
+	DefaultMaxAuthVMs = int64(10)
 	// DefaultMaxScriptVMs is the default maximum concurrent runtimes for tool scripts.
-	DefaultMaxScriptVMs = 20
+	DefaultMaxScriptVMs = int64(20)
 )
 
-// Registry holds the shared bounded runtime pools for JS and Lua script execution.
+// Factory is a function that constructs a Runtime from the global RuntimeConfig.
+// Each scripting sub-package (js, lua, wasm, …) registers one or more factories
+// via Register in its init() function.
+type Factory func(ctx context.Context, cfg config.RuntimeConfig) (Runtime, error)
+
+var factories registry.Registry[Factory]
+
+// Register registers a Factory under the given name. Typically called from init()
+// in a scripting sub-package. Logs and skips if name is empty or already registered.
+func Register(name string, f Factory) {
+	if name == "" {
+		slog.Error("runtime.Register: name must not be empty")
+		return
+	}
+	if !factories.RegisterIfAbsent(name, f) {
+		slog.Error("runtime.Register: duplicate runtime name", "name", name)
+	}
+}
+
+// Registry holds a bounded Runtime pool for every registered scripting runtime.
 // A single Registry is created at startup from config and shared across all
 // validators, providers, and script tool executors. Sharing ensures that the
 // configured limits are enforced globally rather than per-instance.
 type Registry struct {
-	// JSAuth bounds concurrent Sobek JS runtimes used for authentication
-	// (inbound + outbound combined).
-	JSAuth *Pool
-	// JSScript bounds concurrent Sobek JS runtimes used for tool script execution.
-	JSScript *Pool
-	// LuaAuth bounds concurrent gopher-lua runtimes used for authentication
-	// (inbound + outbound combined).
-	LuaAuth *Pool
+	pools map[string]Runtime
 }
 
-// NewRegistry creates a Registry with pools sized according to cfg.
-// Returns an error if any configured limit is negative.
-func NewRegistry(cfg config.RuntimeConfig) (*Registry, error) {
-	jsAuthMax := cfg.JS.MaxAuthVMs
-	if jsAuthMax == 0 {
-		jsAuthMax = DefaultMaxAuthVMs
-	}
-	if jsAuthMax < 0 {
-		return nil, fmt.Errorf("runtime.js.max_auth_vms must be > 0, got %d", jsAuthMax)
-	}
+// NewRegistry creates a Registry by calling every registered Factory.
+// Returns an error if any factory returns an error.
+func NewRegistry(ctx context.Context, cfg config.RuntimeConfig) (*Registry, error) {
+	snap := factories.Snapshot()
 
-	jsScriptMax := cfg.JS.MaxScriptVMs
-	if jsScriptMax == 0 {
-		jsScriptMax = DefaultMaxScriptVMs
+	pools := make(map[string]Runtime, len(snap))
+	for name, f := range snap {
+		rt, err := f(ctx, cfg)
+		if err != nil {
+			return nil, fmt.Errorf("building runtime pool %q: %w", name, err)
+		}
+		pools[name] = rt
 	}
-	if jsScriptMax < 0 {
-		return nil, fmt.Errorf("runtime.js.max_script_vms must be > 0, got %d", jsScriptMax)
-	}
+	return &Registry{pools: pools}, nil
+}
 
-	luaAuthMax := cfg.Lua.MaxAuthVMs
-	if luaAuthMax == 0 {
-		luaAuthMax = DefaultMaxAuthVMs
+// Get returns the Runtime registered under name, or nil if not found.
+func (r *Registry) Get(name string) Runtime {
+	if r == nil {
+		return nil
 	}
-	if luaAuthMax < 0 {
-		return nil, fmt.Errorf("runtime.lua.max_auth_vms must be > 0, got %d", luaAuthMax)
-	}
+	return r.pools[name]
+}
 
-	return &Registry{
-		JSAuth:   NewPool(jsAuthMax),
-		JSScript: NewPool(jsScriptMax),
-		LuaAuth:  NewPool(luaAuthMax),
-	}, nil
+// All returns a copy of the name→Runtime map for iteration (e.g. logging).
+func (r *Registry) All() map[string]Runtime {
+	if r == nil {
+		return nil
+	}
+	out := make(map[string]Runtime, len(r.pools))
+	for k, v := range r.pools {
+		out[k] = v
+	}
+	return out
 }

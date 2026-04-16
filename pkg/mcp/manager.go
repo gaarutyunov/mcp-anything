@@ -246,9 +246,9 @@ func (m *Manager) Rebuild(ctx context.Context, cfg *config.ProxyConfig) error {
 		// can use bounded pools without holding a direct reference to the runtime registry.
 		cfgCopy := *upCfg
 		if m.pools != nil {
-			cfgCopy.OutboundAuth.JSAuthPool = m.pools.JSAuth
-			cfgCopy.OutboundAuth.LuaAuthPool = m.pools.LuaAuth
-			cfgCopy.JSScriptPool = m.pools.JSScript
+			cfgCopy.OutboundAuth.JSAuthPool = m.pools.Get("js/auth")
+			cfgCopy.OutboundAuth.LuaAuthPool = m.pools.Get("lua/auth")
+			cfgCopy.JSScriptPool = m.pools.Get("js/script")
 		}
 		// Inject OAuth session config for oauth2_user_session strategy.
 		cfgCopy.OutboundAuth.OAuthTokenStore = m.oauthStore

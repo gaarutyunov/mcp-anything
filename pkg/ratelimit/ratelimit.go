@@ -16,13 +16,13 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/ulule/limiter/v3"
 
 	"github.com/gaarutyunov/mcp-anything/pkg/config"
 	pkgmiddleware "github.com/gaarutyunov/mcp-anything/pkg/middleware"
+	"github.com/gaarutyunov/mcp-anything/pkg/registry"
 )
 
 func init() {
@@ -35,17 +35,12 @@ func init() {
 // Called from init() in store sub-packages.
 type StoreFactory func(ctx context.Context, cfg *config.ProxyConfig) (limiter.Store, error)
 
-var (
-	storeMu        sync.RWMutex
-	storeFactories = make(map[string]StoreFactory)
-)
+var storeFactories registry.Registry[StoreFactory]
 
 // Register adds a store factory for the given store type name.
 // Typically called from init() in store sub-packages.
 func Register(name string, f StoreFactory) {
-	storeMu.Lock()
-	defer storeMu.Unlock()
-	storeFactories[name] = f
+	storeFactories.Register(name, f)
 }
 
 // clientIPKey is an unexported context key for storing the client IP.
@@ -111,9 +106,7 @@ func New(ctx context.Context, cfg *config.ProxyConfig) (*Enforcer, error) {
 		storeName = "redis"
 	}
 
-	storeMu.RLock()
-	factory, ok := storeFactories[storeName]
-	storeMu.RUnlock()
+	factory, ok := storeFactories.Get(storeName)
 	if !ok {
 		return nil, fmt.Errorf(
 			"unknown rate limit store %q — import the store package or pkg/ratelimit/all",

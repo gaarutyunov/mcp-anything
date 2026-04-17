@@ -1,4 +1,5 @@
 bin/
+coverage/
 *.test
 *.out
 .env

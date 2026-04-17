@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	dockercontainer "github.com/docker/docker/api/types/container"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/network"
@@ -23,16 +24,25 @@ import (
 
 // proxyContainerRequest returns a ContainerRequest for the proxy.
 // If PROXY_IMAGE is set, it pulls that image. Otherwise, it builds from source using the Dockerfile.
+// If COVERAGE_DIR is set, it bind-mounts that directory to /tmp/gocov inside the container so that
+// the coverage-instrumented binary flushes its data to the host when the container stops.
 func proxyContainerRequest() testcontainers.ContainerRequest {
+	req := testcontainers.ContainerRequest{}
 	if img := os.Getenv("PROXY_IMAGE"); img != "" {
-		return testcontainers.ContainerRequest{Image: img}
-	}
-	return testcontainers.ContainerRequest{
-		FromDockerfile: testcontainers.FromDockerfile{
+		req.Image = img
+	} else {
+		req.FromDockerfile = testcontainers.FromDockerfile{
 			Context:    "../..",
 			Dockerfile: "Dockerfile",
-		},
+		}
 	}
+	if coverDir := os.Getenv("COVERAGE_DIR"); coverDir != "" {
+		bind := coverDir + ":/tmp/gocov"
+		req.HostConfigModifier = func(hc *dockercontainer.HostConfig) {
+			hc.Binds = append(hc.Binds, bind)
+		}
+	}
+	return req
 }
 
 const testOpenAPISpec = `openapi: "3.0.0"

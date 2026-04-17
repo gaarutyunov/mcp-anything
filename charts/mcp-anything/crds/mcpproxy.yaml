@@ -49,6 +49,28 @@ spec:
           spec:
             description: MCPProxySpec defines the desired state of MCPProxy.
             properties:
+              gatewayRef:
+                description: |-
+                  GatewayRef configures Kubernetes Gateway API HTTPRoute creation.
+                  When set, the operator creates an HTTPRoute that routes traffic from the
+                  referenced Gateway to the proxy Service.
+                properties:
+                  hostname:
+                    description: |-
+                      Hostname is the hostname to match in the HTTPRoute rules.
+                      If empty, all hostnames are matched.
+                    type: string
+                  name:
+                    description: Name is the name of the Gateway resource.
+                    type: string
+                  namespace:
+                    description: |-
+                      Namespace is the namespace of the Gateway resource.
+                      Defaults to the same namespace as the MCPProxy.
+                    type: string
+                required:
+                - name
+                type: object
               image:
                 description: Image is the proxy container image. Defaults to ghcr.io/gaarutyunov/mcp-anything:latest.
                 type: string
@@ -124,6 +146,44 @@ spec:
                     type: integer
                   separator:
                     type: string
+                type: object
+              rateLimits:
+                description: |-
+                  RateLimits configures named rate limit policies for tool calls.
+                  Policies are referenced by MCPUpstream resources via the rateLimit field.
+                properties:
+                  policies:
+                    additionalProperties:
+                      description: MCPProxyRateLimitPolicySpec defines a named rate
+                        limit policy.
+                      properties:
+                        average:
+                          description: Average is the number of requests allowed per
+                            Period.
+                          format: int64
+                          type: integer
+                        burst:
+                          description: Burst is the number of additional requests
+                            allowed above Average in a single burst.
+                          format: int64
+                          type: integer
+                        period:
+                          description: Period is the time window for rate limiting
+                            (e.g. "1m", "1h").
+                          type: string
+                        source:
+                          description: |-
+                            Source determines the counter key: "user" (authenticated subject),
+                            "ip" (remote address), or "session" (MCP session ID). Defaults to "ip".
+                          type: string
+                      required:
+                      - average
+                      - period
+                      type: object
+                    description: |-
+                      Policies maps rate limit policy names to their configurations.
+                      MCPUpstream resources reference these policies by name via the rateLimit field.
+                    type: object
                 type: object
               replicas:
                 description: Replicas is the number of proxy pod replicas. Defaults

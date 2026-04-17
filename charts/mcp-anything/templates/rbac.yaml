@@ -35,6 +35,9 @@ rules:
     resources: [namespaces]
     verbs: [get, list, watch]
 {{- end }}
+  - apiGroups: [gateway.networking.k8s.io]
+    resources: [httproutes]
+    verbs: [get, list, watch, create, update, patch, delete]
   - apiGroups: [apps]
     resources: [deployments]
     verbs: [get, list, watch, create, update, patch, delete]

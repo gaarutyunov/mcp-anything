@@ -62,6 +62,52 @@ type MCPProxySpec struct {
 	// Telemetry configures observability settings.
 	// Generated from pkg/config.TelemetryConfig.
 	Telemetry *ProxyTelemetrySpec `json:"telemetry,omitempty"`
+	// +optional
+	// GatewayRef configures Kubernetes Gateway API HTTPRoute creation.
+	// When set, the operator creates an HTTPRoute that routes traffic from the
+	// referenced Gateway to the proxy Service.
+	GatewayRef *GatewayRefSpec `json:"gatewayRef,omitempty"`
+	// +optional
+	// RateLimits configures named rate limit policies for tool calls.
+	// Policies are referenced by MCPUpstream resources via the rateLimit field.
+	RateLimits *MCPProxyRateLimitsSpec `json:"rateLimits,omitempty"`
+}
+
+// GatewayRefSpec references a Kubernetes Gateway resource for HTTPRoute creation.
+type GatewayRefSpec struct {
+	// Name is the name of the Gateway resource.
+	Name string `json:"name"`
+	// +optional
+	// Namespace is the namespace of the Gateway resource.
+	// Defaults to the same namespace as the MCPProxy.
+	Namespace string `json:"namespace,omitempty"`
+	// +optional
+	// Hostname is the hostname to match in the HTTPRoute rules.
+	// If empty, all hostnames are matched.
+	Hostname string `json:"hostname,omitempty"`
+}
+
+// MCPProxyRateLimitsSpec configures named rate limit policies for the proxy.
+type MCPProxyRateLimitsSpec struct {
+	// +optional
+	// Policies maps rate limit policy names to their configurations.
+	// MCPUpstream resources reference these policies by name via the rateLimit field.
+	Policies map[string]MCPProxyRateLimitPolicySpec `json:"policies,omitempty"`
+}
+
+// MCPProxyRateLimitPolicySpec defines a named rate limit policy.
+type MCPProxyRateLimitPolicySpec struct {
+	// Average is the number of requests allowed per Period.
+	Average int64 `json:"average"`
+	// Period is the time window for rate limiting (e.g. "1m", "1h").
+	Period string `json:"period"`
+	// +optional
+	// Burst is the number of additional requests allowed above Average in a single burst.
+	Burst int64 `json:"burst,omitempty"`
+	// +optional
+	// Source determines the counter key: "user" (authenticated subject),
+	// "ip" (remote address), or "session" (MCP session ID). Defaults to "ip".
+	Source string `json:"source,omitempty"`
 }
 
 // NamespaceSelectorSpec selects namespaces by name.
@@ -173,6 +219,11 @@ type MCPUpstreamSpec struct {
 	// Commands defines command-backed MCP tools. Required when Type is "command".
 	// Generated from pkg/config.CommandConfig.
 	Commands []MCPUpstreamCommandSpec `json:"commands,omitempty"`
+	// +optional
+	// RateLimit is the name of a rate limit policy defined in the owning MCPProxy's
+	// rateLimits.policies map. When set, the named policy is applied to all tool calls
+	// from this upstream.
+	RateLimit string `json:"rateLimit,omitempty"`
 }
 
 // ServiceRefSpec references a Kubernetes Service by name and port.

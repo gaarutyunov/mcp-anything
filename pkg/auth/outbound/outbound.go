@@ -6,7 +6,6 @@ package outbound
 
 import (
 	"context"
-	"net/http"
 )
 
 // TokenProvider supplies credentials for upstream API calls.
@@ -34,16 +33,3 @@ type AuthRequiredError struct {
 func (e *AuthRequiredError) Error() string {
 	return "authorization required: visit " + e.AuthURL
 }
-
-// Middleware is implemented by all outbound auth providers.
-// Each concrete provider type implements Wrap directly on the struct.
-type Middleware interface {
-	Wrap(next http.Handler) http.Handler
-}
-
-// MiddlewareFunc adapts a func(http.Handler) http.Handler to implement Middleware.
-// This mirrors the http.HandlerFunc / http.Handler pattern.
-type MiddlewareFunc func(http.Handler) http.Handler
-
-// Wrap implements Middleware.
-func (f MiddlewareFunc) Wrap(next http.Handler) http.Handler { return f(next) }

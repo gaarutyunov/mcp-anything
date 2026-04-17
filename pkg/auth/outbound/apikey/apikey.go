@@ -19,7 +19,10 @@ func init() {
 		if !ok {
 			return nil, fmt.Errorf("outbound/api_key: expected *config.OutboundAuthConfig, got %T", cfg)
 		}
-		return NewProvider(oc.APIKey).Wrap, nil
+		p := NewProvider(oc.APIKey)
+		return func(next http.Handler) http.Handler {
+			return &Provider{header: p.header, valueEnv: p.valueEnv, prefix: p.prefix, Next: next}
+		}, nil
 	})
 }
 
@@ -28,6 +31,7 @@ type Provider struct {
 	header   string
 	valueEnv string
 	prefix   string
+	Next     http.Handler
 }
 
 // NewProvider creates a Provider from config.
@@ -53,9 +57,7 @@ func (p *Provider) RawHeaders(_ context.Context) (map[string]string, error) {
 	return map[string]string{p.header: p.prefix + val}, nil
 }
 
-// Wrap implements outbound.Middleware. It injects an API key header into the request context.
-func (p *Provider) Wrap(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		outbound.ServeWithProvider(w, r, next, p)
-	})
+// ServeHTTP implements http.Handler. It injects an API key header into the request context.
+func (p *Provider) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	outbound.ServeWithProvider(w, r, p.Next, p)
 }

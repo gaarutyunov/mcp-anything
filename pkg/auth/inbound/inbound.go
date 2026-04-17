@@ -7,7 +7,6 @@ package inbound
 import (
 	"context"
 	"fmt"
-	"net/http"
 )
 
 // DeniedError is returned by a TokenValidator when access is explicitly denied
@@ -50,16 +49,3 @@ func TokenInfoFromContext(ctx context.Context) *TokenInfo {
 	v, _ := ctx.Value(contextKey{}).(*TokenInfo)
 	return v
 }
-
-// Middleware is implemented by all inbound auth validators.
-// Each concrete validator type implements Wrap directly on the struct.
-type Middleware interface {
-	Wrap(next http.Handler) http.Handler
-}
-
-// MiddlewareFunc adapts a func(http.Handler) http.Handler to implement Middleware.
-// This mirrors the http.HandlerFunc / http.Handler pattern.
-type MiddlewareFunc func(http.Handler) http.Handler
-
-// Wrap implements Middleware.
-func (f MiddlewareFunc) Wrap(next http.Handler) http.Handler { return f(next) }

@@ -33,7 +33,16 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
-		return p.Wrap, nil
+		return func(next http.Handler) http.Handler {
+			return &Provider{
+				store:       p.store,
+				callbackReg: p.callbackReg,
+				upstream:    p.upstream,
+				oauth2Cfg:   p.oauth2Cfg,
+				httpClient:  p.httpClient,
+				Next:        next,
+			}
+		}, nil
 	})
 }
 
@@ -44,6 +53,7 @@ type Provider struct {
 	upstream    string
 	oauth2Cfg   *oauth2.Config
 	httpClient  *http.Client
+	Next        http.Handler
 }
 
 func newProvider(ctx context.Context, cfg *config.OutboundAuthConfig) (*Provider, error) {
@@ -156,11 +166,9 @@ func (p *Provider) RawHeaders(_ context.Context) (map[string]string, error) {
 	return nil, nil
 }
 
-// Wrap implements outbound.Middleware. It injects a per-user OAuth2 access token into the request context.
-func (p *Provider) Wrap(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		outbound.ServeWithProvider(w, r, next, p)
-	})
+// ServeHTTP implements http.Handler. It injects a per-user OAuth2 access token into the request context.
+func (p *Provider) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	outbound.ServeWithProvider(w, r, p.Next, p)
 }
 
 // doRefresh exchanges the refresh token for a new access token and saves it.

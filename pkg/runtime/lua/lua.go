@@ -55,7 +55,9 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
-		return v.Wrap, nil
+		return func(next http.Handler) http.Handler {
+			return &Validator{proto: v.proto, pool: v.pool, timeout: v.timeout, Next: next}
+		}, nil
 	})
 	pkgmiddleware.Register("outbound/lua", func(_ context.Context, cfg any) (func(http.Handler) http.Handler, error) {
 		oc, ok := cfg.(*config.OutboundAuthConfig)
@@ -69,7 +71,15 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
-		return p.Wrap, nil
+		return func(next http.Handler) http.Handler {
+			return &Provider{
+				upstreamName: p.upstreamName,
+				proto:        p.proto,
+				pool:         p.pool,
+				timeout:      p.timeout,
+				Next:         next,
+			}
+		}, nil
 	})
 }
 
@@ -81,6 +91,7 @@ type Validator struct {
 	proto   *lua.FunctionProto
 	pool    config.PoolAcquirer
 	timeout time.Duration
+	Next    http.Handler
 }
 
 // NewValidator creates a Validator by reading and pre-compiling the Lua
@@ -110,11 +121,9 @@ func NewValidator(cfg config.LuaAuthConfig, pool config.PoolAcquirer) (*Validato
 	}, nil
 }
 
-// Wrap implements inbound.Middleware. It extracts a Bearer token and validates it via Lua script.
-func (v *Validator) Wrap(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		inbound.ServeValidated(w, r, next, v, inbound.ExtractBearerToken(r))
-	})
+// ServeHTTP implements http.Handler. It extracts a Bearer token and validates it via Lua script.
+func (v *Validator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	inbound.ServeValidated(w, r, v.Next, v, inbound.ExtractBearerToken(r))
 }
 
 // ValidateToken calls the Lua script with the token and returns identity info on success.
@@ -170,6 +179,7 @@ type Provider struct {
 	pool         config.PoolAcquirer
 	timeout      time.Duration
 	cache        providerCache
+	Next         http.Handler
 }
 
 type providerCache struct {
@@ -206,11 +216,9 @@ func NewProvider(upstreamName string, cfg config.LuaOutboundConfig, pool config.
 	}, nil
 }
 
-// Wrap implements outbound.Middleware. It injects Lua-script-derived credentials into the request context.
-func (p *Provider) Wrap(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		outbound.ServeWithProvider(w, r, next, p)
-	})
+// ServeHTTP implements http.Handler. It injects Lua-script-derived credentials into the request context.
+func (p *Provider) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	outbound.ServeWithProvider(w, r, p.Next, p)
 }
 
 // Token returns the current token, invoking the Lua script if the cache has expired.

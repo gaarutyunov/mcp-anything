@@ -69,7 +69,17 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
-		return v.Wrap, nil
+		return func(next http.Handler) http.Handler {
+			return &Validator{
+				program:     v.program,
+				timeout:     v.timeout,
+				env:         v.env,
+				scriptCache: v.scriptCache,
+				httpClient:  v.httpClient,
+				pool:        v.pool,
+				Next:        next,
+			}
+		}, nil
 	})
 	pkgmiddleware.Register("outbound/js", func(_ context.Context, cfg any) (func(http.Handler) http.Handler, error) {
 		oc, ok := cfg.(*config.OutboundAuthConfig)
@@ -83,7 +93,18 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
-		return p.Wrap, nil
+		return func(next http.Handler) http.Handler {
+			return &Provider{
+				upstreamName: p.upstreamName,
+				program:      p.program,
+				timeout:      p.timeout,
+				env:          p.env,
+				scriptCache:  p.scriptCache,
+				httpClient:   p.httpClient,
+				pool:         p.pool,
+				Next:         next,
+			}
+		}, nil
 	})
 }
 
@@ -150,6 +171,7 @@ type Validator struct {
 	scriptCache *scriptCache
 	httpClient  *http.Client
 	pool        config.PoolAcquirer
+	Next        http.Handler
 }
 
 // NewValidator creates a Validator by reading and pre-compiling the JS script.
@@ -178,11 +200,9 @@ func NewValidator(cfg config.JSAuthConfig, pool config.PoolAcquirer) (*Validator
 	}, nil
 }
 
-// Wrap implements inbound.Middleware. It extracts a Bearer token and validates it via JS script.
-func (v *Validator) Wrap(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		inbound.ServeValidated(w, r, next, v, inbound.ExtractBearerToken(r))
-	})
+// ServeHTTP implements http.Handler. It extracts a Bearer token and validates it via JS script.
+func (v *Validator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	inbound.ServeValidated(w, r, v.Next, v, inbound.ExtractBearerToken(r))
 }
 
 // ValidateToken runs the JS script with the token and returns identity info on success.
@@ -287,6 +307,7 @@ type Provider struct {
 	scriptCache  *scriptCache // persists across callScript invocations
 	httpClient   *http.Client
 	pool         config.PoolAcquirer
+	Next         http.Handler
 }
 
 // NewProvider creates a Provider by reading and pre-compiling the JS script.
@@ -316,11 +337,9 @@ func NewProvider(upstreamName string, cfg config.JSOutboundConfig, pool config.P
 	}, nil
 }
 
-// Wrap implements outbound.Middleware. It injects JS-script-derived credentials into the request context.
-func (p *Provider) Wrap(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		outbound.ServeWithProvider(w, r, next, p)
-	})
+// ServeHTTP implements http.Handler. It injects JS-script-derived credentials into the request context.
+func (p *Provider) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	outbound.ServeWithProvider(w, r, p.Next, p)
 }
 
 // Token returns the current Bearer token, invoking the JS script if the cache has expired.

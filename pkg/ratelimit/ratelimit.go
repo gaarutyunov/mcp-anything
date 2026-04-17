@@ -27,7 +27,9 @@ import (
 
 func init() {
 	pkgmiddleware.Register("ratelimit/client_ip", func(_ context.Context, _ any) (func(http.Handler) http.Handler, error) {
-		return ClientIPMiddleware, nil
+		return func(next http.Handler) http.Handler {
+			return &ClientIPHandler{Next: next}
+		}, nil
 	})
 }
 
@@ -62,14 +64,23 @@ func ClientIPFromContext(ctx context.Context) string {
 	return v
 }
 
-// ClientIPMiddleware is an HTTP middleware that extracts the client IP and stores it
+// ClientIPHandler is an http.Handler that extracts the client IP and stores it
 // in the request context so that rate limiters with source: ip can use it.
+type ClientIPHandler struct {
+	Next http.Handler
+}
+
+// ServeHTTP implements http.Handler.
+func (h *ClientIPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	ip := extractClientIP(r)
+	ctx := WithClientIP(r.Context(), ip)
+	h.Next.ServeHTTP(w, r.WithContext(ctx))
+}
+
+// ClientIPMiddleware wraps next with ClientIPHandler.
+// Kept for callers that compose handlers via a func adapter.
 func ClientIPMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ip := extractClientIP(r)
-		ctx := WithClientIP(r.Context(), ip)
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
+	return &ClientIPHandler{Next: next}
 }
 
 // extractClientIP returns the real client IP from the HTTP request.

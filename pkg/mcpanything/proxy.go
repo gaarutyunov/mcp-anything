@@ -134,23 +134,28 @@ func New(ctx context.Context, cfg *pkgconfig.ProxyConfig, opts ...Option) (*Prox
 		}
 	}
 
-	// Build inbound auth middleware (global + per-upstream overrides).
-	authMiddleware, wellKnown, err := p.buildAuth(ctx)
+	// Build inbound auth handler factories (global + per-upstream overrides).
+	globalFn, overrideFns, wellKnown, err := p.buildAuth(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	// Wrap MCP handlers with optional auth middleware and IP extraction for rate limiting.
+	// Wrap MCP handlers with optional auth and IP extraction for rate limiting.
 	rawHandlers := p.manager.HTTPHandlers()
 	mcpHandlers := make(map[string]http.Handler, len(rawHandlers))
 	for endpoint, handler := range rawHandlers {
 		h := handler
-		if authMiddleware != nil {
-			h = authMiddleware.Wrap(h)
+		if globalFn != nil {
+			globalH := globalFn(h)
+			overrideHandlers := make(map[string]http.Handler, len(overrideFns))
+			for name, fn := range overrideFns {
+				overrideHandlers[name] = fn(h)
+			}
+			h = pkginbound.NewDispatchHandler(globalH, overrideHandlers, p.manager, p.manager.ToolUpstreamName, h)
 		}
-		// Always wrap with ClientIPMiddleware so that source: ip rate limits work
-		// even when no auth is configured. Middleware is lightweight (single header read).
-		h = pkgratelimit.ClientIPMiddleware(h)
+		// Always add ClientIPHandler so that source: ip rate limits work
+		// even when no auth is configured. Handler is lightweight (single header read).
+		h = &pkgratelimit.ClientIPHandler{Next: h}
 		mcpHandlers[endpoint] = h
 		slog.Info("mounted group", "endpoint", endpoint)
 	}
@@ -244,24 +249,29 @@ func (p *Proxy) Shutdown(ctx context.Context) error {
 	return firstErr
 }
 
-// buildAuth constructs the inbound auth middleware and the optional well-known
-// handler. Returns nil middleware and nil handler when auth is disabled.
-func (p *Proxy) buildAuth(ctx context.Context) (pkginbound.Middleware, http.HandlerFunc, error) {
+// buildAuth constructs the inbound auth handler factories and the optional well-known
+// handler. Returns nil factories when auth is disabled.
+func (p *Proxy) buildAuth(ctx context.Context) (
+	globalFn func(http.Handler) http.Handler,
+	overrideFns map[string]func(http.Handler) http.Handler,
+	wellKnown http.HandlerFunc,
+	err error,
+) {
 	strategy := p.cfg.InboundAuth.Strategy
 	if strategy == "" || strategy == "none" {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 
 	authCfg := p.cfg.InboundAuth
 	authCfg.JSAuthPool = p.pools.Get("js/auth")
 	authCfg.LuaAuthPool = p.pools.Get("lua/auth")
-	globalMWFn, err := pkgmiddleware.New(ctx, "inbound/"+strategy, &authCfg)
+	globalFn, err = pkgmiddleware.New(ctx, "inbound/"+strategy, &authCfg)
 	if err != nil {
-		return nil, nil, fmt.Errorf("build inbound auth middleware: %w", err)
+		return nil, nil, nil, fmt.Errorf("build inbound auth middleware: %w", err)
 	}
 	slog.Info("inbound auth enabled", "strategy", strategy)
 
-	overrideMWs := make(map[string]pkginbound.Middleware)
+	overrideFns = make(map[string]func(http.Handler) http.Handler)
 	for i := range p.cfg.Upstreams {
 		up := &p.cfg.Upstreams[i]
 		if !up.Enabled || up.InboundAuthOverride == nil {
@@ -270,27 +280,19 @@ func (p *Proxy) buildAuth(ctx context.Context) (pkginbound.Middleware, http.Hand
 		ovCfg := *up.InboundAuthOverride
 		ovCfg.JSAuthPool = p.pools.Get("js/auth")
 		ovCfg.LuaAuthPool = p.pools.Get("lua/auth")
-		ovMWFn, ovErr := pkgmiddleware.New(ctx, "inbound/"+ovCfg.Strategy, &ovCfg)
+		ovFn, ovErr := pkgmiddleware.New(ctx, "inbound/"+ovCfg.Strategy, &ovCfg)
 		if ovErr != nil {
-			return nil, nil, fmt.Errorf("build inbound auth override for %q: %w", up.Name, ovErr)
+			return nil, nil, nil, fmt.Errorf("build inbound auth override for %q: %w", up.Name, ovErr)
 		}
-		overrideMWs[up.Name] = pkginbound.MiddlewareFunc(ovMWFn)
+		overrideFns[up.Name] = ovFn
 		slog.Info("per-upstream auth override", "upstream", up.Name, "strategy", up.InboundAuthOverride.Strategy)
 	}
 
-	authMiddleware := pkginbound.DispatchMiddleware(
-		pkginbound.MiddlewareFunc(globalMWFn),
-		overrideMWs,
-		p.manager,
-		p.manager.ToolUpstreamName,
-	)
-
-	var wellKnown http.HandlerFunc
 	if strategy == "jwt" || strategy == "introspection" {
 		wellKnown = pkginbound.WellKnownHandler(p.cfg)
 	}
 
-	return authMiddleware, wellKnown, nil
+	return globalFn, overrideFns, wellKnown, nil
 }
 
 // buildSessionStore creates the OAuth session store and callback mux when configured.

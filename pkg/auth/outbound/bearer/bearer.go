@@ -19,13 +19,17 @@ func init() {
 		if !ok {
 			return nil, fmt.Errorf("outbound/bearer: expected *config.OutboundAuthConfig, got %T", cfg)
 		}
-		return NewProvider(oc.Bearer).Wrap, nil
+		p := NewProvider(oc.Bearer)
+		return func(next http.Handler) http.Handler {
+			return &Provider{tokenEnv: p.tokenEnv, Next: next}
+		}, nil
 	})
 }
 
 // Provider injects a static Bearer token read from an environment variable.
 type Provider struct {
 	tokenEnv string
+	Next     http.Handler
 }
 
 // NewProvider creates a Provider from config.
@@ -47,9 +51,7 @@ func (p *Provider) RawHeaders(_ context.Context) (map[string]string, error) {
 	return nil, nil
 }
 
-// Wrap implements outbound.Middleware. It injects a Bearer token into the request context.
-func (p *Provider) Wrap(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		outbound.ServeWithProvider(w, r, next, p)
-	})
+// ServeHTTP implements http.Handler. It injects a Bearer token into the request context.
+func (p *Provider) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	outbound.ServeWithProvider(w, r, p.Next, p)
 }

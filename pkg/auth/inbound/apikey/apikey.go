@@ -25,7 +25,9 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
-		return v.Wrap, nil
+		return func(next http.Handler) http.Handler {
+			return &Validator{header: v.header, keys: v.keys, Next: next}
+		}, nil
 	})
 }
 
@@ -34,11 +36,11 @@ func init() {
 type Validator struct {
 	header string
 	keys   map[string]struct{}
+	Next   http.Handler
 }
 
 // NewValidator creates a Validator by reading keys from the environment variable
 // named cfg.KeysEnv (comma-separated list of valid keys).
-// The header name from cfg.Header is stored and used in Wrap.
 func NewValidator(cfg config.APIKeyAuthConfig) (*Validator, error) {
 	raw := os.Getenv(cfg.KeysEnv)
 	keys := make(map[string]struct{})
@@ -62,9 +64,7 @@ func (v *Validator) ValidateToken(_ context.Context, token string) (*inbound.Tok
 	return &inbound.TokenInfo{}, nil
 }
 
-// Wrap implements inbound.Middleware. It reads the API key from the configured header.
-func (v *Validator) Wrap(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		inbound.ServeValidated(w, r, next, v, r.Header.Get(v.header))
-	})
+// ServeHTTP implements http.Handler. It reads the API key from the configured header.
+func (v *Validator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	inbound.ServeValidated(w, r, v.Next, v, r.Header.Get(v.header))
 }

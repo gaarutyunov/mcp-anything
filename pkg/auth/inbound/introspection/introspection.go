@@ -28,7 +28,9 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
-		return v.Wrap, nil
+		return func(next http.Handler) http.Handler {
+			return &Validator{server: v.server, aud: v.aud, Next: next}
+		}, nil
 	})
 }
 
@@ -36,6 +38,7 @@ func init() {
 type Validator struct {
 	server rs.ResourceServer
 	aud    string
+	Next   http.Handler
 }
 
 // NewValidator creates a Validator using client credentials.
@@ -67,9 +70,7 @@ func (v *Validator) ValidateToken(ctx context.Context, raw string) (*inbound.Tok
 	}, nil
 }
 
-// Wrap implements inbound.Middleware. It extracts a Bearer token and validates it.
-func (v *Validator) Wrap(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		inbound.ServeValidated(w, r, next, v, inbound.ExtractBearerToken(r))
-	})
+// ServeHTTP implements http.Handler. It extracts a Bearer token and validates it.
+func (v *Validator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	inbound.ServeValidated(w, r, v.Next, v, inbound.ExtractBearerToken(r))
 }

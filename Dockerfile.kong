@@ -11,8 +11,9 @@ RUN CGO_ENABLED=0 go build -o /mcp-anything-kong ./cmd/kong
 FROM kong:3.9-ubuntu
 
 USER root
-RUN mkdir -p /etc/mcp-anything /etc/kong
+RUN mkdir -p /etc/mcp-anything /etc/kong /usr/local/share/lua/5.1/kong/plugins/mcp-anything
 COPY --from=builder /mcp-anything-kong /usr/local/bin/mcp-anything-kong
+COPY pkg/kong/schema.lua /usr/local/share/lua/5.1/kong/plugins/mcp-anything/schema.lua
 
 ENV KONG_PLUGINS=bundled,mcp-anything
 ENV KONG_PLUGINSERVER_NAMES=mcp-anything

@@ -28,13 +28,12 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
-		return v.Middleware(""), nil
+		return v.Wrap, nil
 	})
 }
 
 // Validator validates tokens by calling a token introspection endpoint.
 type Validator struct {
-	inbound.ValidatorBase
 	server rs.ResourceServer
 	aud    string
 }
@@ -47,9 +46,7 @@ func NewValidator(ctx context.Context, cfg config.IntrospectionConfig) (*Validat
 	if err != nil {
 		return nil, fmt.Errorf("creating introspection resource server: %w", err)
 	}
-	v := &Validator{server: server, aud: cfg.Audience}
-	v.ValidatorBase = inbound.NewValidatorBase(v)
-	return v, nil
+	return &Validator{server: server, aud: cfg.Audience}, nil
 }
 
 // ValidateToken introspects the token and checks it is active and has the expected audience.
@@ -68,4 +65,11 @@ func (v *Validator) ValidateToken(ctx context.Context, raw string) (*inbound.Tok
 		Subject:  resp.Subject,
 		Audience: resp.Audience,
 	}, nil
+}
+
+// Wrap implements inbound.Middleware. It extracts a Bearer token and validates it.
+func (v *Validator) Wrap(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		inbound.ServeValidated(w, r, next, v, inbound.ExtractBearerToken(r))
+	})
 }

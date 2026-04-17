@@ -7,6 +7,7 @@ package inbound
 import (
 	"context"
 	"fmt"
+	"net/http"
 )
 
 // DeniedError is returned by a TokenValidator when access is explicitly denied
@@ -50,17 +51,15 @@ func TokenInfoFromContext(ctx context.Context) *TokenInfo {
 	return v
 }
 
-// ValidatorBase can be embedded in any concrete TokenValidator struct to provide
-// the Middleware() method directly on the struct.
-// Call NewValidatorBase(v) in the constructor to wire the self-reference.
-type ValidatorBase struct {
-	self TokenValidator
+// Middleware is implemented by all inbound auth validators.
+// Each concrete validator type implements Wrap directly on the struct.
+type Middleware interface {
+	Wrap(next http.Handler) http.Handler
 }
 
-// NewValidatorBase creates a ValidatorBase wired to v.
-// Assign the result to the embedded ValidatorBase field of your concrete type:
-//
-//	v.ValidatorBase = inbound.NewValidatorBase(v)
-func NewValidatorBase(v TokenValidator) ValidatorBase {
-	return ValidatorBase{self: v}
-}
+// MiddlewareFunc adapts a func(http.Handler) http.Handler to implement Middleware.
+// This mirrors the http.HandlerFunc / http.Handler pattern.
+type MiddlewareFunc func(http.Handler) http.Handler
+
+// Wrap implements Middleware.
+func (f MiddlewareFunc) Wrap(next http.Handler) http.Handler { return f(next) }

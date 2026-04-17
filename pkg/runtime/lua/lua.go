@@ -55,7 +55,7 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
-		return v.Middleware(""), nil
+		return v.Wrap, nil
 	})
 	pkgmiddleware.Register("outbound/lua", func(_ context.Context, cfg any) (func(http.Handler) http.Handler, error) {
 		oc, ok := cfg.(*config.OutboundAuthConfig)
@@ -69,7 +69,7 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
-		return p.Middleware(), nil
+		return p.Wrap, nil
 	})
 }
 
@@ -78,7 +78,6 @@ func init() {
 // allowed (bool), status (int), extra_headers (table), error_msg (string).
 // The shared pool bounds the maximum number of concurrent Lua runtimes to prevent OOM.
 type Validator struct {
-	inbound.ValidatorBase
 	proto   *lua.FunctionProto
 	pool    config.PoolAcquirer
 	timeout time.Duration
@@ -104,13 +103,18 @@ func NewValidator(cfg config.LuaAuthConfig, pool config.PoolAcquirer) (*Validato
 		timeout = defaultTimeout
 	}
 
-	v := &Validator{
+	return &Validator{
 		proto:   proto,
 		timeout: timeout,
 		pool:    pool,
-	}
-	v.ValidatorBase = inbound.NewValidatorBase(v)
-	return v, nil
+	}, nil
+}
+
+// Wrap implements inbound.Middleware. It extracts a Bearer token and validates it via Lua script.
+func (v *Validator) Wrap(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		inbound.ServeValidated(w, r, next, v, inbound.ExtractBearerToken(r))
+	})
 }
 
 // ValidateToken calls the Lua script with the token and returns identity info on success.
@@ -161,7 +165,6 @@ func (v *Validator) ValidateToken(ctx context.Context, token string) (*inbound.T
 // token (string), expiry_unix (int), raw_headers (table), error_msg (string).
 // The shared pool bounds the maximum number of concurrent Lua runtimes to prevent OOM.
 type Provider struct {
-	outbound.ProviderBase
 	upstreamName string
 	proto        *lua.FunctionProto
 	pool         config.PoolAcquirer
@@ -195,14 +198,19 @@ func NewProvider(upstreamName string, cfg config.LuaOutboundConfig, pool config.
 		timeout = defaultTimeout
 	}
 
-	p := &Provider{
+	return &Provider{
 		upstreamName: upstreamName,
 		proto:        proto,
 		timeout:      timeout,
 		pool:         pool,
-	}
-	p.ProviderBase = outbound.NewProviderBase(p)
-	return p, nil
+	}, nil
+}
+
+// Wrap implements outbound.Middleware. It injects Lua-script-derived credentials into the request context.
+func (p *Provider) Wrap(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		outbound.ServeWithProvider(w, r, next, p)
+	})
 }
 
 // Token returns the current token, invoking the Lua script if the cache has expired.

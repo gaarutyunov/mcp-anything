@@ -33,13 +33,12 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
-		return p.Middleware(), nil
+		return p.Wrap, nil
 	})
 }
 
 // Provider implements the oauth2_user_session outbound auth strategy.
 type Provider struct {
-	outbound.ProviderBase
 	store       config.OAuthTokenStore
 	callbackReg config.OAuthCallbackRegistrar
 	upstream    string
@@ -89,15 +88,13 @@ func newProvider(ctx context.Context, cfg *config.OutboundAuthConfig) (*Provider
 		cfg.Upstream, authURL, tokenURL, ocfg.ClientID, clientSecret, ocfg.Scopes, ocfg.CallbackURL,
 	)
 
-	p := &Provider{
+	return &Provider{
 		store:       cfg.OAuthTokenStore,
 		callbackReg: cfg.OAuthCallbackReg,
 		upstream:    cfg.Upstream,
 		oauth2Cfg:   oauth2Cfg,
 		httpClient:  &http.Client{Timeout: 30 * time.Second},
-	}
-	p.ProviderBase = outbound.NewProviderBase(p)
-	return p, nil
+	}, nil
 }
 
 // Token returns the current access token for the user, refreshing or prompting OAuth flow as needed.
@@ -157,6 +154,13 @@ func (p *Provider) Token(ctx context.Context) (string, error) {
 // RawHeaders returns nil — this strategy uses Bearer token injection via Token().
 func (p *Provider) RawHeaders(_ context.Context) (map[string]string, error) {
 	return nil, nil
+}
+
+// Wrap implements outbound.Middleware. It injects a per-user OAuth2 access token into the request context.
+func (p *Provider) Wrap(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		outbound.ServeWithProvider(w, r, next, p)
+	})
 }
 
 // doRefresh exchanges the refresh token for a new access token and saves it.

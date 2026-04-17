@@ -26,14 +26,13 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
-		return p.Middleware(), nil
+		return p.Wrap, nil
 	})
 }
 
 // Provider obtains tokens via the OAuth2 client credentials flow.
 // It caches the token and refreshes it automatically before expiry.
 type Provider struct {
-	outbound.ProviderBase
 	src gooauth2.TokenSource
 }
 
@@ -47,9 +46,7 @@ func NewProvider(ctx context.Context, cfg config.OAuth2CCConfig) (*Provider, err
 		Scopes:       cfg.Scopes,
 	}
 	src := gooauth2.ReuseTokenSource(nil, ccCfg.TokenSource(ctx))
-	p := &Provider{src: src}
-	p.ProviderBase = outbound.NewProviderBase(p)
-	return p, nil
+	return &Provider{src: src}, nil
 }
 
 // Token returns a valid access token, refreshing if the cached token has expired.
@@ -64,4 +61,11 @@ func (p *Provider) Token(_ context.Context) (string, error) {
 // RawHeaders returns nil because OAuth2 auth uses Token().
 func (p *Provider) RawHeaders(_ context.Context) (map[string]string, error) {
 	return nil, nil
+}
+
+// Wrap implements outbound.Middleware. It injects an OAuth2 access token into the request context.
+func (p *Provider) Wrap(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		outbound.ServeWithProvider(w, r, next, p)
+	})
 }

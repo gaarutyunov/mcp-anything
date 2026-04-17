@@ -8,9 +8,8 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// Middleware returns an HTTP middleware for the per-tool execution chain.
-// It resolves outbound credentials from the embedded provider and stores them in context
-// for the terminal handler.
+// ServeWithProvider resolves credentials from p and calls next with the appropriate
+// context values set. Sub-packages call this to implement their Wrap method.
 //
 // On success, auth headers are stored via withHeaders.
 // On AuthRequiredError (e.g. OAuth2 user redirect needed), a CallToolResult is stored
@@ -19,35 +18,31 @@ import (
 //
 // next is always called so that the terminal handler can write the result to the pipeline state.
 // The terminal handler must check AuthResultFromContext before proceeding with the HTTP call.
-func (pb *ProviderBase) Middleware() func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ctx := r.Context()
+func ServeWithProvider(w http.ResponseWriter, r *http.Request, next http.Handler, p TokenProvider) {
+	ctx := r.Context()
 
-			rawHeaders, err := pb.self.RawHeaders(ctx)
-			if err != nil {
-				ctx = withAuthResult(ctx, authErrResult(err))
-				next.ServeHTTP(w, r.WithContext(ctx))
-				return
-			}
-
-			if len(rawHeaders) > 0 {
-				ctx = withHeaders(ctx, rawHeaders)
-			} else {
-				token, tokenErr := pb.self.Token(ctx)
-				if tokenErr != nil {
-					ctx = withAuthResult(ctx, authErrResult(tokenErr))
-					next.ServeHTTP(w, r.WithContext(ctx))
-					return
-				}
-				if token != "" {
-					ctx = withHeaders(ctx, map[string]string{"Authorization": "Bearer " + token})
-				}
-			}
-
-			next.ServeHTTP(w, r.WithContext(ctx))
-		})
+	rawHeaders, err := p.RawHeaders(ctx)
+	if err != nil {
+		ctx = withAuthResult(ctx, authErrResult(err))
+		next.ServeHTTP(w, r.WithContext(ctx))
+		return
 	}
+
+	if len(rawHeaders) > 0 {
+		ctx = withHeaders(ctx, rawHeaders)
+	} else {
+		token, tokenErr := p.Token(ctx)
+		if tokenErr != nil {
+			ctx = withAuthResult(ctx, authErrResult(tokenErr))
+			next.ServeHTTP(w, r.WithContext(ctx))
+			return
+		}
+		if token != "" {
+			ctx = withHeaders(ctx, map[string]string{"Authorization": "Bearer " + token})
+		}
+	}
+
+	next.ServeHTTP(w, r.WithContext(ctx))
 }
 
 // authErrResult converts an outbound auth error into a CallToolResult.

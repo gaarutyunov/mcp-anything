@@ -25,19 +25,20 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
-		return v.Middleware(ic.APIKey.Header), nil
+		return v.Wrap, nil
 	})
 }
 
 // Validator validates tokens by checking them against a set of allowed API keys.
-// The "token" passed to ValidateToken is the value of the configured header.
+// The token is read from the header configured at construction time.
 type Validator struct {
-	inbound.ValidatorBase
-	keys map[string]struct{}
+	header string
+	keys   map[string]struct{}
 }
 
 // NewValidator creates a Validator by reading keys from the environment variable
 // named cfg.KeysEnv (comma-separated list of valid keys).
+// The header name from cfg.Header is stored and used in Wrap.
 func NewValidator(cfg config.APIKeyAuthConfig) (*Validator, error) {
 	raw := os.Getenv(cfg.KeysEnv)
 	keys := make(map[string]struct{})
@@ -50,9 +51,7 @@ func NewValidator(cfg config.APIKeyAuthConfig) (*Validator, error) {
 	if len(keys) == 0 {
 		return nil, fmt.Errorf("no API keys found in environment variable %q", cfg.KeysEnv)
 	}
-	v := &Validator{keys: keys}
-	v.ValidatorBase = inbound.NewValidatorBase(v)
-	return v, nil
+	return &Validator{header: cfg.Header, keys: keys}, nil
 }
 
 // ValidateToken checks whether token (the API key value) is in the allowed key set.
@@ -61,4 +60,11 @@ func (v *Validator) ValidateToken(_ context.Context, token string) (*inbound.Tok
 		return nil, errors.New("invalid API key")
 	}
 	return &inbound.TokenInfo{}, nil
+}
+
+// Wrap implements inbound.Middleware. It reads the API key from the configured header.
+func (v *Validator) Wrap(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		inbound.ServeValidated(w, r, next, v, r.Header.Get(v.header))
+	})
 }

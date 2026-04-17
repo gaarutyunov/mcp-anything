@@ -11,44 +11,39 @@ import (
 	"strings"
 )
 
-// Middleware returns an HTTP middleware that validates inbound Bearer tokens
-// (or API keys when apiKeyHeader is non-empty).
-// It extracts the token, calls ValidateToken on the embedded validator, and stores
-// the resulting TokenInfo in the request context.
-// It does NOT implement per-tool auth bypass — use DispatchMiddleware for that.
-func (vb *ValidatorBase) Middleware(apiKeyHeader string) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			var token string
-			if apiKeyHeader != "" {
-				token = r.Header.Get(apiKeyHeader)
-			} else {
-				authHeader := r.Header.Get("Authorization")
-				if after, ok := strings.CutPrefix(authHeader, "Bearer "); ok {
-					token = strings.TrimSpace(after)
-				}
-			}
-
-			if token == "" {
-				writeUnauthorized(w, r, "missing_token")
-				return
-			}
-
-			info, err := vb.self.ValidateToken(r.Context(), token)
-			if err != nil {
-				var denied *DeniedError
-				if errors.As(err, &denied) {
-					writeDenied(w, r, denied)
-				} else {
-					writeUnauthorized(w, r, "invalid_token")
-				}
-				return
-			}
-
-			ctx := context.WithValue(r.Context(), contextKey{}, info)
-			next.ServeHTTP(w, r.WithContext(ctx))
-		})
+// ExtractBearerToken returns the Bearer token from the Authorization header,
+// or empty string if not present or malformed.
+func ExtractBearerToken(r *http.Request) string {
+	authHeader := r.Header.Get("Authorization")
+	after, ok := strings.CutPrefix(authHeader, "Bearer ")
+	if !ok {
+		return ""
 	}
+	return strings.TrimSpace(after)
+}
+
+// ServeValidated validates token via v, writes an error response on failure,
+// or stores TokenInfo in context and calls next on success.
+// Sub-packages call this to implement their Wrap method.
+func ServeValidated(w http.ResponseWriter, r *http.Request, next http.Handler, v TokenValidator, token string) {
+	if token == "" {
+		writeUnauthorized(w, r, "missing_token")
+		return
+	}
+
+	info, err := v.ValidateToken(r.Context(), token)
+	if err != nil {
+		var denied *DeniedError
+		if errors.As(err, &denied) {
+			writeDenied(w, r, denied)
+		} else {
+			writeUnauthorized(w, r, "invalid_token")
+		}
+		return
+	}
+
+	ctx := context.WithValue(r.Context(), contextKey{}, info)
+	next.ServeHTTP(w, r.WithContext(ctx))
 }
 
 // DispatchMiddleware builds a middleware that:
@@ -61,17 +56,17 @@ func (vb *ValidatorBase) Middleware(apiKeyHeader string) func(http.Handler) http
 // registry is used to check whether auth is required for a given tool.
 // upstreamLookup maps a tool name to its upstream name; may be nil when overrides is empty.
 func DispatchMiddleware(
-	globalMW func(http.Handler) http.Handler,
-	overrides map[string]func(http.Handler) http.Handler,
+	globalMW Middleware,
+	overrides map[string]Middleware,
 	registry RegistryReader,
 	upstreamLookup func(string) string,
-) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
+) Middleware {
+	return MiddlewareFunc(func(next http.Handler) http.Handler {
 		// Pre-compute handlers to avoid allocating a new wrapper per request.
-		globalH := globalMW(next)
+		globalH := globalMW.Wrap(next)
 		overrideHandlers := make(map[string]http.Handler, len(overrides))
 		for upstreamName, mw := range overrides {
-			overrideHandlers[upstreamName] = mw(next)
+			overrideHandlers[upstreamName] = mw.Wrap(next)
 		}
 
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -97,7 +92,7 @@ func DispatchMiddleware(
 
 			globalH.ServeHTTP(w, r)
 		})
-	}
+	})
 }
 
 // peekToolCallName reads the request body, attempts to parse a JSON-RPC tools/call message,

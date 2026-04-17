@@ -19,13 +19,12 @@ func init() {
 		if !ok {
 			return nil, fmt.Errorf("outbound/api_key: expected *config.OutboundAuthConfig, got %T", cfg)
 		}
-		return NewProvider(oc.APIKey).Middleware(), nil
+		return NewProvider(oc.APIKey).Wrap, nil
 	})
 }
 
 // Provider injects an API key into a configured request header.
 type Provider struct {
-	outbound.ProviderBase
 	header   string
 	valueEnv string
 	prefix   string
@@ -33,13 +32,11 @@ type Provider struct {
 
 // NewProvider creates a Provider from config.
 func NewProvider(cfg config.APIKeyOutboundConfig) *Provider {
-	p := &Provider{
+	return &Provider{
 		header:   cfg.Header,
 		valueEnv: cfg.ValueEnv,
 		prefix:   cfg.Prefix,
 	}
-	p.ProviderBase = outbound.NewProviderBase(p)
-	return p
 }
 
 // Token returns empty string because API key auth uses RawHeaders().
@@ -54,4 +51,11 @@ func (p *Provider) RawHeaders(_ context.Context) (map[string]string, error) {
 		return nil, fmt.Errorf("outbound API key env var %q is empty or unset", p.valueEnv)
 	}
 	return map[string]string{p.header: p.prefix + val}, nil
+}
+
+// Wrap implements outbound.Middleware. It injects an API key header into the request context.
+func (p *Provider) Wrap(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		outbound.ServeWithProvider(w, r, next, p)
+	})
 }

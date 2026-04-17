@@ -146,7 +146,7 @@ func New(ctx context.Context, cfg *pkgconfig.ProxyConfig, opts ...Option) (*Prox
 	for endpoint, handler := range rawHandlers {
 		h := handler
 		if authMiddleware != nil {
-			h = authMiddleware(h)
+			h = authMiddleware.Wrap(h)
 		}
 		// Always wrap with ClientIPMiddleware so that source: ip rate limits work
 		// even when no auth is configured. Middleware is lightweight (single header read).
@@ -246,7 +246,7 @@ func (p *Proxy) Shutdown(ctx context.Context) error {
 
 // buildAuth constructs the inbound auth middleware and the optional well-known
 // handler. Returns nil middleware and nil handler when auth is disabled.
-func (p *Proxy) buildAuth(ctx context.Context) (func(http.Handler) http.Handler, http.HandlerFunc, error) {
+func (p *Proxy) buildAuth(ctx context.Context) (pkginbound.Middleware, http.HandlerFunc, error) {
 	strategy := p.cfg.InboundAuth.Strategy
 	if strategy == "" || strategy == "none" {
 		return nil, nil, nil
@@ -255,13 +255,13 @@ func (p *Proxy) buildAuth(ctx context.Context) (func(http.Handler) http.Handler,
 	authCfg := p.cfg.InboundAuth
 	authCfg.JSAuthPool = p.pools.Get("js/auth")
 	authCfg.LuaAuthPool = p.pools.Get("lua/auth")
-	globalMW, err := pkgmiddleware.New(ctx, "inbound/"+strategy, &authCfg)
+	globalMWFn, err := pkgmiddleware.New(ctx, "inbound/"+strategy, &authCfg)
 	if err != nil {
 		return nil, nil, fmt.Errorf("build inbound auth middleware: %w", err)
 	}
 	slog.Info("inbound auth enabled", "strategy", strategy)
 
-	overrideMWs := make(map[string]func(http.Handler) http.Handler)
+	overrideMWs := make(map[string]pkginbound.Middleware)
 	for i := range p.cfg.Upstreams {
 		up := &p.cfg.Upstreams[i]
 		if !up.Enabled || up.InboundAuthOverride == nil {
@@ -270,15 +270,20 @@ func (p *Proxy) buildAuth(ctx context.Context) (func(http.Handler) http.Handler,
 		ovCfg := *up.InboundAuthOverride
 		ovCfg.JSAuthPool = p.pools.Get("js/auth")
 		ovCfg.LuaAuthPool = p.pools.Get("lua/auth")
-		ovMW, ovErr := pkgmiddleware.New(ctx, "inbound/"+ovCfg.Strategy, &ovCfg)
+		ovMWFn, ovErr := pkgmiddleware.New(ctx, "inbound/"+ovCfg.Strategy, &ovCfg)
 		if ovErr != nil {
 			return nil, nil, fmt.Errorf("build inbound auth override for %q: %w", up.Name, ovErr)
 		}
-		overrideMWs[up.Name] = ovMW
+		overrideMWs[up.Name] = pkginbound.MiddlewareFunc(ovMWFn)
 		slog.Info("per-upstream auth override", "upstream", up.Name, "strategy", up.InboundAuthOverride.Strategy)
 	}
 
-	authMiddleware := pkginbound.DispatchMiddleware(globalMW, overrideMWs, p.manager, p.manager.ToolUpstreamName)
+	authMiddleware := pkginbound.DispatchMiddleware(
+		pkginbound.MiddlewareFunc(globalMWFn),
+		overrideMWs,
+		p.manager,
+		p.manager.ToolUpstreamName,
+	)
 
 	var wellKnown http.HandlerFunc
 	if strategy == "jwt" || strategy == "introspection" {

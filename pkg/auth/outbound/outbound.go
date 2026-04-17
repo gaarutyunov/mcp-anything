@@ -4,7 +4,10 @@
 // all built-in strategies.
 package outbound
 
-import "context"
+import (
+	"context"
+	"net/http"
+)
 
 // TokenProvider supplies credentials for upstream API calls.
 // Implementations must be safe for concurrent use.
@@ -32,17 +35,15 @@ func (e *AuthRequiredError) Error() string {
 	return "authorization required: visit " + e.AuthURL
 }
 
-// ProviderBase can be embedded in any concrete TokenProvider struct to provide
-// the Middleware() method directly on the struct.
-// Call NewProviderBase(p) in the constructor to wire the self-reference.
-type ProviderBase struct {
-	self TokenProvider
+// Middleware is implemented by all outbound auth providers.
+// Each concrete provider type implements Wrap directly on the struct.
+type Middleware interface {
+	Wrap(next http.Handler) http.Handler
 }
 
-// NewProviderBase creates a ProviderBase wired to p.
-// Assign the result to the embedded ProviderBase field of your concrete type:
-//
-//	p.ProviderBase = outbound.NewProviderBase(p)
-func NewProviderBase(p TokenProvider) ProviderBase {
-	return ProviderBase{self: p}
-}
+// MiddlewareFunc adapts a func(http.Handler) http.Handler to implement Middleware.
+// This mirrors the http.HandlerFunc / http.Handler pattern.
+type MiddlewareFunc func(http.Handler) http.Handler
+
+// Wrap implements Middleware.
+func (f MiddlewareFunc) Wrap(next http.Handler) http.Handler { return f(next) }

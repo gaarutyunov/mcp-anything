@@ -25,13 +25,12 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
-		return v.Middleware(""), nil
+		return v.Wrap, nil
 	})
 }
 
 // Validator validates JWT Bearer tokens using OIDC/JWKS.
 type Validator struct {
-	inbound.ValidatorBase
 	verifier *oidc.IDTokenVerifier
 }
 
@@ -52,9 +51,7 @@ func NewValidator(ctx context.Context, cfg config.JWTAuthConfig) (*Validator, er
 		verifier = provider.Verifier(oidcConfig)
 	}
 
-	v := &Validator{verifier: verifier}
-	v.ValidatorBase = inbound.NewValidatorBase(v)
-	return v, nil
+	return &Validator{verifier: verifier}, nil
 }
 
 // ValidateToken verifies the JWT signature, expiry, and audience, then returns TokenInfo.
@@ -76,4 +73,11 @@ func (v *Validator) ValidateToken(ctx context.Context, raw string) (*inbound.Tok
 		Scopes:   strings.Fields(claims.Scope),
 		Audience: token.Audience,
 	}, nil
+}
+
+// Wrap implements inbound.Middleware. It extracts a Bearer token and validates it.
+func (v *Validator) Wrap(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		inbound.ServeValidated(w, r, next, v, inbound.ExtractBearerToken(r))
+	})
 }

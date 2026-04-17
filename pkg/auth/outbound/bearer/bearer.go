@@ -14,15 +14,12 @@ import (
 )
 
 func init() {
-	pkgmiddleware.Register("outbound/bearer", func(_ context.Context, cfg any) (func(http.Handler) http.Handler, error) {
+	pkgmiddleware.Register("outbound/bearer", func(_ context.Context, cfg any) (pkgmiddleware.Builder, error) {
 		oc, ok := cfg.(*config.OutboundAuthConfig)
 		if !ok {
 			return nil, fmt.Errorf("outbound/bearer: expected *config.OutboundAuthConfig, got %T", cfg)
 		}
-		p := NewProvider(oc.Bearer)
-		return func(next http.Handler) http.Handler {
-			return &Provider{tokenEnv: p.tokenEnv, Next: next}
-		}, nil
+		return NewProvider(oc.Bearer), nil
 	})
 }
 
@@ -35,6 +32,11 @@ type Provider struct {
 // NewProvider creates a Provider from config.
 func NewProvider(cfg config.BearerOutboundConfig) *Provider {
 	return &Provider{tokenEnv: cfg.TokenEnv}
+}
+
+// Build implements middleware.Builder. It returns a Provider wired to next.
+func (p *Provider) Build(next http.Handler) http.Handler {
+	return &Provider{tokenEnv: p.tokenEnv, Next: next}
 }
 
 // Token returns the Bearer token value from the configured environment variable.
@@ -53,5 +55,14 @@ func (p *Provider) RawHeaders(_ context.Context) (map[string]string, error) {
 
 // ServeHTTP implements http.Handler. It injects a Bearer token into the request context.
 func (p *Provider) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	outbound.ServeWithProvider(w, r, p.Next, p)
+	ctx := r.Context()
+	token, err := p.Token(ctx)
+	if err != nil {
+		p.Next.ServeHTTP(w, r.WithContext(outbound.WithAuthResult(ctx, outbound.AuthErrResult(err))))
+		return
+	}
+	if token != "" {
+		ctx = outbound.WithHeaders(ctx, map[string]string{"Authorization": "Bearer " + token})
+	}
+	p.Next.ServeHTTP(w, r.WithContext(ctx))
 }

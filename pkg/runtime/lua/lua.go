@@ -5,6 +5,7 @@ package lua
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -43,7 +44,7 @@ func init() {
 	})
 
 	// Register inbound and outbound middleware strategies.
-	pkgmiddleware.Register("inbound/lua", func(_ context.Context, cfg any) (func(http.Handler) http.Handler, error) {
+	pkgmiddleware.Register("inbound/lua", func(_ context.Context, cfg any) (pkgmiddleware.Builder, error) {
 		ic, ok := cfg.(*config.InboundAuthConfig)
 		if !ok {
 			return nil, fmt.Errorf("inbound/lua: expected *config.InboundAuthConfig, got %T", cfg)
@@ -51,15 +52,9 @@ func init() {
 		if ic.LuaAuthPool == nil {
 			return nil, fmt.Errorf("lua inbound auth requires runtime pools; set InboundAuthConfig.LuaAuthPool")
 		}
-		v, err := NewValidator(ic.Lua, ic.LuaAuthPool)
-		if err != nil {
-			return nil, err
-		}
-		return func(next http.Handler) http.Handler {
-			return &Validator{proto: v.proto, pool: v.pool, timeout: v.timeout, Next: next}
-		}, nil
+		return NewValidator(ic.Lua, ic.LuaAuthPool)
 	})
-	pkgmiddleware.Register("outbound/lua", func(_ context.Context, cfg any) (func(http.Handler) http.Handler, error) {
+	pkgmiddleware.Register("outbound/lua", func(_ context.Context, cfg any) (pkgmiddleware.Builder, error) {
 		oc, ok := cfg.(*config.OutboundAuthConfig)
 		if !ok {
 			return nil, fmt.Errorf("outbound/lua: expected *config.OutboundAuthConfig, got %T", cfg)
@@ -67,19 +62,7 @@ func init() {
 		if oc.LuaAuthPool == nil {
 			return nil, fmt.Errorf("lua outbound auth requires runtime pools; set OutboundAuthConfig.LuaAuthPool")
 		}
-		p, err := NewProvider(oc.Upstream, oc.Lua, oc.LuaAuthPool)
-		if err != nil {
-			return nil, err
-		}
-		return func(next http.Handler) http.Handler {
-			return &Provider{
-				upstreamName: p.upstreamName,
-				proto:        p.proto,
-				pool:         p.pool,
-				timeout:      p.timeout,
-				Next:         next,
-			}
-		}, nil
+		return NewProvider(oc.Upstream, oc.Lua, oc.LuaAuthPool)
 	})
 }
 
@@ -121,9 +104,29 @@ func NewValidator(cfg config.LuaAuthConfig, pool config.PoolAcquirer) (*Validato
 	}, nil
 }
 
+// Build implements middleware.Builder. It returns a Validator wired to next, sharing compiled bytecode.
+func (v *Validator) Build(next http.Handler) http.Handler {
+	return &Validator{proto: v.proto, pool: v.pool, timeout: v.timeout, Next: next}
+}
+
 // ServeHTTP implements http.Handler. It extracts a Bearer token and validates it via Lua script.
 func (v *Validator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	inbound.ServeValidated(w, r, v.Next, v, inbound.ExtractBearerToken(r))
+	token := inbound.ExtractBearerToken(r)
+	if token == "" {
+		inbound.WriteUnauthorized(w, r, "missing_token")
+		return
+	}
+	info, err := v.ValidateToken(r.Context(), token)
+	if err != nil {
+		var denied *inbound.DeniedError
+		if errors.As(err, &denied) {
+			inbound.WriteDenied(w, r, denied)
+		} else {
+			inbound.WriteUnauthorized(w, r, "invalid_token")
+		}
+		return
+	}
+	v.Next.ServeHTTP(w, r.WithContext(inbound.WithTokenInfo(r.Context(), info)))
 }
 
 // ValidateToken calls the Lua script with the token and returns identity info on success.
@@ -216,9 +219,38 @@ func NewProvider(upstreamName string, cfg config.LuaOutboundConfig, pool config.
 	}, nil
 }
 
+// Build implements middleware.Builder. It returns a Provider wired to next, sharing compiled bytecode and cache.
+func (p *Provider) Build(next http.Handler) http.Handler {
+	return &Provider{
+		upstreamName: p.upstreamName,
+		proto:        p.proto,
+		pool:         p.pool,
+		timeout:      p.timeout,
+		Next:         next,
+	}
+}
+
 // ServeHTTP implements http.Handler. It injects Lua-script-derived credentials into the request context.
 func (p *Provider) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	outbound.ServeWithProvider(w, r, p.Next, p)
+	ctx := r.Context()
+	rawHeaders, err := p.RawHeaders(ctx)
+	if err != nil {
+		p.Next.ServeHTTP(w, r.WithContext(outbound.WithAuthResult(ctx, outbound.AuthErrResult(err))))
+		return
+	}
+	if len(rawHeaders) > 0 {
+		ctx = outbound.WithHeaders(ctx, rawHeaders)
+	} else {
+		token, tokenErr := p.Token(ctx)
+		if tokenErr != nil {
+			p.Next.ServeHTTP(w, r.WithContext(outbound.WithAuthResult(ctx, outbound.AuthErrResult(tokenErr))))
+			return
+		}
+		if token != "" {
+			ctx = outbound.WithHeaders(ctx, map[string]string{"Authorization": "Bearer " + token})
+		}
+	}
+	p.Next.ServeHTTP(w, r.WithContext(ctx))
 }
 
 // Token returns the current token, invoking the Lua script if the cache has expired.

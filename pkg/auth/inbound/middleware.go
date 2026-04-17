@@ -2,9 +2,7 @@ package inbound
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -20,30 +18,6 @@ func ExtractBearerToken(r *http.Request) string {
 		return ""
 	}
 	return strings.TrimSpace(after)
-}
-
-// ServeValidated validates token via v, writes an error response on failure,
-// or stores TokenInfo in context and calls next on success.
-// Sub-packages call this to implement their ServeHTTP method.
-func ServeValidated(w http.ResponseWriter, r *http.Request, next http.Handler, v TokenValidator, token string) {
-	if token == "" {
-		writeUnauthorized(w, r, "missing_token")
-		return
-	}
-
-	info, err := v.ValidateToken(r.Context(), token)
-	if err != nil {
-		var denied *DeniedError
-		if errors.As(err, &denied) {
-			writeDenied(w, r, denied)
-		} else {
-			writeUnauthorized(w, r, "invalid_token")
-		}
-		return
-	}
-
-	ctx := context.WithValue(r.Context(), contextKey{}, info)
-	next.ServeHTTP(w, r.WithContext(ctx))
 }
 
 // dispatchHandler implements http.Handler. It routes each request to the
@@ -134,8 +108,8 @@ func peekToolCallName(r *http.Request) (toolName string, isToolCall bool, body [
 	return msg.Params.Name, true, body
 }
 
-// writeUnauthorized writes an HTTP 401 response with the appropriate WWW-Authenticate header.
-func writeUnauthorized(w http.ResponseWriter, r *http.Request, errCode string) {
+// WriteUnauthorized writes an HTTP 401 response with the appropriate WWW-Authenticate header.
+func WriteUnauthorized(w http.ResponseWriter, r *http.Request, errCode string) {
 	metadataURL := resourceMetadataURL(r)
 	wwwAuth := fmt.Sprintf(
 		`Bearer realm="mcp-anything", error=%q, resource_metadata=%q`,
@@ -152,15 +126,15 @@ func writeUnauthorized(w http.ResponseWriter, r *http.Request, errCode string) {
 	_, _ = w.Write(resp)
 }
 
-// writeDenied writes an HTTP response for an explicit denial with a specific status code.
-// If the status is 401, it delegates to writeUnauthorized to preserve WWW-Authenticate semantics.
-func writeDenied(w http.ResponseWriter, r *http.Request, denied *DeniedError) {
+// WriteDenied writes an HTTP response for an explicit denial with a specific status code.
+// If the status is 401, it delegates to WriteUnauthorized to preserve WWW-Authenticate semantics.
+func WriteDenied(w http.ResponseWriter, r *http.Request, denied *DeniedError) {
 	if denied.Status == 0 || denied.Status == http.StatusUnauthorized {
 		errCode := denied.Message
 		if errCode == "" {
 			errCode = "access_denied"
 		}
-		writeUnauthorized(w, r, errCode)
+		WriteUnauthorized(w, r, errCode)
 		return
 	}
 	errCode := denied.Message

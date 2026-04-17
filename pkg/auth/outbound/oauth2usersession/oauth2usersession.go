@@ -24,25 +24,12 @@ import (
 )
 
 func init() {
-	pkgmiddleware.Register("outbound/oauth2_user_session", func(ctx context.Context, cfg any) (func(http.Handler) http.Handler, error) {
+	pkgmiddleware.Register("outbound/oauth2_user_session", func(ctx context.Context, cfg any) (pkgmiddleware.Builder, error) {
 		oc, ok := cfg.(*config.OutboundAuthConfig)
 		if !ok {
 			return nil, fmt.Errorf("outbound/oauth2_user_session: expected *config.OutboundAuthConfig, got %T", cfg)
 		}
-		p, err := newProvider(ctx, oc)
-		if err != nil {
-			return nil, err
-		}
-		return func(next http.Handler) http.Handler {
-			return &Provider{
-				store:       p.store,
-				callbackReg: p.callbackReg,
-				upstream:    p.upstream,
-				oauth2Cfg:   p.oauth2Cfg,
-				httpClient:  p.httpClient,
-				Next:        next,
-			}
-		}, nil
+		return newProvider(ctx, oc)
 	})
 }
 
@@ -166,9 +153,30 @@ func (p *Provider) RawHeaders(_ context.Context) (map[string]string, error) {
 	return nil, nil
 }
 
+// Build implements middleware.Builder. It returns a Provider wired to next, sharing session state.
+func (p *Provider) Build(next http.Handler) http.Handler {
+	return &Provider{
+		store:       p.store,
+		callbackReg: p.callbackReg,
+		upstream:    p.upstream,
+		oauth2Cfg:   p.oauth2Cfg,
+		httpClient:  p.httpClient,
+		Next:        next,
+	}
+}
+
 // ServeHTTP implements http.Handler. It injects a per-user OAuth2 access token into the request context.
 func (p *Provider) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	outbound.ServeWithProvider(w, r, p.Next, p)
+	ctx := r.Context()
+	token, err := p.Token(ctx)
+	if err != nil {
+		p.Next.ServeHTTP(w, r.WithContext(outbound.WithAuthResult(ctx, outbound.AuthErrResult(err))))
+		return
+	}
+	if token != "" {
+		ctx = outbound.WithHeaders(ctx, map[string]string{"Authorization": "Bearer " + token})
+	}
+	p.Next.ServeHTTP(w, r.WithContext(ctx))
 }
 
 // doRefresh exchanges the refresh token for a new access token and saves it.

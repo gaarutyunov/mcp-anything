@@ -26,10 +26,8 @@ import (
 )
 
 func init() {
-	pkgmiddleware.Register("ratelimit/client_ip", func(_ context.Context, _ any) (func(http.Handler) http.Handler, error) {
-		return func(next http.Handler) http.Handler {
-			return &ClientIPHandler{Next: next}
-		}, nil
+	pkgmiddleware.Register("ratelimit/client_ip", func(_ context.Context, _ any) (pkgmiddleware.Builder, error) {
+		return &ClientIPHandler{}, nil
 	})
 }
 
@@ -70,17 +68,16 @@ type ClientIPHandler struct {
 	Next http.Handler
 }
 
+// Build implements middleware.Builder. It returns a ClientIPHandler wired to next.
+func (h *ClientIPHandler) Build(next http.Handler) http.Handler {
+	return &ClientIPHandler{Next: next}
+}
+
 // ServeHTTP implements http.Handler.
 func (h *ClientIPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ip := extractClientIP(r)
 	ctx := WithClientIP(r.Context(), ip)
 	h.Next.ServeHTTP(w, r.WithContext(ctx))
-}
-
-// ClientIPMiddleware wraps next with ClientIPHandler.
-// Kept for callers that compose handlers via a func adapter.
-func ClientIPMiddleware(next http.Handler) http.Handler {
-	return &ClientIPHandler{Next: next}
 }
 
 // extractClientIP returns the real client IP from the HTTP request.

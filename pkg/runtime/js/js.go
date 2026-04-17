@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -57,7 +58,7 @@ func init() {
 	})
 
 	// Register inbound and outbound middleware strategies.
-	pkgmiddleware.Register("inbound/js", func(_ context.Context, cfg any) (func(http.Handler) http.Handler, error) {
+	pkgmiddleware.Register("inbound/js", func(_ context.Context, cfg any) (pkgmiddleware.Builder, error) {
 		ic, ok := cfg.(*config.InboundAuthConfig)
 		if !ok {
 			return nil, fmt.Errorf("inbound/js: expected *config.InboundAuthConfig, got %T", cfg)
@@ -65,23 +66,9 @@ func init() {
 		if ic.JSAuthPool == nil {
 			return nil, fmt.Errorf("js inbound auth requires runtime pools; set InboundAuthConfig.JSAuthPool")
 		}
-		v, err := NewValidator(ic.JS, ic.JSAuthPool)
-		if err != nil {
-			return nil, err
-		}
-		return func(next http.Handler) http.Handler {
-			return &Validator{
-				program:     v.program,
-				timeout:     v.timeout,
-				env:         v.env,
-				scriptCache: v.scriptCache,
-				httpClient:  v.httpClient,
-				pool:        v.pool,
-				Next:        next,
-			}
-		}, nil
+		return NewValidator(ic.JS, ic.JSAuthPool)
 	})
-	pkgmiddleware.Register("outbound/js", func(_ context.Context, cfg any) (func(http.Handler) http.Handler, error) {
+	pkgmiddleware.Register("outbound/js", func(_ context.Context, cfg any) (pkgmiddleware.Builder, error) {
 		oc, ok := cfg.(*config.OutboundAuthConfig)
 		if !ok {
 			return nil, fmt.Errorf("outbound/js: expected *config.OutboundAuthConfig, got %T", cfg)
@@ -89,22 +76,7 @@ func init() {
 		if oc.JSAuthPool == nil {
 			return nil, fmt.Errorf("js outbound auth requires runtime pools; set OutboundAuthConfig.JSAuthPool")
 		}
-		p, err := NewProvider(oc.Upstream, oc.JS, oc.JSAuthPool)
-		if err != nil {
-			return nil, err
-		}
-		return func(next http.Handler) http.Handler {
-			return &Provider{
-				upstreamName: p.upstreamName,
-				program:      p.program,
-				timeout:      p.timeout,
-				env:          p.env,
-				scriptCache:  p.scriptCache,
-				httpClient:   p.httpClient,
-				pool:         p.pool,
-				Next:         next,
-			}
-		}, nil
+		return NewProvider(oc.Upstream, oc.JS, oc.JSAuthPool)
 	})
 }
 
@@ -200,9 +172,37 @@ func NewValidator(cfg config.JSAuthConfig, pool config.PoolAcquirer) (*Validator
 	}, nil
 }
 
+// Build implements middleware.Builder. It returns a Validator wired to next, sharing compiled program and cache.
+func (v *Validator) Build(next http.Handler) http.Handler {
+	return &Validator{
+		program:     v.program,
+		timeout:     v.timeout,
+		env:         v.env,
+		scriptCache: v.scriptCache,
+		httpClient:  v.httpClient,
+		pool:        v.pool,
+		Next:        next,
+	}
+}
+
 // ServeHTTP implements http.Handler. It extracts a Bearer token and validates it via JS script.
 func (v *Validator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	inbound.ServeValidated(w, r, v.Next, v, inbound.ExtractBearerToken(r))
+	token := inbound.ExtractBearerToken(r)
+	if token == "" {
+		inbound.WriteUnauthorized(w, r, "missing_token")
+		return
+	}
+	info, err := v.ValidateToken(r.Context(), token)
+	if err != nil {
+		var denied *inbound.DeniedError
+		if errors.As(err, &denied) {
+			inbound.WriteDenied(w, r, denied)
+		} else {
+			inbound.WriteUnauthorized(w, r, "invalid_token")
+		}
+		return
+	}
+	v.Next.ServeHTTP(w, r.WithContext(inbound.WithTokenInfo(r.Context(), info)))
 }
 
 // ValidateToken runs the JS script with the token and returns identity info on success.
@@ -337,9 +337,41 @@ func NewProvider(upstreamName string, cfg config.JSOutboundConfig, pool config.P
 	}, nil
 }
 
+// Build implements middleware.Builder. It returns a Provider wired to next, sharing compiled program and cache.
+func (p *Provider) Build(next http.Handler) http.Handler {
+	return &Provider{
+		upstreamName: p.upstreamName,
+		program:      p.program,
+		timeout:      p.timeout,
+		env:          p.env,
+		scriptCache:  p.scriptCache,
+		httpClient:   p.httpClient,
+		pool:         p.pool,
+		Next:         next,
+	}
+}
+
 // ServeHTTP implements http.Handler. It injects JS-script-derived credentials into the request context.
 func (p *Provider) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	outbound.ServeWithProvider(w, r, p.Next, p)
+	ctx := r.Context()
+	rawHeaders, err := p.RawHeaders(ctx)
+	if err != nil {
+		p.Next.ServeHTTP(w, r.WithContext(outbound.WithAuthResult(ctx, outbound.AuthErrResult(err))))
+		return
+	}
+	if len(rawHeaders) > 0 {
+		ctx = outbound.WithHeaders(ctx, rawHeaders)
+	} else {
+		token, tokenErr := p.Token(ctx)
+		if tokenErr != nil {
+			p.Next.ServeHTTP(w, r.WithContext(outbound.WithAuthResult(ctx, outbound.AuthErrResult(tokenErr))))
+			return
+		}
+		if token != "" {
+			ctx = outbound.WithHeaders(ctx, map[string]string{"Authorization": "Bearer " + token})
+		}
+	}
+	p.Next.ServeHTTP(w, r.WithContext(ctx))
 }
 
 // Token returns the current Bearer token, invoking the JS script if the cache has expired.

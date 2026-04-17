@@ -49,3 +49,8 @@ func TokenInfoFromContext(ctx context.Context) *TokenInfo {
 	v, _ := ctx.Value(contextKey{}).(*TokenInfo)
 	return v
 }
+
+// WithTokenInfo stores info in ctx for retrieval by TokenInfoFromContext.
+func WithTokenInfo(ctx context.Context, info *TokenInfo) context.Context {
+	return context.WithValue(ctx, contextKey{}, info)
+}

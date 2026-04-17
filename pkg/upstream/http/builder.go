@@ -51,7 +51,7 @@ func (b *Builder) Build(ctx context.Context, cfg *config.UpstreamConfig, naming 
 	if outboundStrategy == "" {
 		outboundStrategy = "none"
 	}
-	outboundMW, err := pkgmiddleware.New(ctx, "outbound/"+outboundStrategy, &outboundCfg)
+	outboundBuilder, err := pkgmiddleware.New(ctx, "outbound/"+outboundStrategy, &outboundCfg)
 	if err != nil {
 		return nil, fmt.Errorf("build outbound auth for upstream %q: %w", cfg.Name, err)
 	}
@@ -108,7 +108,7 @@ func (b *Builder) Build(ctx context.Context, cfg *config.UpstreamConfig, naming 
 		// Compose the per-tool handler chain:
 		//   TransformHandler → outbound auth → Executor (terminal handler)
 		var h nethttp.Handler = executor
-		h = outboundMW(h)
+		h = outboundBuilder.Build(h)
 		if vt.Transforms != nil {
 			h = &transform.Handler{Transforms: vt.Transforms, Next: h}
 		}

@@ -17,18 +17,12 @@ import (
 )
 
 func init() {
-	pkgmiddleware.Register("outbound/oauth2_client_credentials", func(ctx context.Context, cfg any) (func(http.Handler) http.Handler, error) {
+	pkgmiddleware.Register("outbound/oauth2_client_credentials", func(ctx context.Context, cfg any) (pkgmiddleware.Builder, error) {
 		oc, ok := cfg.(*config.OutboundAuthConfig)
 		if !ok {
 			return nil, fmt.Errorf("outbound/oauth2_client_credentials: expected *config.OutboundAuthConfig, got %T", cfg)
 		}
-		p, err := NewProvider(ctx, oc.OAuth2ClientCredentials)
-		if err != nil {
-			return nil, err
-		}
-		return func(next http.Handler) http.Handler {
-			return &Provider{src: p.src, Next: next}
-		}, nil
+		return NewProvider(ctx, oc.OAuth2ClientCredentials)
 	})
 }
 
@@ -52,6 +46,11 @@ func NewProvider(ctx context.Context, cfg config.OAuth2CCConfig) (*Provider, err
 	return &Provider{src: src}, nil
 }
 
+// Build implements middleware.Builder. It returns a Provider wired to next, sharing the token source.
+func (p *Provider) Build(next http.Handler) http.Handler {
+	return &Provider{src: p.src, Next: next}
+}
+
 // Token returns a valid access token, refreshing if the cached token has expired.
 func (p *Provider) Token(_ context.Context) (string, error) {
 	tok, err := p.src.Token()
@@ -68,5 +67,14 @@ func (p *Provider) RawHeaders(_ context.Context) (map[string]string, error) {
 
 // ServeHTTP implements http.Handler. It injects an OAuth2 access token into the request context.
 func (p *Provider) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	outbound.ServeWithProvider(w, r, p.Next, p)
+	ctx := r.Context()
+	token, err := p.Token(ctx)
+	if err != nil {
+		p.Next.ServeHTTP(w, r.WithContext(outbound.WithAuthResult(ctx, outbound.AuthErrResult(err))))
+		return
+	}
+	if token != "" {
+		ctx = outbound.WithHeaders(ctx, map[string]string{"Authorization": "Bearer " + token})
+	}
+	p.Next.ServeHTTP(w, r.WithContext(ctx))
 }

@@ -17,7 +17,7 @@ func TestClientIPMiddleware(t *testing.T) {
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		capturedIP = ratelimit.ClientIPFromContext(r.Context())
 	})
-	handler := ratelimit.ClientIPMiddleware(next)
+	handler := (&ratelimit.ClientIPHandler{}).Build(next)
 
 	tests := []struct {
 		name       string

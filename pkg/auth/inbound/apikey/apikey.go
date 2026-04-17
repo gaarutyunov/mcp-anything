@@ -16,18 +16,12 @@ import (
 )
 
 func init() {
-	pkgmiddleware.Register("inbound/apikey", func(_ context.Context, cfg any) (func(http.Handler) http.Handler, error) {
+	pkgmiddleware.Register("inbound/apikey", func(_ context.Context, cfg any) (pkgmiddleware.Builder, error) {
 		ic, ok := cfg.(*config.InboundAuthConfig)
 		if !ok {
 			return nil, fmt.Errorf("inbound/apikey: expected *config.InboundAuthConfig, got %T", cfg)
 		}
-		v, err := NewValidator(ic.APIKey)
-		if err != nil {
-			return nil, err
-		}
-		return func(next http.Handler) http.Handler {
-			return &Validator{header: v.header, keys: v.keys, Next: next}
-		}, nil
+		return NewValidator(ic.APIKey)
 	})
 }
 
@@ -56,6 +50,11 @@ func NewValidator(cfg config.APIKeyAuthConfig) (*Validator, error) {
 	return &Validator{header: cfg.Header, keys: keys}, nil
 }
 
+// Build implements middleware.Builder. It returns a Validator wired to next.
+func (v *Validator) Build(next http.Handler) http.Handler {
+	return &Validator{header: v.header, keys: v.keys, Next: next}
+}
+
 // ValidateToken checks whether token (the API key value) is in the allowed key set.
 func (v *Validator) ValidateToken(_ context.Context, token string) (*inbound.TokenInfo, error) {
 	if _, ok := v.keys[token]; !ok {
@@ -66,5 +65,20 @@ func (v *Validator) ValidateToken(_ context.Context, token string) (*inbound.Tok
 
 // ServeHTTP implements http.Handler. It reads the API key from the configured header.
 func (v *Validator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	inbound.ServeValidated(w, r, v.Next, v, r.Header.Get(v.header))
+	token := r.Header.Get(v.header)
+	if token == "" {
+		inbound.WriteUnauthorized(w, r, "missing_token")
+		return
+	}
+	info, err := v.ValidateToken(r.Context(), token)
+	if err != nil {
+		var denied *inbound.DeniedError
+		if errors.As(err, &denied) {
+			inbound.WriteDenied(w, r, denied)
+		} else {
+			inbound.WriteUnauthorized(w, r, "invalid_token")
+		}
+		return
+	}
+	v.Next.ServeHTTP(w, r.WithContext(inbound.WithTokenInfo(r.Context(), info)))
 }

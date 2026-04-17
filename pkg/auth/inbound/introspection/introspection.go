@@ -19,18 +19,12 @@ import (
 )
 
 func init() {
-	pkgmiddleware.Register("inbound/introspection", func(ctx context.Context, cfg any) (func(http.Handler) http.Handler, error) {
+	pkgmiddleware.Register("inbound/introspection", func(ctx context.Context, cfg any) (pkgmiddleware.Builder, error) {
 		ic, ok := cfg.(*config.InboundAuthConfig)
 		if !ok {
 			return nil, fmt.Errorf("inbound/introspection: expected *config.InboundAuthConfig, got %T", cfg)
 		}
-		v, err := NewValidator(ctx, ic.Introspection)
-		if err != nil {
-			return nil, err
-		}
-		return func(next http.Handler) http.Handler {
-			return &Validator{server: v.server, aud: v.aud, Next: next}
-		}, nil
+		return NewValidator(ctx, ic.Introspection)
 	})
 }
 
@@ -50,6 +44,11 @@ func NewValidator(ctx context.Context, cfg config.IntrospectionConfig) (*Validat
 		return nil, fmt.Errorf("creating introspection resource server: %w", err)
 	}
 	return &Validator{server: server, aud: cfg.Audience}, nil
+}
+
+// Build implements middleware.Builder. It returns a Validator wired to next.
+func (v *Validator) Build(next http.Handler) http.Handler {
+	return &Validator{server: v.server, aud: v.aud, Next: next}
 }
 
 // ValidateToken introspects the token and checks it is active and has the expected audience.
@@ -72,5 +71,20 @@ func (v *Validator) ValidateToken(ctx context.Context, raw string) (*inbound.Tok
 
 // ServeHTTP implements http.Handler. It extracts a Bearer token and validates it.
 func (v *Validator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	inbound.ServeValidated(w, r, v.Next, v, inbound.ExtractBearerToken(r))
+	token := inbound.ExtractBearerToken(r)
+	if token == "" {
+		inbound.WriteUnauthorized(w, r, "missing_token")
+		return
+	}
+	info, err := v.ValidateToken(r.Context(), token)
+	if err != nil {
+		var denied *inbound.DeniedError
+		if errors.As(err, &denied) {
+			inbound.WriteDenied(w, r, denied)
+		} else {
+			inbound.WriteUnauthorized(w, r, "invalid_token")
+		}
+		return
+	}
+	v.Next.ServeHTTP(w, r.WithContext(inbound.WithTokenInfo(r.Context(), info)))
 }

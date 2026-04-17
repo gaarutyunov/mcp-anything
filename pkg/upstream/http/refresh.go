@@ -305,7 +305,7 @@ func (r *Refresher) buildEntriesFromBytes(ctx context.Context, mergedBytes []byt
 	if outboundStrategy == "" {
 		outboundStrategy = "none"
 	}
-	outboundMW, err := pkgmiddleware.New(ctx, "outbound/"+outboundStrategy, &outboundCfg)
+	outboundBuilder, err := pkgmiddleware.New(ctx, "outbound/"+outboundStrategy, &outboundCfg)
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("building outbound auth: %w", err)
 	}
@@ -349,7 +349,7 @@ func (r *Refresher) buildEntriesFromBytes(ctx context.Context, mergedBytes []byt
 		// Compose the per-tool handler chain:
 		//   TransformHandler → outbound auth → Executor (terminal handler)
 		var h nethttp.Handler = executor
-		h = outboundMW(h)
+		h = outboundBuilder.Build(h)
 		if vt.Transforms != nil {
 			h = &transform.Handler{Transforms: vt.Transforms, Next: h}
 		}

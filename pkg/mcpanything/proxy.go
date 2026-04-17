@@ -134,8 +134,8 @@ func New(ctx context.Context, cfg *pkgconfig.ProxyConfig, opts ...Option) (*Prox
 		}
 	}
 
-	// Build inbound auth handler factories (global + per-upstream overrides).
-	globalFn, overrideFns, wellKnown, err := p.buildAuth(ctx)
+	// Build inbound auth middleware builders (global + per-upstream overrides).
+	globalMW, overrideMWs, wellKnown, err := p.buildAuth(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -145,11 +145,11 @@ func New(ctx context.Context, cfg *pkgconfig.ProxyConfig, opts ...Option) (*Prox
 	mcpHandlers := make(map[string]http.Handler, len(rawHandlers))
 	for endpoint, handler := range rawHandlers {
 		h := handler
-		if globalFn != nil {
-			globalH := globalFn(h)
-			overrideHandlers := make(map[string]http.Handler, len(overrideFns))
-			for name, fn := range overrideFns {
-				overrideHandlers[name] = fn(h)
+		if globalMW != nil {
+			globalH := globalMW.Build(h)
+			overrideHandlers := make(map[string]http.Handler, len(overrideMWs))
+			for name, mw := range overrideMWs {
+				overrideHandlers[name] = mw.Build(h)
 			}
 			h = pkginbound.NewDispatchHandler(globalH, overrideHandlers, p.manager, p.manager.ToolUpstreamName, h)
 		}
@@ -249,11 +249,11 @@ func (p *Proxy) Shutdown(ctx context.Context) error {
 	return firstErr
 }
 
-// buildAuth constructs the inbound auth handler factories and the optional well-known
-// handler. Returns nil factories when auth is disabled.
+// buildAuth constructs the inbound auth middleware builders and the optional well-known
+// handler. Returns nil builders when auth is disabled.
 func (p *Proxy) buildAuth(ctx context.Context) (
-	globalFn func(http.Handler) http.Handler,
-	overrideFns map[string]func(http.Handler) http.Handler,
+	globalMW pkgmiddleware.Builder,
+	overrideMWs map[string]pkgmiddleware.Builder,
 	wellKnown http.HandlerFunc,
 	err error,
 ) {
@@ -265,13 +265,13 @@ func (p *Proxy) buildAuth(ctx context.Context) (
 	authCfg := p.cfg.InboundAuth
 	authCfg.JSAuthPool = p.pools.Get("js/auth")
 	authCfg.LuaAuthPool = p.pools.Get("lua/auth")
-	globalFn, err = pkgmiddleware.New(ctx, "inbound/"+strategy, &authCfg)
+	globalMW, err = pkgmiddleware.New(ctx, "inbound/"+strategy, &authCfg)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("build inbound auth middleware: %w", err)
 	}
 	slog.Info("inbound auth enabled", "strategy", strategy)
 
-	overrideFns = make(map[string]func(http.Handler) http.Handler)
+	overrideMWs = make(map[string]pkgmiddleware.Builder)
 	for i := range p.cfg.Upstreams {
 		up := &p.cfg.Upstreams[i]
 		if !up.Enabled || up.InboundAuthOverride == nil {
@@ -280,11 +280,11 @@ func (p *Proxy) buildAuth(ctx context.Context) (
 		ovCfg := *up.InboundAuthOverride
 		ovCfg.JSAuthPool = p.pools.Get("js/auth")
 		ovCfg.LuaAuthPool = p.pools.Get("lua/auth")
-		ovFn, ovErr := pkgmiddleware.New(ctx, "inbound/"+ovCfg.Strategy, &ovCfg)
+		ovMW, ovErr := pkgmiddleware.New(ctx, "inbound/"+ovCfg.Strategy, &ovCfg)
 		if ovErr != nil {
 			return nil, nil, nil, fmt.Errorf("build inbound auth override for %q: %w", up.Name, ovErr)
 		}
-		overrideFns[up.Name] = ovFn
+		overrideMWs[up.Name] = ovMW
 		slog.Info("per-upstream auth override", "upstream", up.Name, "strategy", up.InboundAuthOverride.Strategy)
 	}
 
@@ -292,7 +292,7 @@ func (p *Proxy) buildAuth(ctx context.Context) (
 		wellKnown = pkginbound.WellKnownHandler(p.cfg)
 	}
 
-	return globalFn, overrideFns, wellKnown, nil
+	return globalMW, overrideMWs, wellKnown, nil
 }
 
 // buildSessionStore creates the OAuth session store and callback mux when configured.

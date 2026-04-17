@@ -11,10 +11,18 @@ import (
 	"sync"
 )
 
-// Factory creates a middleware from a generic config value.
+// Builder composes a middleware with a downstream handler.
+// Build is called once per downstream handler to wire the chain.
+// Implementations share expensive internal state (e.g. token caches, compiled scripts)
+// across multiple Build calls.
+type Builder interface {
+	Build(next http.Handler) http.Handler
+}
+
+// Factory creates a Builder from a generic config value.
 // The cfg parameter is type-asserted by each factory to its own concrete type.
 // Factories are registered from init() in strategy sub-packages.
-type Factory func(ctx context.Context, cfg any) (func(http.Handler) http.Handler, error)
+type Factory func(ctx context.Context, cfg any) (Builder, error)
 
 var (
 	regMu sync.RWMutex
@@ -30,10 +38,10 @@ func Register(name string, f Factory) {
 	reg[name] = f
 }
 
-// New builds the appropriate middleware from config.
+// New builds the appropriate middleware Builder from config.
 // Returns an error for unknown names; strategy sub-packages must be imported
 // (blank import) before calling New.
-func New(ctx context.Context, name string, cfg any) (func(http.Handler) http.Handler, error) {
+func New(ctx context.Context, name string, cfg any) (Builder, error) {
 	regMu.RLock()
 	f, ok := reg[name]
 	regMu.RUnlock()

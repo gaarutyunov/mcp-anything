@@ -7,19 +7,16 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/gaarutyunov/mcp-anything/pkg/auth/outbound"
 	"github.com/gaarutyunov/mcp-anything/pkg/config"
 	pkgmiddleware "github.com/gaarutyunov/mcp-anything/pkg/middleware"
 )
 
 func init() {
-	pkgmiddleware.Register("outbound/none", func(_ context.Context, cfg any) (func(http.Handler) http.Handler, error) {
+	pkgmiddleware.Register("outbound/none", func(_ context.Context, cfg any) (pkgmiddleware.Builder, error) {
 		if _, ok := cfg.(*config.OutboundAuthConfig); !ok {
 			return nil, fmt.Errorf("outbound/none: expected *config.OutboundAuthConfig, got %T", cfg)
 		}
-		return func(next http.Handler) http.Handler {
-			return &Provider{Next: next}
-		}, nil
+		return NewProvider(), nil
 	})
 }
 
@@ -31,6 +28,11 @@ type Provider struct {
 // NewProvider creates a no-op Provider.
 func NewProvider() *Provider { return &Provider{} }
 
+// Build implements middleware.Builder. It returns a Provider wired to next.
+func (p *Provider) Build(next http.Handler) http.Handler {
+	return &Provider{Next: next}
+}
+
 // Token returns an empty token; no authentication is injected.
 func (p *Provider) Token(_ context.Context) (string, error) { return "", nil }
 
@@ -39,5 +41,5 @@ func (p *Provider) RawHeaders(_ context.Context) (map[string]string, error) { re
 
 // ServeHTTP implements http.Handler. It passes through to Next with no credential injection.
 func (p *Provider) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	outbound.ServeWithProvider(w, r, p.Next, p)
+	p.Next.ServeHTTP(w, r)
 }

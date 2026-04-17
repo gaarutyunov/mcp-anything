@@ -14,15 +14,12 @@ import (
 )
 
 func init() {
-	pkgmiddleware.Register("outbound/api_key", func(_ context.Context, cfg any) (func(http.Handler) http.Handler, error) {
+	pkgmiddleware.Register("outbound/api_key", func(_ context.Context, cfg any) (pkgmiddleware.Builder, error) {
 		oc, ok := cfg.(*config.OutboundAuthConfig)
 		if !ok {
 			return nil, fmt.Errorf("outbound/api_key: expected *config.OutboundAuthConfig, got %T", cfg)
 		}
-		p := NewProvider(oc.APIKey)
-		return func(next http.Handler) http.Handler {
-			return &Provider{header: p.header, valueEnv: p.valueEnv, prefix: p.prefix, Next: next}
-		}, nil
+		return NewProvider(oc.APIKey), nil
 	})
 }
 
@@ -43,6 +40,11 @@ func NewProvider(cfg config.APIKeyOutboundConfig) *Provider {
 	}
 }
 
+// Build implements middleware.Builder. It returns a Provider wired to next.
+func (p *Provider) Build(next http.Handler) http.Handler {
+	return &Provider{header: p.header, valueEnv: p.valueEnv, prefix: p.prefix, Next: next}
+}
+
 // Token returns empty string because API key auth uses RawHeaders().
 func (p *Provider) Token(_ context.Context) (string, error) {
 	return "", nil
@@ -59,5 +61,14 @@ func (p *Provider) RawHeaders(_ context.Context) (map[string]string, error) {
 
 // ServeHTTP implements http.Handler. It injects an API key header into the request context.
 func (p *Provider) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	outbound.ServeWithProvider(w, r, p.Next, p)
+	ctx := r.Context()
+	rawHeaders, err := p.RawHeaders(ctx)
+	if err != nil {
+		p.Next.ServeHTTP(w, r.WithContext(outbound.WithAuthResult(ctx, outbound.AuthErrResult(err))))
+		return
+	}
+	if len(rawHeaders) > 0 {
+		ctx = outbound.WithHeaders(ctx, rawHeaders)
+	}
+	p.Next.ServeHTTP(w, r.WithContext(ctx))
 }

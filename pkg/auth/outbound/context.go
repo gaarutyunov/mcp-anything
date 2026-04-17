@@ -20,8 +20,8 @@ func HeadersFromContext(ctx context.Context) map[string]string {
 	return h
 }
 
-// withHeaders stores outbound auth headers in ctx under the package-private outboundHeadersKey.
-func withHeaders(ctx context.Context, headers map[string]string) context.Context {
+// WithHeaders stores outbound auth headers in ctx under the package-private outboundHeadersKey.
+func WithHeaders(ctx context.Context, headers map[string]string) context.Context {
 	return context.WithValue(ctx, outboundHeadersKey{}, headers)
 }
 
@@ -33,7 +33,7 @@ func AuthResultFromContext(ctx context.Context) *sdkmcp.CallToolResult {
 	return r
 }
 
-// withAuthResult stores an early-exit result in ctx under the package-private outboundResultKey.
-func withAuthResult(ctx context.Context, result *sdkmcp.CallToolResult) context.Context {
+// WithAuthResult stores an early-exit result in ctx under the package-private outboundResultKey.
+func WithAuthResult(ctx context.Context, result *sdkmcp.CallToolResult) context.Context {
 	return context.WithValue(ctx, outboundResultKey{}, result)
 }

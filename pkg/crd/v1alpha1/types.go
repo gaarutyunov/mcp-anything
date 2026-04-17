@@ -53,14 +53,14 @@ type MCPProxySpec struct {
 	Server ProxyServerSpec `json:"server,omitempty"`
 	// +optional
 	// Naming configures how MCP tool names are generated.
-	// Generated from pkg/config.NamingSpec.
+	// Generated from pkg/config.NamingConfig.
 	Naming NamingSpec `json:"naming,omitempty"`
 	// +optional
 	// InboundAuth configures authentication for inbound MCP clients.
 	InboundAuth *ProxyInboundAuthSpec `json:"inboundAuth,omitempty"`
 	// +optional
 	// Telemetry configures observability settings.
-	// Generated from pkg/config.TelemetrySpec.
+	// Generated from pkg/config.TelemetryConfig.
 	Telemetry *TelemetrySpec `json:"telemetry,omitempty"`
 	// +optional
 	// GatewayRef configures Kubernetes Gateway API HTTPRoute creation.
@@ -213,11 +213,11 @@ type MCPUpstreamSpec struct {
 	Transport *MCPUpstreamTransportSpec `json:"transport,omitempty"`
 	// +optional
 	// Validation configures request/response validation against the OpenAPI schema.
-	// Generated from pkg/config.ValidationSpec.
+	// Generated from pkg/config.ValidationConfig.
 	Validation *ValidationSpec `json:"validation,omitempty"`
 	// +optional
 	// Commands defines command-backed MCP tools. Required when Type is "command".
-	// Generated from pkg/config.CommandSpec.
+	// Generated from pkg/config.CommandConfig.
 	Commands []CommandSpec `json:"commands,omitempty"`
 	// +optional
 	// RateLimit is the name of a rate limit policy defined in the owning MCPProxy's
@@ -327,7 +327,7 @@ type ProxyInboundAuthSpec struct {
 	Strategy string `json:"strategy"`
 	// +optional
 	// JWT configures JWT Bearer token validation.
-	// Generated from pkg/config.JWTAuthSpec.
+	// Generated from pkg/config.JWTAuthConfig.
 	JWT *JWTAuthSpec `json:"jwt,omitempty"`
 }
 

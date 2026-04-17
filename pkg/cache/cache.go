@@ -30,7 +30,7 @@ type Store interface {
 }
 
 // StoreFactory creates a Store from config.
-type StoreFactory func(ctx context.Context, cfg *config.CacheStoreSpec) (Store, error)
+type StoreFactory func(ctx context.Context, cfg *config.CacheStoreConfig) (Store, error)
 
 var reg registry.Registry[StoreFactory]
 
@@ -42,7 +42,7 @@ func Register(provider string, factory StoreFactory) {
 
 // New creates a Store from config.
 // Defaults to "memory" provider if cfg.Provider is empty.
-func New(ctx context.Context, cfg *config.CacheStoreSpec) (Store, error) {
+func New(ctx context.Context, cfg *config.CacheStoreConfig) (Store, error) {
 	provider := cfg.Provider
 	if provider == "" {
 		provider = "memory"

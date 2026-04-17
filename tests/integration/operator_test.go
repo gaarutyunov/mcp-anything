@@ -346,7 +346,7 @@ func TestOperatorCreatesMCPProxyResources(t *testing.T) {
 			Server: v1alpha1.ProxyServerSpec{
 				Port: 8080,
 			},
-			Naming: v1alpha1.NamingSpec{
+			Naming: v1alpha1.ProxyNamingSpec{
 				Separator: "__",
 			},
 		},
@@ -486,7 +486,7 @@ func TestOperatorLabelSelectorFiltersUpstreams(t *testing.T) {
 				MatchLabels: map[string]string{"mcp-anything.ai/proxy": "proxy-a"},
 			},
 			Server: v1alpha1.ProxyServerSpec{Port: 8080},
-			Naming: v1alpha1.NamingSpec{Separator: "__"},
+			Naming: v1alpha1.ProxyNamingSpec{Separator: "__"},
 		},
 	}
 	if err := k8sClient.Create(ctx, proxy); err != nil {
@@ -640,7 +640,7 @@ func TestAnnotationBasedServiceDiscovery(t *testing.T) {
 				},
 			},
 			Server: v1alpha1.ProxyServerSpec{Port: 8080},
-			Naming: v1alpha1.NamingSpec{Separator: "__"},
+			Naming: v1alpha1.ProxyNamingSpec{Separator: "__"},
 		},
 	}
 	if err := k8sClient.Create(ctx, proxy); err != nil {
@@ -818,7 +818,7 @@ func TestAnnotationBasedCrossNamespaceDiscovery(t *testing.T) {
 				},
 			},
 			Server: v1alpha1.ProxyServerSpec{Port: 8080},
-			Naming: v1alpha1.NamingSpec{Separator: "__"},
+			Naming: v1alpha1.ProxyNamingSpec{Separator: "__"},
 		},
 	}
 	if err := k8sClient.Create(ctx, proxy); err != nil {

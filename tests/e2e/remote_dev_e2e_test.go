@@ -164,7 +164,7 @@ func TestRemoteDevWorkspaceE2E(t *testing.T) {
 			Server: v1alpha1.ProxyServerSpec{
 				Port: remoteDevProxyPort,
 			},
-			Naming: v1alpha1.NamingSpec{
+			Naming: v1alpha1.ProxyNamingSpec{
 				Separator: "__",
 			},
 		},
@@ -425,15 +425,15 @@ func buildRemoteDevUpstream() *v1alpha1.MCPUpstream {
 		Spec: v1alpha1.MCPUpstreamSpec{
 			Type:       "command",
 			ToolPrefix: "dev",
-			Commands: []v1alpha1.CommandSpec{
+			Commands: []v1alpha1.MCPUpstreamCommandSpec{
 				{
 					ToolName:    "write_file",
 					Description: "Write content to a file in the workspace",
 					Command:     "/usr/local/bin/write-file {{.path}} {{.content}}",
 					Timeout:     "10s",
-					InputSchema: v1alpha1.CommandInputSchema{
+					InputSchema: v1alpha1.MCPUpstreamCommandInputSchema{
 						Type: "object",
-						Properties: map[string]v1alpha1.CommandSchemaProperty{
+						Properties: map[string]v1alpha1.MCPUpstreamCommandSchemaProperty{
 							"path": {
 								Type:        "string",
 								Description: "File path relative to /workspace (or absolute path under /workspace)",
@@ -451,9 +451,9 @@ func buildRemoteDevUpstream() *v1alpha1.MCPUpstream {
 					Description: "Read the contents of a file",
 					Command:     "cat {{.path}}",
 					Timeout:     "10s",
-					InputSchema: v1alpha1.CommandInputSchema{
+					InputSchema: v1alpha1.MCPUpstreamCommandInputSchema{
 						Type: "object",
-						Properties: map[string]v1alpha1.CommandSchemaProperty{
+						Properties: map[string]v1alpha1.MCPUpstreamCommandSchemaProperty{
 							"path": {
 								Type:        "string",
 								Description: "Absolute file path to read",
@@ -467,9 +467,9 @@ func buildRemoteDevUpstream() *v1alpha1.MCPUpstream {
 					Description: "List files matching a pattern in a directory",
 					Command:     "find {{.directory}} -type f -name {{.pattern}}",
 					Timeout:     "10s",
-					InputSchema: v1alpha1.CommandInputSchema{
+					InputSchema: v1alpha1.MCPUpstreamCommandInputSchema{
 						Type: "object",
-						Properties: map[string]v1alpha1.CommandSchemaProperty{
+						Properties: map[string]v1alpha1.MCPUpstreamCommandSchemaProperty{
 							"directory": {
 								Type:        "string",
 								Description: "Directory to search in",
@@ -487,9 +487,9 @@ func buildRemoteDevUpstream() *v1alpha1.MCPUpstream {
 					Description: "Search file contents for a pattern (grep)",
 					Command:     "grep -rn {{.pattern}} {{.directory}}",
 					Timeout:     "30s",
-					InputSchema: v1alpha1.CommandInputSchema{
+					InputSchema: v1alpha1.MCPUpstreamCommandInputSchema{
 						Type: "object",
-						Properties: map[string]v1alpha1.CommandSchemaProperty{
+						Properties: map[string]v1alpha1.MCPUpstreamCommandSchemaProperty{
 							"pattern": {
 								Type:        "string",
 								Description: "Search pattern (fixed string or regex)",
@@ -508,9 +508,9 @@ func buildRemoteDevUpstream() *v1alpha1.MCPUpstream {
 					Command:     "golangci-lint run {{.path}}",
 					WorkingDir:  "/workspace",
 					Timeout:     "60s",
-					InputSchema: v1alpha1.CommandInputSchema{
+					InputSchema: v1alpha1.MCPUpstreamCommandInputSchema{
 						Type: "object",
-						Properties: map[string]v1alpha1.CommandSchemaProperty{
+						Properties: map[string]v1alpha1.MCPUpstreamCommandSchemaProperty{
 							"path": {
 								Type:        "string",
 								Description: "Package path to lint (e.g. ./...)",
@@ -525,9 +525,9 @@ func buildRemoteDevUpstream() *v1alpha1.MCPUpstream {
 					Command:     "go build {{.path}}",
 					WorkingDir:  "/workspace",
 					Timeout:     "60s",
-					InputSchema: v1alpha1.CommandInputSchema{
+					InputSchema: v1alpha1.MCPUpstreamCommandInputSchema{
 						Type: "object",
-						Properties: map[string]v1alpha1.CommandSchemaProperty{
+						Properties: map[string]v1alpha1.MCPUpstreamCommandSchemaProperty{
 							"path": {
 								Type:        "string",
 								Description: "Package path to build (e.g. ./...)",

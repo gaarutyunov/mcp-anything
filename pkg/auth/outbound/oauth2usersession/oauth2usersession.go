@@ -25,9 +25,9 @@ import (
 
 func init() {
 	pkgmiddleware.Register("outbound/oauth2_user_session", func(ctx context.Context, cfg any) (func(http.Handler) http.Handler, error) {
-		oc, ok := cfg.(*config.OutboundAuthSpec)
+		oc, ok := cfg.(*config.OutboundAuthConfig)
 		if !ok {
-			return nil, fmt.Errorf("outbound/oauth2_user_session: expected *config.OutboundAuthSpec, got %T", cfg)
+			return nil, fmt.Errorf("outbound/oauth2_user_session: expected *config.OutboundAuthConfig, got %T", cfg)
 		}
 		p, err := newProvider(ctx, oc)
 		if err != nil {
@@ -46,7 +46,7 @@ type Provider struct {
 	httpClient  *http.Client
 }
 
-func newProvider(ctx context.Context, cfg *config.OutboundAuthSpec) (*Provider, error) {
+func newProvider(ctx context.Context, cfg *config.OutboundAuthConfig) (*Provider, error) {
 	if cfg.OAuthTokenStore == nil {
 		return nil, fmt.Errorf("oauth2_user_session strategy requires session_store to be configured in the top-level proxy config")
 	}
@@ -199,7 +199,7 @@ func subjectFromContext(ctx context.Context) string {
 }
 
 // resolveEndpoints determines the OAuth2 auth and token endpoint URLs.
-func resolveEndpoints(ctx context.Context, cfg config.OAuth2UserSessionSpec) (authURL, tokenURL string, err error) {
+func resolveEndpoints(ctx context.Context, cfg config.OAuth2UserSessionConfig) (authURL, tokenURL string, err error) {
 	switch cfg.Provider {
 	case "github":
 		return "https://github.com/login/oauth/authorize",

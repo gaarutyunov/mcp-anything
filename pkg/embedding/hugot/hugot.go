@@ -22,7 +22,7 @@ import (
 )
 
 func init() {
-	embedding.Register("hugot", func(_ context.Context, cfg *config.EmbeddingSpec) (embedding.Func, error) {
+	embedding.Register("hugot", func(_ context.Context, cfg *config.EmbeddingConfig) (embedding.Func, error) {
 		if cfg.Hugot == nil {
 			return nil, fmt.Errorf("embedding.hugot config is required for provider %q", "hugot")
 		}
@@ -32,7 +32,7 @@ func init() {
 
 // newHugotEmbeddingFunc creates an embedding Func backed by an in-process ONNX model.
 // The session and pipeline are created once and reused across calls.
-func newHugotEmbeddingFunc(cfg *config.HugotEmbedSpec) (embedding.Func, error) {
+func newHugotEmbeddingFunc(cfg *config.HugotEmbedConfig) (embedding.Func, error) {
 	if cfg.ModelPath == "" {
 		return nil, fmt.Errorf("hugot: model_path is required")
 	}

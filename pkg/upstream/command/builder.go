@@ -26,7 +26,7 @@ type Builder struct{}
 
 // Build compiles command tool definitions and returns a ValidatedUpstream
 // with RegistryEntry objects ready for registration.
-func (b *Builder) Build(_ context.Context, cfg *config.UpstreamSpec, naming *config.NamingSpec) (*pkgupstream.ValidatedUpstream, error) {
+func (b *Builder) Build(_ context.Context, cfg *config.UpstreamConfig, naming *config.NamingConfig) (*pkgupstream.ValidatedUpstream, error) {
 	cmdTools, err := BuildTools(cfg.Commands, cfg, naming)
 	if err != nil {
 		return nil, fmt.Errorf("upstream %q command validation failed: %w", cfg.Name, err)

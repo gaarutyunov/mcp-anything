@@ -84,7 +84,7 @@ type ValidatedTool struct {
 // and dry-runs all three transforms against synthetic data.
 // Respects the provided context (for startup_validation_timeout).
 // Returns the validated tools and the post-overlay YAML root node for JSONPath filter evaluation.
-func ValidateUpstream(ctx context.Context, upstreamCfg *config.UpstreamSpec, namingCfg *config.NamingSpec) ([]*ValidatedTool, *yaml.Node, error) {
+func ValidateUpstream(ctx context.Context, upstreamCfg *config.UpstreamConfig, namingCfg *config.NamingConfig) ([]*ValidatedTool, *yaml.Node, error) {
 	doc, router, specYAMLRoot, err := LoadPipeline(ctx, upstreamCfg.OpenAPI, upstreamCfg.Overlay)
 	if err != nil {
 		return nil, nil, fmt.Errorf("loading spec for upstream %q: %w", upstreamCfg.Name, err)

@@ -15,7 +15,7 @@ import (
 )
 
 func init() {
-	pkgratelimit.Register("memory", func(_ context.Context, _ *config.ProxySpec) (limiter.Store, error) {
+	pkgratelimit.Register("memory", func(_ context.Context, _ *config.ProxyConfig) (limiter.Store, error) {
 		return memstore.NewStore(), nil
 	})
 }

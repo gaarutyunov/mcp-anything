@@ -35,10 +35,11 @@ func HashBytes(b []byte) string {
 // SpecGenPath is the path (relative to repo root) of the generated spec types file.
 const SpecGenPath = "pkg/crd/v1alpha1/spec_gen.go"
 
-// SpecMapping defines which types in pkg/config/config.go are mirrored as CRD
-// spec types in pkg/crd/v1alpha1/spec_gen.go. The type name is identical in
-// both packages — no renaming occurs. Order determines the order of type
-// declarations in the generated file.
+// SpecMapping lists the config type names from pkg/config/config.go that are
+// mirrored as CRD spec types in pkg/crd/v1alpha1/spec_gen.go. The CRD type
+// name is derived algorithmically: the "Config" suffix is replaced with "Spec"
+// (types without a "Config" suffix are used unchanged). Order determines the
+// order of type declarations in the generated file.
 //
 // Rules for adding an entry:
 //   - All non-skipped fields must resolve to either a Go builtin, time.Duration
@@ -46,14 +47,23 @@ const SpecGenPath = "pkg/crd/v1alpha1/spec_gen.go"
 //   - Fields tagged with koanf:"-" are automatically skipped.
 //   - To add a new generated type: add the entry here and run "make generate-crds".
 var SpecMapping = []string{
-	"JWTAuthSpec",
-	"NamingSpec",
-	"SlugRulesSpec",
-	"TelemetrySpec",
-	"CommandSpec",
+	"JWTAuthConfig",
+	"NamingConfig",
+	"SlugRulesConfig",
+	"TelemetryConfig",
+	"CommandConfig",
 	"CommandInputSchema",
 	"CommandSchemaProperty",
-	"ValidationSpec",
+	"ValidationConfig",
+}
+
+// specName converts a config type name to its CRD spec type name by replacing
+// the "Config" suffix with "Spec". Names without a "Config" suffix are unchanged.
+func specName(configName string) string {
+	if strings.HasSuffix(configName, "Config") {
+		return strings.TrimSuffix(configName, "Config") + "Spec"
+	}
+	return configName
 }
 
 // generatedField is a single field in a generated struct.
@@ -79,34 +89,34 @@ func GenerateSpecContent(configPath string) (string, error) {
 		return "", fmt.Errorf("parsing %s: %w", configPath, err)
 	}
 
-	// Build set of known spec type names (same in both pkg/config and v1alpha1).
-	known := make(map[string]bool, len(SpecMapping))
-	for _, name := range SpecMapping {
-		known[name] = true
+	// Build mapping from config type name → CRD spec type name.
+	nameMap := make(map[string]string, len(SpecMapping))
+	for _, cfgName := range SpecMapping {
+		nameMap[cfgName] = specName(cfgName)
 	}
 
 	// Index all struct types declared in the file.
 	typeIndex := buildTypeIndex(f)
 
 	var types []generatedType
-	for _, name := range SpecMapping {
-		ts, ok := typeIndex[name]
+	for _, cfgName := range SpecMapping {
+		ts, ok := typeIndex[cfgName]
 		if !ok {
-			return "", fmt.Errorf("type %q not found in %s", name, configPath)
+			return "", fmt.Errorf("type %q not found in %s", cfgName, configPath)
 		}
 		st, ok := ts.Type.(*ast.StructType)
 		if !ok {
-			return "", fmt.Errorf("type %q is not a struct in %s", name, configPath)
+			return "", fmt.Errorf("type %q is not a struct in %s", cfgName, configPath)
 		}
 
 		gt := generatedType{
-			Name: name,
+			Name: nameMap[cfgName],
 			Doc:  extractTypeDoc(ts),
 		}
 		for _, field := range st.Fields.List {
-			gf, err := convertField(field, known)
+			gf, err := convertField(field, nameMap)
 			if err != nil {
-				return "", fmt.Errorf("field in %s: %w", name, err)
+				return "", fmt.Errorf("field in %s: %w", cfgName, err)
 			}
 			if gf != nil {
 				gt.Fields = append(gt.Fields, *gf)
@@ -176,7 +186,7 @@ func extractTypeDoc(ts *ast.TypeSpec) string {
 
 // convertField converts an AST struct field to a generatedField.
 // Returns nil for skipped fields (koanf:"-", koanf:"", or embedded).
-func convertField(field *ast.Field, known map[string]bool) (*generatedField, error) {
+func convertField(field *ast.Field, nameMap map[string]string) (*generatedField, error) {
 	// Embedded fields (no names) don't appear in our config types.
 	if len(field.Names) == 0 {
 		return nil, nil
@@ -192,8 +202,8 @@ func convertField(field *ast.Field, known map[string]bool) (*generatedField, err
 		return nil, nil
 	}
 
-	// Convert the Go type expression, using the known-types set.
-	goType, err := convertTypeExpr(field.Type, known)
+	// Convert the Go type expression, remapping config type names to spec names.
+	goType, err := convertTypeExpr(field.Type, nameMap)
 	if err != nil {
 		return nil, fmt.Errorf("field %s: %w", field.Names[0].Name, err)
 	}
@@ -207,15 +217,16 @@ func convertField(field *ast.Field, known map[string]bool) (*generatedField, err
 }
 
 // convertTypeExpr converts an AST type expression to its Go string representation.
-// Known spec types are passed through unchanged; time.Duration becomes string.
-func convertTypeExpr(expr ast.Expr, known map[string]bool) (string, error) {
+// Config type names in nameMap are renamed to their CRD spec names; time.Duration
+// becomes string.
+func convertTypeExpr(expr ast.Expr, nameMap map[string]string) (string, error) {
 	switch t := expr.(type) {
 	case *ast.Ident:
-		// Known spec types are shared between pkg/config and v1alpha1 — no rename needed.
-		if known[t.Name] {
-			return t.Name, nil
+		// Config types in the mapping are renamed to their spec counterparts.
+		if specN, ok := nameMap[t.Name]; ok {
+			return specN, nil
 		}
-		// Uppercase identifiers not in the known set are config types that should
+		// Uppercase identifiers not in the map are config types that should
 		// have been added to SpecMapping. Lowercase identifiers are Go builtins.
 		if len(t.Name) > 0 && unicode.IsUpper(rune(t.Name[0])) {
 			return "", fmt.Errorf(
@@ -238,25 +249,25 @@ func convertTypeExpr(expr ast.Expr, known map[string]bool) (string, error) {
 		return pkg.Name + "." + t.Sel.Name, nil
 
 	case *ast.StarExpr:
-		inner, err := convertTypeExpr(t.X, known)
+		inner, err := convertTypeExpr(t.X, nameMap)
 		if err != nil {
 			return "", err
 		}
 		return "*" + inner, nil
 
 	case *ast.ArrayType:
-		inner, err := convertTypeExpr(t.Elt, known)
+		inner, err := convertTypeExpr(t.Elt, nameMap)
 		if err != nil {
 			return "", err
 		}
 		return "[]" + inner, nil
 
 	case *ast.MapType:
-		key, err := convertTypeExpr(t.Key, known)
+		key, err := convertTypeExpr(t.Key, nameMap)
 		if err != nil {
 			return "", err
 		}
-		val, err := convertTypeExpr(t.Value, known)
+		val, err := convertTypeExpr(t.Value, nameMap)
 		if err != nil {
 			return "", err
 		}

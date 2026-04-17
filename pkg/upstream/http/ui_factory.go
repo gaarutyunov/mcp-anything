@@ -13,7 +13,7 @@ import (
 // toolName, description, schema, and resourceURI are the values to embed in the handler.
 // Registered from init() in pkg/upstream/http/withui; nil when UI support is not imported.
 type UIHandlerBuilder func(
-	cfg *config.ToolUISpec,
+	cfg *config.ToolUIConfig,
 	fetchClient *http.Client,
 	pool config.PoolAcquirer,
 	toolName string,
@@ -38,7 +38,7 @@ func RegisterUIHandlerBuilder(f UIHandlerBuilder) {
 // buildUIHandler creates a UI resource handler using the registered factory.
 // Returns nil, nil when no factory is registered (UI support not imported).
 func buildUIHandler(
-	cfg *config.ToolUISpec,
+	cfg *config.ToolUIConfig,
 	fetchClient *http.Client,
 	pool config.PoolAcquirer,
 	toolName string,

@@ -58,7 +58,7 @@ type Manager struct {
 
 	// rateLimitCfgs holds the named rate limit configs for source key resolution.
 	// Updated in Rebuild; read under mu.
-	rateLimitCfgs map[string]config.RateLimitSpec
+	rateLimitCfgs map[string]config.RateLimitConfig
 
 	// circuitBreakerSet holds the active circuit breakers for readiness checking.
 	// nil when no circuit breakers are configured. Updated in Rebuild under mu.
@@ -69,8 +69,8 @@ type Manager struct {
 	oauthCallbackReg config.OAuthCallbackRegistrar
 
 	// State needed for per-upstream incremental updates (background refresh).
-	groups         []config.GroupSpec
-	namingCfg      *config.NamingSpec
+	groups         []config.GroupConfig
+	namingCfg      *config.NamingConfig
 	upstreamByName map[string]*upstreamState // latest state per upstream name
 
 	// Semantic tool search state, keyed by group endpoint.
@@ -80,7 +80,7 @@ type Manager struct {
 
 	// Cache state — populated by Rebuild when caches are configured.
 	store        pkgcache.Store
-	cacheConfigs map[string]config.CacheSpec
+	cacheConfigs map[string]config.CacheConfig
 }
 
 // NewManager creates a Manager with no active servers.
@@ -198,7 +198,7 @@ func (m *Manager) DispatchForGroup(ctx context.Context, groupName, toolName stri
 // and diffs the tool sets to call AddTool/RemoveTools on each MCP server.
 // Connected clients receive notifications/tools/list_changed automatically.
 // If any upstream validation fails, the existing registry and servers are unchanged.
-func (m *Manager) Rebuild(ctx context.Context, cfg *config.ProxySpec) error {
+func (m *Manager) Rebuild(ctx context.Context, cfg *config.ProxyConfig) error {
 	// Set Implementation on first Rebuild.
 	if m.impl == nil {
 		m.impl = &sdkmcp.Implementation{
@@ -297,7 +297,7 @@ func (m *Manager) Rebuild(ctx context.Context, cfg *config.ProxySpec) error {
 		for _, vu := range validatedUpstreams {
 			allNames = append(allNames, vu.Config.Name)
 		}
-		groups = []config.GroupSpec{{
+		groups = []config.GroupConfig{{
 			Name:      "default",
 			Endpoint:  "/mcp",
 			Upstreams: allNames,
@@ -406,9 +406,9 @@ func (m *Manager) Rebuild(ctx context.Context, cfg *config.ProxySpec) error {
 // Returns empty maps when disabled or on error; the caller handles the error.
 func (m *Manager) buildSearchState(
 	ctx context.Context,
-	cfg *config.ToolSearchSpec,
+	cfg *config.ToolSearchConfig,
 	reg *pkgupstream.Registry,
-	groups []config.GroupSpec,
+	groups []config.GroupConfig,
 ) (map[string]*pkgsearch.Index, map[string]*sdkmcp.Tool, int, error) {
 	indexes := make(map[string]*pkgsearch.Index)
 	tools := make(map[string]*sdkmcp.Tool)
@@ -469,7 +469,7 @@ func buildSearchTool(defaultLimit int) *sdkmcp.Tool {
 // MCP servers accordingly. Must be called with m.mu held for writing.
 // newSearchTools maps group endpoint → search_tools tool definition; pass nil
 // to leave existing search tool state unchanged (used by incremental updates).
-func (m *Manager) applyRegistryLocked(newRegistry *pkgupstream.Registry, groups []config.GroupSpec, newSearchTools map[string]*sdkmcp.Tool) {
+func (m *Manager) applyRegistryLocked(newRegistry *pkgupstream.Registry, groups []config.GroupConfig, newSearchTools map[string]*sdkmcp.Tool) {
 	for _, g := range groups {
 		groupName := g.Name    // capture for closure
 		endpoint := g.Endpoint // capture for closure
@@ -813,7 +813,7 @@ func (m *Manager) rebuildFromStateLocked() error {
 }
 
 // validateUpstreamPrefixes returns an error if any two enabled upstreams share the same tool_prefix.
-func validateUpstreamPrefixes(upstreams []config.UpstreamSpec) error {
+func validateUpstreamPrefixes(upstreams []config.UpstreamConfig) error {
 	seen := make(map[string]string)
 	for _, up := range upstreams {
 		if !up.Enabled {

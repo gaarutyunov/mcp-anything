@@ -54,7 +54,7 @@ func (t *tokenInfoHeaderTransport) RoundTrip(req *nethttp.Request) (*nethttp.Res
 // Static headers from cfg.Headers are injected via a custom RoundTripper.
 // Outbound authentication is handled by the per-tool middleware chain (outbound.Middleware)
 // rather than a RoundTripper, so no auth transport is added here.
-func NewHTTPClient(cfg *config.UpstreamSpec) (*nethttp.Client, error) {
+func NewHTTPClient(cfg *config.UpstreamConfig) (*nethttp.Client, error) {
 	transportCfg := cfg.Transport
 	// Legacy tls_skip_verify field: propagate to transport TLS config for backward compat.
 	if cfg.TLSSkipVerify {

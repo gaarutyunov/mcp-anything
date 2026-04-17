@@ -20,7 +20,7 @@ import (
 )
 
 func init() {
-	session.Register("redis", func(ctx context.Context, cfg *config.SessionStoreSpec) (session.Store, error) {
+	session.Register("redis", func(ctx context.Context, cfg *config.SessionStoreConfig) (session.Store, error) {
 		return New(ctx, cfg.Redis)
 	})
 }
@@ -42,7 +42,7 @@ type tokenData struct {
 }
 
 // New creates a Redis session store and verifies connectivity.
-func New(ctx context.Context, cfg config.RedisSessionSpec) (*Store, error) {
+func New(ctx context.Context, cfg config.RedisSessionConfig) (*Store, error) {
 	encKey, err := session.ParseKey(cfg.EncryptionKey)
 	if err != nil {
 		return nil, fmt.Errorf("redis session store encryption key: %w", err)

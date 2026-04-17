@@ -32,8 +32,8 @@ type Refresher interface {
 // a positive refresh interval. Typically registered from init() in pkg/upstream/http.
 type RefresherFactory func(
 	ctx context.Context,
-	cfg *config.UpstreamSpec,
-	naming *config.NamingSpec,
+	cfg *config.UpstreamConfig,
+	naming *config.NamingConfig,
 	manager RegistryManager,
 	pools *runtime.Registry,
 ) (Refresher, error)
@@ -55,8 +55,8 @@ func RegisterRefresherFactory(f RefresherFactory) {
 // Returns an error if no factory has been registered — import pkg/upstream/http to register one.
 func NewRefresher(
 	ctx context.Context,
-	cfg *config.UpstreamSpec,
-	naming *config.NamingSpec,
+	cfg *config.UpstreamConfig,
+	naming *config.NamingConfig,
 	manager RegistryManager,
 	pools *runtime.Registry,
 ) (Refresher, error) {

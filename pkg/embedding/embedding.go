@@ -25,8 +25,8 @@ import (
 // implement it without depending directly on chromem-go.
 type Func = chromem.EmbeddingFunc
 
-// ProviderFactory creates an embedding Func from an EmbeddingSpec.
-type ProviderFactory func(ctx context.Context, cfg *config.EmbeddingSpec) (Func, error)
+// ProviderFactory creates an embedding Func from an EmbeddingConfig.
+type ProviderFactory func(ctx context.Context, cfg *config.EmbeddingConfig) (Func, error)
 
 var reg registry.Registry[ProviderFactory]
 
@@ -39,7 +39,7 @@ func Register(provider string, factory ProviderFactory) {
 // New creates an embedding Func from the given config.
 // Returns an error for unknown providers.
 // Provider sub-packages must be imported (blank import) before calling New.
-func New(ctx context.Context, cfg *config.EmbeddingSpec) (Func, error) {
+func New(ctx context.Context, cfg *config.EmbeddingConfig) (Func, error) {
 	f, ok := reg.Get(cfg.Provider)
 	if !ok {
 		return nil, fmt.Errorf("unknown embedding provider %q — import the provider package or pkg/embedding/all", cfg.Provider)
@@ -57,7 +57,7 @@ func init() {
 		"vertex", "azure_openai", "localai",
 	} {
 		p := p // capture for closure
-		Register(p, func(_ context.Context, cfg *config.EmbeddingSpec) (Func, error) {
+		Register(p, func(_ context.Context, cfg *config.EmbeddingConfig) (Func, error) {
 			return newBuiltinEmbeddingFunc(cfg)
 		})
 	}
@@ -69,7 +69,7 @@ func expandEnv(s string) string {
 }
 
 // newBuiltinEmbeddingFunc dispatches to the correct chromem-go constructor.
-func newBuiltinEmbeddingFunc(cfg *config.EmbeddingSpec) (chromem.EmbeddingFunc, error) {
+func newBuiltinEmbeddingFunc(cfg *config.EmbeddingConfig) (chromem.EmbeddingFunc, error) {
 	switch cfg.Provider {
 	case "openai":
 		if cfg.OpenAI == nil {

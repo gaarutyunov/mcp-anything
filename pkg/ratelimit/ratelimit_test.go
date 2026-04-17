@@ -78,7 +78,7 @@ func TestClientIPMiddleware(t *testing.T) {
 }
 
 func TestEnforcer_NilWhenNoRateLimits(t *testing.T) {
-	cfg := &config.ProxySpec{}
+	cfg := &config.ProxyConfig{}
 	enf, err := ratelimit.New(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -89,8 +89,8 @@ func TestEnforcer_NilWhenNoRateLimits(t *testing.T) {
 }
 
 func TestEnforcer_AllowUnderLimit(t *testing.T) {
-	cfg := &config.ProxySpec{
-		RateLimits: map[string]config.RateLimitSpec{
+	cfg := &config.ProxyConfig{
+		RateLimits: map[string]config.RateLimitConfig{
 			"test": {
 				Average: 10,
 				Period:  time.Minute,
@@ -118,8 +118,8 @@ func TestEnforcer_AllowUnderLimit(t *testing.T) {
 }
 
 func TestEnforcer_RejectOverLimit(t *testing.T) {
-	cfg := &config.ProxySpec{
-		RateLimits: map[string]config.RateLimitSpec{
+	cfg := &config.ProxyConfig{
+		RateLimits: map[string]config.RateLimitConfig{
 			"strict": {
 				Average: 2,
 				Period:  time.Minute,
@@ -161,8 +161,8 @@ func TestEnforcer_RejectOverLimit(t *testing.T) {
 }
 
 func TestEnforcer_Source(t *testing.T) {
-	cfg := &config.ProxySpec{
-		RateLimits: map[string]config.RateLimitSpec{
+	cfg := &config.ProxyConfig{
+		RateLimits: map[string]config.RateLimitConfig{
 			"by-user":    {Average: 10, Period: time.Minute, Source: "user"},
 			"by-ip":      {Average: 10, Period: time.Minute, Source: "ip"},
 			"by-session": {Average: 10, Period: time.Minute, Source: "session"},
@@ -188,8 +188,8 @@ func TestEnforcer_Source(t *testing.T) {
 }
 
 func TestEnforcer_UnknownLimitName(t *testing.T) {
-	cfg := &config.ProxySpec{
-		RateLimits: map[string]config.RateLimitSpec{
+	cfg := &config.ProxyConfig{
+		RateLimits: map[string]config.RateLimitConfig{
 			"known": {Average: 10, Period: time.Minute, Source: "ip"},
 		},
 	}

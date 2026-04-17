@@ -22,7 +22,7 @@ import (
 
 func init() {
 	pkghttp.RegisterUIHandlerBuilder(func(
-		cfg *config.ToolUISpec,
+		cfg *config.ToolUIConfig,
 		fetchClient *nethttp.Client,
 		pool config.PoolAcquirer,
 		toolName string,

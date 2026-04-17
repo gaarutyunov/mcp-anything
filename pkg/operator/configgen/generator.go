@@ -17,9 +17,9 @@ const (
 	overlaysDir  = "/etc/mcp-anything/overlays"
 )
 
-// The following unexported types mirror a subset of config.ProxySpec using yaml struct tags
+// The following unexported types mirror a subset of config.ProxyConfig using yaml struct tags
 // so that gopkg.in/yaml.v3 produces snake_case keys that koanf can correctly parse.
-// (config.ProxySpec uses koanf tags only; marshaling it directly produces PascalCase keys.)
+// (config.ProxyConfig uses koanf tags only; marshaling it directly produces PascalCase keys.)
 
 type generatedProxyConfig struct {
 	Server      generatedServerConfig               `yaml:"server"`
@@ -133,7 +133,7 @@ type generatedValidationConfig struct {
 }
 
 // Generate translates MCPProxy and its selected MCPUpstream resources into a
-// config.ProxySpec and returns it serialised as YAML bytes.
+// config.ProxyConfig and returns it serialised as YAML bytes.
 func Generate(ctx context.Context, proxy *v1alpha1.MCPProxy, upstreams []v1alpha1.MCPUpstream) ([]byte, error) {
 	_ = ctx // reserved for future async lookups
 
@@ -258,7 +258,7 @@ func buildCommandUpstreamConfig(up *v1alpha1.MCPUpstream, uc generatedUpstreamCo
 	return uc, nil
 }
 
-// buildGeneratedInputSchema converts an CommandInputSchema to its generated form.
+// buildGeneratedInputSchema converts a CommandInputSchema to its generated form.
 func buildGeneratedInputSchema(s *v1alpha1.CommandInputSchema) *generatedCommandInputSchema {
 	gs := &generatedCommandInputSchema{
 		Type:     s.Type,

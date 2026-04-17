@@ -15,7 +15,7 @@ import (
 )
 
 func init() {
-	session.Register("memory", func(_ context.Context, _ *config.SessionStoreSpec) (session.Store, error) {
+	session.Register("memory", func(_ context.Context, _ *config.SessionStoreConfig) (session.Store, error) {
 		return &Store{tokens: make(map[string]*config.OAuthToken)}, nil
 	})
 }

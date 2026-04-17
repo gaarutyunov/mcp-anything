@@ -39,7 +39,7 @@ import (
 // Proxy is the assembled mcp-anything proxy. It holds the MCP manager, HTTP
 // server, telemetry shutdown function, runtime pools, and background refreshers.
 type Proxy struct {
-	cfg         *pkgconfig.ProxySpec
+	cfg         *pkgconfig.ProxyConfig
 	cfgPath     string
 	manager     *pkgmcp.Manager
 	srv         *pkgserver.Server
@@ -63,8 +63,8 @@ func WithConfigPath(path string) Option {
 
 // LoadConfig reads the config file path from the CONFIG_PATH environment variable
 // (defaulting to /etc/mcp-anything/config.yaml), loads and parses the file, and
-// returns both the path and the parsed ProxySpec.
-func LoadConfig() (string, *pkgconfig.ProxySpec, error) {
+// returns both the path and the parsed ProxyConfig.
+func LoadConfig() (string, *pkgconfig.ProxyConfig, error) {
 	path := os.Getenv("CONFIG_PATH")
 	if path == "" {
 		path = "/etc/mcp-anything/config.yaml"
@@ -76,10 +76,10 @@ func LoadConfig() (string, *pkgconfig.ProxySpec, error) {
 	return path, cfg, nil
 }
 
-// New assembles a Proxy from the given ProxySpec and options.
+// New assembles a Proxy from the given ProxyConfig and options.
 // It initialises runtime pools, telemetry, the MCP manager, inbound auth, spec
 // refreshers, and the HTTP server. Call Start to begin serving requests.
-func New(ctx context.Context, cfg *pkgconfig.ProxySpec, opts ...Option) (*Proxy, error) {
+func New(ctx context.Context, cfg *pkgconfig.ProxyConfig, opts ...Option) (*Proxy, error) {
 	p := &Proxy{cfg: cfg}
 	for _, opt := range opts {
 		opt(p)
@@ -120,7 +120,7 @@ func New(ctx context.Context, cfg *pkgconfig.ProxySpec, opts ...Option) (*Proxy,
 	// the initial Rebuild and sets up fsnotify for hot-reload via Watch).
 	// Otherwise perform the initial Rebuild directly from the provided config.
 	if p.cfgPath != "" {
-		loader, loaderErr := pkgconfig.NewLoader(p.cfgPath, func(newCfg *pkgconfig.ProxySpec) error {
+		loader, loaderErr := pkgconfig.NewLoader(p.cfgPath, func(newCfg *pkgconfig.ProxyConfig) error {
 			return p.manager.Rebuild(ctx, newCfg)
 		})
 		if loaderErr != nil {

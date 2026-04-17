@@ -31,7 +31,7 @@ const noCacheExpiry = int64(1)
 
 func init() {
 	// Register runtime pool for Lua auth execution.
-	pkgruntime.Register("lua/auth", func(_ context.Context, cfg config.RuntimeSpec) (pkgruntime.Runtime, error) {
+	pkgruntime.Register("lua/auth", func(_ context.Context, cfg config.RuntimeConfig) (pkgruntime.Runtime, error) {
 		max := cfg.Lua.MaxAuthVMs
 		if max == 0 {
 			max = int(pkgruntime.DefaultMaxAuthVMs)
@@ -44,12 +44,12 @@ func init() {
 
 	// Register inbound and outbound middleware strategies.
 	pkgmiddleware.Register("inbound/lua", func(_ context.Context, cfg any) (func(http.Handler) http.Handler, error) {
-		ic, ok := cfg.(*config.InboundAuthSpec)
+		ic, ok := cfg.(*config.InboundAuthConfig)
 		if !ok {
-			return nil, fmt.Errorf("inbound/lua: expected *config.InboundAuthSpec, got %T", cfg)
+			return nil, fmt.Errorf("inbound/lua: expected *config.InboundAuthConfig, got %T", cfg)
 		}
 		if ic.LuaAuthPool == nil {
-			return nil, fmt.Errorf("lua inbound auth requires runtime pools; set InboundAuthSpec.LuaAuthPool")
+			return nil, fmt.Errorf("lua inbound auth requires runtime pools; set InboundAuthConfig.LuaAuthPool")
 		}
 		v, err := NewValidator(ic.Lua, ic.LuaAuthPool)
 		if err != nil {
@@ -58,12 +58,12 @@ func init() {
 		return inbound.ValidatorMiddleware(v, ""), nil
 	})
 	pkgmiddleware.Register("outbound/lua", func(_ context.Context, cfg any) (func(http.Handler) http.Handler, error) {
-		oc, ok := cfg.(*config.OutboundAuthSpec)
+		oc, ok := cfg.(*config.OutboundAuthConfig)
 		if !ok {
-			return nil, fmt.Errorf("outbound/lua: expected *config.OutboundAuthSpec, got %T", cfg)
+			return nil, fmt.Errorf("outbound/lua: expected *config.OutboundAuthConfig, got %T", cfg)
 		}
 		if oc.LuaAuthPool == nil {
-			return nil, fmt.Errorf("lua outbound auth requires runtime pools; set OutboundAuthSpec.LuaAuthPool")
+			return nil, fmt.Errorf("lua outbound auth requires runtime pools; set OutboundAuthConfig.LuaAuthPool")
 		}
 		p, err := NewProvider(oc.Upstream, oc.Lua, oc.LuaAuthPool)
 		if err != nil {
@@ -87,7 +87,7 @@ type Validator struct {
 // script at cfg.ScriptPath to bytecode. The bytecode is reused across calls.
 // pool bounds the number of concurrent Lua runtimes; it is shared with the outbound
 // Lua auth provider to enforce a single global limit for all auth scripts.
-func NewValidator(cfg config.LuaAuthSpec, pool config.PoolAcquirer) (*Validator, error) {
+func NewValidator(cfg config.LuaAuthConfig, pool config.PoolAcquirer) (*Validator, error) {
 	src, err := os.ReadFile(cfg.ScriptPath)
 	if err != nil {
 		return nil, fmt.Errorf("reading lua auth script %q: %w", cfg.ScriptPath, err)
@@ -175,7 +175,7 @@ type providerCache struct {
 // NewProvider creates a Provider by reading and pre-compiling the Lua script.
 // pool bounds the number of concurrent Lua runtimes; it is shared with the inbound
 // Lua auth validator to enforce a single global limit for all auth scripts.
-func NewProvider(upstreamName string, cfg config.LuaOutboundSpec, pool config.PoolAcquirer) (*Provider, error) {
+func NewProvider(upstreamName string, cfg config.LuaOutboundConfig, pool config.PoolAcquirer) (*Provider, error) {
 	src, err := os.ReadFile(cfg.ScriptPath)
 	if err != nil {
 		return nil, fmt.Errorf("reading lua outbound script %q: %w", cfg.ScriptPath, err)

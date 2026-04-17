@@ -43,7 +43,7 @@ var (
 //  7. If rules.CollapseSeparators: replace runs of _ with single _
 //  8. Trim leading/trailing _
 //  9. Prepend the verb prefix
-func Slugify(method, path string, hasPathParams bool, rules config.SlugRulesSpec) string {
+func Slugify(method, path string, hasPathParams bool, rules config.SlugRulesConfig) string {
 	verb := slugVerb(method, hasPathParams)
 
 	s := strings.TrimPrefix(path, "/")
@@ -95,7 +95,7 @@ func slugVerb(method string, hasPathParams bool) string {
 
 // ToolBaseName returns the base name (without upstream prefix) for a tool.
 // Priority: x-mcp-tool-name extension > operationId > Slugify(method, path).
-func ToolBaseName(op *openapi3.Operation, method, path string, hasPathParams bool, rules config.SlugRulesSpec) string {
+func ToolBaseName(op *openapi3.Operation, method, path string, hasPathParams bool, rules config.SlugRulesConfig) string {
 	// x-mcp-tool-name override: used as-is without slugification.
 	if val, ok := op.Extensions["x-mcp-tool-name"]; ok {
 		if name := extractExtensionString(val); name != "" {
@@ -113,7 +113,7 @@ func ToolBaseName(op *openapi3.Operation, method, path string, hasPathParams boo
 
 // sanitizeIdentifier applies the slug sanitisation rules to an arbitrary identifier
 // (such as operationId) without prepending a verb prefix.
-func sanitizeIdentifier(id string, rules config.SlugRulesSpec) string {
+func sanitizeIdentifier(id string, rules config.SlugRulesConfig) string {
 	s := id
 
 	if rules.ExpandCamelCase {

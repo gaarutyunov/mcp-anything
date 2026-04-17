@@ -17,9 +17,9 @@ import (
 
 func init() {
 	pkgmiddleware.Register("inbound/apikey", func(_ context.Context, cfg any) (func(http.Handler) http.Handler, error) {
-		ic, ok := cfg.(*config.InboundAuthSpec)
+		ic, ok := cfg.(*config.InboundAuthConfig)
 		if !ok {
-			return nil, fmt.Errorf("inbound/apikey: expected *config.InboundAuthSpec, got %T", cfg)
+			return nil, fmt.Errorf("inbound/apikey: expected *config.InboundAuthConfig, got %T", cfg)
 		}
 		v, err := NewValidator(ic.APIKey)
 		if err != nil {
@@ -37,7 +37,7 @@ type Validator struct {
 
 // NewValidator creates a Validator by reading keys from the environment variable
 // named cfg.KeysEnv (comma-separated list of valid keys).
-func NewValidator(cfg config.APIKeyAuthSpec) (*Validator, error) {
+func NewValidator(cfg config.APIKeyAuthConfig) (*Validator, error) {
 	raw := os.Getenv(cfg.KeysEnv)
 	keys := make(map[string]struct{})
 	for _, k := range strings.Split(raw, ",") {

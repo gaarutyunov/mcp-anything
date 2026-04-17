@@ -7,7 +7,7 @@ import (
 	"github.com/gaarutyunov/mcp-anything/pkg/config"
 )
 
-var defaultRules = config.SlugRulesSpec{
+var defaultRules = config.SlugRulesConfig{
 	ReplaceSlashes:     true,
 	ReplaceBraces:      true,
 	ExpandCamelCase:    true,

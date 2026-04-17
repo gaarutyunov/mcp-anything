@@ -81,7 +81,7 @@ spec:
                   jwt:
                     description: |-
                       JWT configures JWT Bearer token validation.
-                      Generated from pkg/config.JWTAuthSpec.
+                      Generated from pkg/config.JWTAuthConfig.
                     properties:
                       audience:
                         type: string
@@ -115,12 +115,12 @@ spec:
               naming:
                 description: |-
                   Naming configures how MCP tool names are generated.
-                  Generated from pkg/config.NamingSpec.
+                  Generated from pkg/config.NamingConfig.
                 properties:
                   conflictResolution:
                     type: string
                   defaultSlugRules:
-                    description: SlugRulesSpec controls which slug transformations
+                    description: SlugRulesConfig controls which slug transformations
                       are applied.
                     properties:
                       collapseSeparators:
@@ -307,7 +307,7 @@ spec:
               telemetry:
                 description: |-
                   Telemetry configures observability settings.
-                  Generated from pkg/config.TelemetrySpec.
+                  Generated from pkg/config.TelemetryConfig.
                 properties:
                   insecure:
                     description: skip TLS for OTLP gRPC (useful in tests)

@@ -16,10 +16,10 @@ const (
 	DefaultMaxScriptVMs = int64(20)
 )
 
-// Factory is a function that constructs a Runtime from the global RuntimeSpec.
+// Factory is a function that constructs a Runtime from the global RuntimeConfig.
 // Each scripting sub-package (js, lua, wasm, …) registers one or more factories
 // via Register in its init() function.
-type Factory func(ctx context.Context, cfg config.RuntimeSpec) (Runtime, error)
+type Factory func(ctx context.Context, cfg config.RuntimeConfig) (Runtime, error)
 
 var factories registry.Registry[Factory]
 
@@ -45,7 +45,7 @@ type Registry struct {
 
 // NewRegistry creates a Registry by calling every registered Factory.
 // Returns an error if any factory returns an error.
-func NewRegistry(ctx context.Context, cfg config.RuntimeSpec) (*Registry, error) {
+func NewRegistry(ctx context.Context, cfg config.RuntimeConfig) (*Registry, error) {
 	snap := factories.Snapshot()
 
 	pools := make(map[string]Runtime, len(snap))

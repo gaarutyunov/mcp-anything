@@ -3,7 +3,7 @@
 //
 //	import _ "github.com/gaarutyunov/mcp-anything/pkg/ratelimit/redis"
 //
-// Requires rate_limit_store.redis to be configured in ProxySpec.
+// Requires rate_limit_store.redis to be configured in ProxyConfig.
 package redis
 
 import (
@@ -19,7 +19,7 @@ import (
 )
 
 func init() {
-	pkgratelimit.Register("redis", func(ctx context.Context, cfg *config.ProxySpec) (limiter.Store, error) {
+	pkgratelimit.Register("redis", func(ctx context.Context, cfg *config.ProxyConfig) (limiter.Store, error) {
 		if cfg.RateLimitStore.Redis == nil {
 			return nil, fmt.Errorf("rate_limit_store.redis is required for the redis store")
 		}

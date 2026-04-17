@@ -11,7 +11,7 @@ import (
 
 // WellKnownHandler returns an http.HandlerFunc for the OAuth 2.0 Protected Resource Metadata
 // endpoint defined in RFC 9728. It is always public (no auth middleware applied).
-func WellKnownHandler(cfg *config.ProxySpec) http.HandlerFunc {
+func WellKnownHandler(cfg *config.ProxyConfig) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var issuer string
 		switch cfg.InboundAuth.Strategy {

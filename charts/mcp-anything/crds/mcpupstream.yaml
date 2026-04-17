@@ -54,9 +54,9 @@ spec:
               commands:
                 description: |-
                   Commands defines command-backed MCP tools. Required when Type is "command".
-                  Generated from pkg/config.CommandSpec.
+                  Generated from pkg/config.CommandConfig.
                 items:
-                  description: CommandSpec defines a single command-backed MCP tool
+                  description: CommandConfig defines a single command-backed MCP tool
                     within a command upstream.
                   properties:
                     command:
@@ -270,7 +270,7 @@ spec:
               validation:
                 description: |-
                   Validation configures request/response validation against the OpenAPI schema.
-                  Generated from pkg/config.ValidationSpec.
+                  Generated from pkg/config.ValidationConfig.
                 properties:
                   errorStatus:
                     items:

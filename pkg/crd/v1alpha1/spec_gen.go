@@ -4,7 +4,7 @@
 
 package v1alpha1
 
-// JWTAuthSpec configures JWT Bearer token validation via OIDC/JWKS.
+// JWTAuthConfig configures JWT Bearer token validation via OIDC/JWKS.
 type JWTAuthSpec struct {
 	// +optional
 	Issuer string `json:"issuer,omitempty"`
@@ -15,7 +15,7 @@ type JWTAuthSpec struct {
 	JWKSURL string `json:"jwksUrl,omitempty"`
 }
 
-// NamingSpec controls how tool names are generated.
+// NamingConfig controls how tool names are generated.
 type NamingSpec struct {
 	// +optional
 	Separator string `json:"separator,omitempty"`
@@ -31,7 +31,7 @@ type NamingSpec struct {
 	DefaultSlugRules SlugRulesSpec `json:"defaultSlugRules,omitempty"`
 }
 
-// SlugRulesSpec controls which slug transformations are applied.
+// SlugRulesConfig controls which slug transformations are applied.
 type SlugRulesSpec struct {
 	// +optional
 	ReplaceSlashes bool `json:"replaceSlashes,omitempty"`
@@ -48,7 +48,7 @@ type SlugRulesSpec struct {
 	CollapseSeparators bool `json:"collapseSeparators,omitempty"`
 }
 
-// TelemetrySpec holds observability settings.
+// TelemetryConfig holds observability settings.
 type TelemetrySpec struct {
 	// +optional
 	ServiceName string `json:"serviceName,omitempty"`
@@ -62,7 +62,7 @@ type TelemetrySpec struct {
 	Insecure bool `json:"insecure,omitempty"`
 }
 
-// CommandSpec defines a single command-backed MCP tool within a command upstream.
+// CommandConfig defines a single command-backed MCP tool within a command upstream.
 type CommandSpec struct {
 	// +optional
 	ToolName string `json:"toolName,omitempty"`
@@ -104,7 +104,7 @@ type CommandSchemaProperty struct {
 	Description string `json:"description,omitempty"`
 }
 
-// ValidationSpec controls runtime request and response validation against the OpenAPI schema.
+// ValidationConfig controls runtime request and response validation against the OpenAPI schema.
 type ValidationSpec struct {
 	// +optional
 	ValidateRequest bool `json:"validateRequest,omitempty"`

@@ -21,7 +21,7 @@ import (
 )
 
 func init() {
-	session.Register("postgres", func(ctx context.Context, cfg *config.SessionStoreSpec) (session.Store, error) {
+	session.Register("postgres", func(ctx context.Context, cfg *config.SessionStoreConfig) (session.Store, error) {
 		return New(ctx, cfg.Postgres)
 	})
 }
@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS mcp_sessions (
 )`
 
 // New creates a PostgreSQL session store, creating the mcp_sessions table if absent.
-func New(ctx context.Context, cfg config.PostgresSessionSpec) (*Store, error) {
+func New(ctx context.Context, cfg config.PostgresSessionConfig) (*Store, error) {
 	encKey, err := session.ParseKey(cfg.EncryptionKey)
 	if err != nil {
 		return nil, fmt.Errorf("postgres session store encryption key: %w", err)

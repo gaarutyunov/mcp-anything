@@ -18,8 +18,8 @@ type Token = config.OAuthToken
 // Store is an alias for config.OAuthTokenStore for convenience in session sub-packages.
 type Store = config.OAuthTokenStore
 
-// StoreFactory creates a Store from a SessionStoreConfig.
-type StoreFactory func(ctx context.Context, cfg *config.SessionStoreConfig) (Store, error)
+// StoreFactory creates a Store from a SessionStoreSpec.
+type StoreFactory func(ctx context.Context, cfg *config.SessionStoreSpec) (Store, error)
 
 var reg registry.Registry[StoreFactory]
 
@@ -31,7 +31,7 @@ func Register(provider string, f StoreFactory) {
 
 // New creates a Store from the given config.
 // The provider sub-package must be imported (blank import) before calling New.
-func New(ctx context.Context, cfg *config.SessionStoreConfig) (Store, error) {
+func New(ctx context.Context, cfg *config.SessionStoreSpec) (Store, error) {
 	if cfg.Provider == "" {
 		return nil, fmt.Errorf("session_store.provider is required")
 	}

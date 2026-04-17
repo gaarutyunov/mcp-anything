@@ -40,10 +40,10 @@ type Loader struct {
 	pool       config.PoolAcquirer
 }
 
-// New creates a Loader from a ToolUIConfig.
+// New creates a Loader from a ToolUISpec.
 // Script takes precedence over static when both paths are set.
 // pool is required when cfg.Script is non-empty.
-func New(cfg *config.ToolUIConfig, env map[string]string, httpClient *http.Client, pool config.PoolAcquirer) (*Loader, error) {
+func New(cfg *config.ToolUISpec, env map[string]string, httpClient *http.Client, pool config.PoolAcquirer) (*Loader, error) {
 	if cfg.Script != "" {
 		if pool == nil {
 			return nil, fmt.Errorf("ui: JSScriptPool must be set when using a render script")

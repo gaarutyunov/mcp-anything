@@ -17,9 +17,9 @@ import (
 
 func init() {
 	pkgmiddleware.Register("inbound/jwt", func(ctx context.Context, cfg any) (func(http.Handler) http.Handler, error) {
-		ic, ok := cfg.(*config.InboundAuthConfig)
+		ic, ok := cfg.(*config.InboundAuthSpec)
 		if !ok {
-			return nil, fmt.Errorf("inbound/jwt: expected *config.InboundAuthConfig, got %T", cfg)
+			return nil, fmt.Errorf("inbound/jwt: expected *config.InboundAuthSpec, got %T", cfg)
 		}
 		v, err := NewValidator(ctx, ic.JWT)
 		if err != nil {
@@ -36,7 +36,7 @@ type Validator struct {
 
 // NewValidator creates a Validator from the given config.
 // If cfg.JWKSURL is set, it uses that directly; otherwise it performs OIDC discovery.
-func NewValidator(ctx context.Context, cfg config.JWTAuthConfig) (*Validator, error) {
+func NewValidator(ctx context.Context, cfg config.JWTAuthSpec) (*Validator, error) {
 	oidcConfig := &oidc.Config{ClientID: cfg.Audience}
 
 	var verifier *oidc.IDTokenVerifier

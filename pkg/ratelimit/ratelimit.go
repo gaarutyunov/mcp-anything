@@ -33,7 +33,7 @@ func init() {
 
 // StoreFactory creates a limiter.Store from the proxy config.
 // Called from init() in store sub-packages.
-type StoreFactory func(ctx context.Context, cfg *config.ProxyConfig) (limiter.Store, error)
+type StoreFactory func(ctx context.Context, cfg *config.ProxySpec) (limiter.Store, error)
 
 var storeFactories registry.Registry[StoreFactory]
 
@@ -89,14 +89,14 @@ func extractClientIP(r *http.Request) string {
 // Enforcer checks and records rate limit hits for named rate limit configurations.
 // A nil Enforcer is valid and always allows requests (no rate limiting configured).
 type Enforcer struct {
-	limiters map[string]*limiter.Limiter       // limitName → limiter
-	configs  map[string]config.RateLimitConfig // limitName → config (for source lookup)
+	limiters map[string]*limiter.Limiter     // limitName → limiter
+	configs  map[string]config.RateLimitSpec // limitName → config (for source lookup)
 }
 
-// New creates an Enforcer from the ProxyConfig.
+// New creates an Enforcer from the ProxySpec.
 // Returns (nil, nil) when no rate limits are configured (len(cfg.RateLimits) == 0).
 // Returns an error if the required store sub-package has not been imported.
-func New(ctx context.Context, cfg *config.ProxyConfig) (*Enforcer, error) {
+func New(ctx context.Context, cfg *config.ProxySpec) (*Enforcer, error) {
 	if len(cfg.RateLimits) == 0 {
 		return nil, nil
 	}
@@ -121,7 +121,7 @@ func New(ctx context.Context, cfg *config.ProxyConfig) (*Enforcer, error) {
 
 	e := &Enforcer{
 		limiters: make(map[string]*limiter.Limiter, len(cfg.RateLimits)),
-		configs:  make(map[string]config.RateLimitConfig, len(cfg.RateLimits)),
+		configs:  make(map[string]config.RateLimitSpec, len(cfg.RateLimits)),
 	}
 
 	for name, rlCfg := range cfg.RateLimits {

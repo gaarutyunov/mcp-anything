@@ -1,6 +1,6 @@
 // Package script implements JavaScript-backed MCP tool execution via Grafana Sobek.
 // It provides the Def type for script execution, and BuildTools for converting
-// ScriptConfig entries into RegistryEntry-compatible tool descriptors.
+// ScriptSpec entries into RegistryEntry-compatible tool descriptors.
 package script
 
 import (
@@ -246,14 +246,14 @@ type Tool struct {
 	Transforms   *transform.CompiledTransforms
 }
 
-// BuildTools converts a slice of ScriptConfig entries into Tool descriptors.
+// BuildTools converts a slice of ScriptSpec entries into Tool descriptors.
 // It validates each entry (non-empty tool_name and script_path, readable file,
 // parseable script) and returns an error if any entry is invalid.
 // httpClient is used by ctx.fetch() in the script execution; if nil, a default
 // client with a 30s timeout is used.
 // pool bounds the number of concurrent JS runtimes; all tools in the upstream
 // share the same pool so the limit applies per upstream, not per tool.
-func BuildTools(cfgs []config.ScriptConfig, upstreamCfg *config.UpstreamConfig, namingCfg *config.NamingConfig, httpClient *http.Client, pool config.PoolAcquirer) ([]*Tool, error) {
+func BuildTools(cfgs []config.ScriptSpec, upstreamCfg *config.UpstreamSpec, namingCfg *config.NamingSpec, httpClient *http.Client, pool config.PoolAcquirer) ([]*Tool, error) {
 	sep := namingCfg.Separator
 	prefix := upstreamCfg.ToolPrefix
 

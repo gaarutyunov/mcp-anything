@@ -15,7 +15,7 @@ import (
 )
 
 func init() {
-	pkgcache.Register("memory", func(ctx context.Context, cfg *config.CacheStoreConfig) (pkgcache.Store, error) {
+	pkgcache.Register("memory", func(ctx context.Context, cfg *config.CacheStoreSpec) (pkgcache.Store, error) {
 		return newStore()
 	})
 }

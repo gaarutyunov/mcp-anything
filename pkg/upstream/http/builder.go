@@ -35,7 +35,7 @@ type Builder struct{}
 
 // Build validates the OpenAPI spec and returns a ValidatedUpstream with RegistryEntry
 // objects ready for registration.
-func (b *Builder) Build(ctx context.Context, cfg *config.UpstreamConfig, naming *config.NamingConfig) (*pkgupstream.ValidatedUpstream, error) {
+func (b *Builder) Build(ctx context.Context, cfg *config.UpstreamSpec, naming *config.NamingSpec) (*pkgupstream.ValidatedUpstream, error) {
 	valCtx, valCancel := context.WithTimeout(ctx, cfg.StartupValidationTimeout)
 	tools, specYAMLRoot, err := openapi.ValidateUpstream(valCtx, cfg, naming)
 	valCancel()

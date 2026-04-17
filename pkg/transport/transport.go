@@ -21,9 +21,9 @@ func NewBuilder() *Builder {
 	return &Builder{}
 }
 
-// Build creates an *http.Transport from a TransportConfig.
+// Build creates an *http.Transport from a TransportSpec.
 // Zero values for numeric/duration fields use production-ready defaults.
-func (b *Builder) Build(cfg config.TransportConfig) (*http.Transport, error) {
+func (b *Builder) Build(cfg config.TransportSpec) (*http.Transport, error) {
 	if cfg.MaxIdleConns == 0 {
 		cfg.MaxIdleConns = 100
 	}

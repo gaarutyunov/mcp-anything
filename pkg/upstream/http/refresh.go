@@ -41,8 +41,8 @@ type Snapshot struct {
 func init() {
 	pkgupstream.RegisterRefresherFactory(func(
 		ctx context.Context,
-		cfg *config.UpstreamConfig,
-		naming *config.NamingConfig,
+		cfg *config.UpstreamSpec,
+		naming *config.NamingSpec,
 		manager pkgupstream.RegistryManager,
 		pools *runtime.Registry,
 	) (pkgupstream.Refresher, error) {
@@ -52,8 +52,8 @@ func init() {
 
 // Refresher manages the lifecycle of background spec refresh for one upstream.
 type Refresher struct {
-	cfg      *config.UpstreamConfig
-	naming   *config.NamingConfig
+	cfg      *config.UpstreamSpec
+	naming   *config.NamingSpec
 	current  atomic.Pointer[Snapshot]
 	manager  pkgupstream.RegistryManager
 	failures atomic.Int32
@@ -68,7 +68,7 @@ type Refresher struct {
 
 // NewRefresher creates a Refresher with an initial snapshot loaded synchronously.
 // Returns an error if the initial load fails.
-func NewRefresher(ctx context.Context, cfg *config.UpstreamConfig, naming *config.NamingConfig, manager pkgupstream.RegistryManager, pools *runtime.Registry) (*Refresher, error) {
+func NewRefresher(ctx context.Context, cfg *config.UpstreamSpec, naming *config.NamingSpec, manager pkgupstream.RegistryManager, pools *runtime.Registry) (*Refresher, error) {
 	r := &Refresher{
 		cfg:     cfg,
 		naming:  naming,

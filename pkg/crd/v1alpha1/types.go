@@ -53,15 +53,15 @@ type MCPProxySpec struct {
 	Server ProxyServerSpec `json:"server,omitempty"`
 	// +optional
 	// Naming configures how MCP tool names are generated.
-	// Generated from pkg/config.NamingConfig.
-	Naming ProxyNamingSpec `json:"naming,omitempty"`
+	// Generated from pkg/config.NamingSpec.
+	Naming NamingSpec `json:"naming,omitempty"`
 	// +optional
 	// InboundAuth configures authentication for inbound MCP clients.
 	InboundAuth *ProxyInboundAuthSpec `json:"inboundAuth,omitempty"`
 	// +optional
 	// Telemetry configures observability settings.
-	// Generated from pkg/config.TelemetryConfig.
-	Telemetry *ProxyTelemetrySpec `json:"telemetry,omitempty"`
+	// Generated from pkg/config.TelemetrySpec.
+	Telemetry *TelemetrySpec `json:"telemetry,omitempty"`
 	// +optional
 	// GatewayRef configures Kubernetes Gateway API HTTPRoute creation.
 	// When set, the operator creates an HTTPRoute that routes traffic from the
@@ -213,12 +213,12 @@ type MCPUpstreamSpec struct {
 	Transport *MCPUpstreamTransportSpec `json:"transport,omitempty"`
 	// +optional
 	// Validation configures request/response validation against the OpenAPI schema.
-	// Generated from pkg/config.ValidationConfig.
-	Validation *MCPUpstreamValidationSpec `json:"validation,omitempty"`
+	// Generated from pkg/config.ValidationSpec.
+	Validation *ValidationSpec `json:"validation,omitempty"`
 	// +optional
 	// Commands defines command-backed MCP tools. Required when Type is "command".
-	// Generated from pkg/config.CommandConfig.
-	Commands []MCPUpstreamCommandSpec `json:"commands,omitempty"`
+	// Generated from pkg/config.CommandSpec.
+	Commands []CommandSpec `json:"commands,omitempty"`
 	// +optional
 	// RateLimit is the name of a rate limit policy defined in the owning MCPProxy's
 	// rateLimits.policies map. When set, the named policy is applied to all tool calls
@@ -327,7 +327,7 @@ type ProxyInboundAuthSpec struct {
 	Strategy string `json:"strategy"`
 	// +optional
 	// JWT configures JWT Bearer token validation.
-	// Generated from pkg/config.JWTAuthConfig.
+	// Generated from pkg/config.JWTAuthSpec.
 	JWT *JWTAuthSpec `json:"jwt,omitempty"`
 }
 

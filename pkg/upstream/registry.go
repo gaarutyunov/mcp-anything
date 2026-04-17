@@ -55,7 +55,7 @@ type RegistryEntry struct {
 	Method         string // HTTP method (empty for command/script tools)
 	PathTemplate   string // e.g. /pets/{petId} (empty for command/script tools)
 	Validator      any    // set by builders; *openapi.Validator for HTTP tools
-	ValidationCfg  config.ValidationConfig
+	ValidationCfg  config.ValidationSpec
 	OperationNode  *yaml.Node   // YAML node for JSONPath group filter evaluation (nil for command/script tools)
 	Executor       ToolExecutor // set by builders; dispatches tool execution
 	// Handler is the composed per-tool middleware chain assembled by HTTP builders.
@@ -67,11 +67,11 @@ type RegistryEntry struct {
 	// overlay extension (per-tool override) or upstream-level rate_limit config (default).
 	RateLimit string
 	// UIHandler is the MCP resource handler that serves the tool's interactive HTML UI.
-	// Nil when no UI is configured. Set by HTTP builders when a ToolUIConfig is resolved.
+	// Nil when no UI is configured. Set by HTTP builders when a ToolUISpec is resolved.
 	UIHandler sdkmcp.ResourceHandler
 	// CacheName is the name of the top-level caches entry to apply for this tool.
 	// Empty string means no caching. Set by HTTP builders from the upstream default
-	// (UpstreamConfig.Cache) or per-tool x-mcp-cache overlay extension.
+	// (UpstreamSpec.Cache) or per-tool x-mcp-cache overlay extension.
 	CacheName string
 }
 
@@ -80,7 +80,7 @@ type RegistryEntry struct {
 // SpecYAMLRoot is the post-overlay YAML root used for JSONPath group filter evaluation
 // (nil for non-HTTP upstreams such as type: command or type: script).
 type ValidatedUpstream struct {
-	Config       *config.UpstreamConfig
+	Config       *config.UpstreamSpec
 	Entries      []*RegistryEntry
 	SpecYAMLRoot *yaml.Node
 }
@@ -107,7 +107,7 @@ type Registry struct {
 // groups is the list of tool groups to build; if empty, a default group at /mcp with all
 // upstreams is assumed to have been created by the caller.
 // Returns an error if any tool prefix is shared (AC-07.5) or if a group filter is invalid.
-func New(upstreams []*ValidatedUpstream, naming *config.NamingConfig, groups []config.GroupConfig) (*Registry, error) {
+func New(upstreams []*ValidatedUpstream, naming *config.NamingSpec, groups []config.GroupSpec) (*Registry, error) {
 	r := &Registry{
 		byPrefixedName: make(map[string]*RegistryEntry),
 		byPrefix:       make(map[string]*Upstream),
@@ -214,8 +214,8 @@ func New(upstreams []*ValidatedUpstream, naming *config.NamingConfig, groups []c
 func NewFromEntries(
 	entriesByUpstream map[string][]*RegistryEntry,
 	specRootByUpstream map[string]*yaml.Node,
-	naming *config.NamingConfig,
-	groups []config.GroupConfig,
+	naming *config.NamingSpec,
+	groups []config.GroupSpec,
 ) (*Registry, error) {
 	r := &Registry{
 		byPrefixedName: make(map[string]*RegistryEntry),

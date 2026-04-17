@@ -15,9 +15,9 @@ import (
 
 func init() {
 	pkgmiddleware.Register("outbound/bearer", func(_ context.Context, cfg any) (func(http.Handler) http.Handler, error) {
-		oc, ok := cfg.(*config.OutboundAuthConfig)
+		oc, ok := cfg.(*config.OutboundAuthSpec)
 		if !ok {
-			return nil, fmt.Errorf("outbound/bearer: expected *config.OutboundAuthConfig, got %T", cfg)
+			return nil, fmt.Errorf("outbound/bearer: expected *config.OutboundAuthSpec, got %T", cfg)
 		}
 		return outbound.Middleware(NewProvider(oc.Bearer)), nil
 	})
@@ -29,7 +29,7 @@ type Provider struct {
 }
 
 // NewProvider creates a Provider from config.
-func NewProvider(cfg config.BearerOutboundConfig) *Provider {
+func NewProvider(cfg config.BearerOutboundSpec) *Provider {
 	return &Provider{tokenEnv: cfg.TokenEnv}
 }
 

@@ -18,9 +18,9 @@ import (
 
 func init() {
 	pkgmiddleware.Register("outbound/oauth2_client_credentials", func(ctx context.Context, cfg any) (func(http.Handler) http.Handler, error) {
-		oc, ok := cfg.(*config.OutboundAuthConfig)
+		oc, ok := cfg.(*config.OutboundAuthSpec)
 		if !ok {
-			return nil, fmt.Errorf("outbound/oauth2_client_credentials: expected *config.OutboundAuthConfig, got %T", cfg)
+			return nil, fmt.Errorf("outbound/oauth2_client_credentials: expected *config.OutboundAuthSpec, got %T", cfg)
 		}
 		p, err := NewProvider(ctx, oc.OAuth2ClientCredentials)
 		if err != nil {
@@ -38,7 +38,7 @@ type Provider struct {
 
 // NewProvider creates a Provider configured for the client credentials flow.
 // The token source handles caching and automatic refresh.
-func NewProvider(ctx context.Context, cfg config.OAuth2CCConfig) (*Provider, error) {
+func NewProvider(ctx context.Context, cfg config.OAuth2CCSpec) (*Provider, error) {
 	ccCfg := &clientcredentials.Config{
 		ClientID:     cfg.ClientID,
 		ClientSecret: os.ExpandEnv(cfg.ClientSecret),

@@ -17,7 +17,7 @@ import (
 )
 
 // Config holds the telemetry initialisation parameters.
-// Populated from config.TelemetryConfig in main.go to avoid an import cycle.
+// Populated from config.TelemetrySpec in main.go to avoid an import cycle.
 type Config struct {
 	ServiceName    string
 	ServiceVersion string

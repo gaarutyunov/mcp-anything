@@ -4,7 +4,7 @@
 
 package v1alpha1
 
-// JWTAuthConfig configures JWT Bearer token validation via OIDC/JWKS.
+// JWTAuthSpec configures JWT Bearer token validation via OIDC/JWKS.
 type JWTAuthSpec struct {
 	// +optional
 	Issuer string `json:"issuer,omitempty"`
@@ -15,8 +15,8 @@ type JWTAuthSpec struct {
 	JWKSURL string `json:"jwksUrl,omitempty"`
 }
 
-// NamingConfig controls how tool names are generated.
-type ProxyNamingSpec struct {
+// NamingSpec controls how tool names are generated.
+type NamingSpec struct {
 	// +optional
 	Separator string `json:"separator,omitempty"`
 	// +optional
@@ -28,11 +28,11 @@ type ProxyNamingSpec struct {
 	// +optional
 	DescriptionTruncationSuffix string `json:"descriptionTruncationSuffix,omitempty"`
 	// +optional
-	DefaultSlugRules ProxySlugRulesSpec `json:"defaultSlugRules,omitempty"`
+	DefaultSlugRules SlugRulesSpec `json:"defaultSlugRules,omitempty"`
 }
 
-// SlugRulesConfig controls which slug transformations are applied.
-type ProxySlugRulesSpec struct {
+// SlugRulesSpec controls which slug transformations are applied.
+type SlugRulesSpec struct {
 	// +optional
 	ReplaceSlashes bool `json:"replaceSlashes,omitempty"`
 	// +optional
@@ -48,8 +48,8 @@ type ProxySlugRulesSpec struct {
 	CollapseSeparators bool `json:"collapseSeparators,omitempty"`
 }
 
-// TelemetryConfig holds observability settings.
-type ProxyTelemetrySpec struct {
+// TelemetrySpec holds observability settings.
+type TelemetrySpec struct {
 	// +optional
 	ServiceName string `json:"serviceName,omitempty"`
 	// +optional
@@ -62,8 +62,8 @@ type ProxyTelemetrySpec struct {
 	Insecure bool `json:"insecure,omitempty"`
 }
 
-// CommandConfig defines a single command-backed MCP tool within a command upstream.
-type MCPUpstreamCommandSpec struct {
+// CommandSpec defines a single command-backed MCP tool within a command upstream.
+type CommandSpec struct {
 	// +optional
 	ToolName string `json:"toolName,omitempty"`
 	// +optional
@@ -71,7 +71,7 @@ type MCPUpstreamCommandSpec struct {
 	// +optional
 	Command string `json:"command,omitempty"`
 	// +optional
-	InputSchema MCPUpstreamCommandInputSchema `json:"inputSchema,omitempty"`
+	InputSchema CommandInputSchema `json:"inputSchema,omitempty"`
 	// +optional
 	Timeout string `json:"timeout,omitempty"`
 	// +optional
@@ -87,25 +87,25 @@ type MCPUpstreamCommandSpec struct {
 }
 
 // CommandInputSchema is the JSON Schema definition for a command tool's input parameters.
-type MCPUpstreamCommandInputSchema struct {
+type CommandInputSchema struct {
 	// +optional
 	Type string `json:"type,omitempty"`
 	// +optional
-	Properties map[string]MCPUpstreamCommandSchemaProperty `json:"properties,omitempty"`
+	Properties map[string]CommandSchemaProperty `json:"properties,omitempty"`
 	// +optional
 	Required []string `json:"required,omitempty"`
 }
 
 // CommandSchemaProperty describes a single property in a command tool's input schema.
-type MCPUpstreamCommandSchemaProperty struct {
+type CommandSchemaProperty struct {
 	// +optional
 	Type string `json:"type,omitempty"`
 	// +optional
 	Description string `json:"description,omitempty"`
 }
 
-// ValidationConfig controls runtime request and response validation against the OpenAPI schema.
-type MCPUpstreamValidationSpec struct {
+// ValidationSpec controls runtime request and response validation against the OpenAPI schema.
+type ValidationSpec struct {
 	// +optional
 	ValidateRequest bool `json:"validateRequest,omitempty"`
 	// +optional

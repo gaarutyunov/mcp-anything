@@ -17,7 +17,7 @@ import (
 // ApplyOverlay loads an overlay from the given config and applies it to the spec bytes.
 // Returns the modified spec bytes, any warnings from unmatched targets, and an error.
 // If cfg is nil, the original specBytes are returned unchanged.
-func ApplyOverlay(ctx context.Context, specBytes []byte, cfg *config.OverlayConfig) ([]byte, []string, error) {
+func ApplyOverlay(ctx context.Context, specBytes []byte, cfg *config.OverlaySpec) ([]byte, []string, error) {
 	if cfg == nil {
 		return specBytes, nil, nil
 	}
@@ -64,7 +64,7 @@ func ApplyOverlayBytes(specBytes, overlayBytes []byte) ([]byte, []string, error)
 // FetchOverlayConditional fetches overlay bytes using conditional GET (for URL-based overlays).
 // If the overlay is inline or file-based, ifNoneMatch is ignored and notModified is always false.
 // Returns notModified=true if the server responds with 304 Not Modified.
-func FetchOverlayConditional(ctx context.Context, cfg *config.OverlayConfig, ifNoneMatch string) (data []byte, etag string, notModified bool, err error) {
+func FetchOverlayConditional(ctx context.Context, cfg *config.OverlaySpec, ifNoneMatch string) (data []byte, etag string, notModified bool, err error) {
 	if cfg == nil {
 		return nil, "", false, nil
 	}
@@ -111,7 +111,7 @@ func FetchOverlayConditional(ctx context.Context, cfg *config.OverlayConfig, ifN
 }
 
 // loadOverlayBytes fetches overlay content from file, URL, or inline string.
-func loadOverlayBytes(ctx context.Context, cfg *config.OverlayConfig) ([]byte, error) {
+func loadOverlayBytes(ctx context.Context, cfg *config.OverlaySpec) ([]byte, error) {
 	if cfg.Inline != "" {
 		return []byte(cfg.Inline), nil
 	}

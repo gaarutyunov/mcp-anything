@@ -14,8 +14,8 @@ import (
 
 func init() {
 	pkgmiddleware.Register("outbound/none", func(_ context.Context, cfg any) (func(http.Handler) http.Handler, error) {
-		if _, ok := cfg.(*config.OutboundAuthConfig); !ok {
-			return nil, fmt.Errorf("outbound/none: expected *config.OutboundAuthConfig, got %T", cfg)
+		if _, ok := cfg.(*config.OutboundAuthSpec); !ok {
+			return nil, fmt.Errorf("outbound/none: expected *config.OutboundAuthSpec, got %T", cfg)
 		}
 		return outbound.Middleware(&Provider{}), nil
 	})

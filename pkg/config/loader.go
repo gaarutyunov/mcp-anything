@@ -19,13 +19,13 @@ import (
 // Loader watches a config file and atomically updates the live configuration on change.
 type Loader struct {
 	path    string
-	current atomic.Pointer[ProxyConfig]
-	onLoad  func(*ProxyConfig) error
+	current atomic.Pointer[ProxySpec]
+	onLoad  func(*ProxySpec) error
 }
 
 // NewLoader creates a Loader, performs the initial load and validation, and returns.
 // If the initial load or validation fails, it returns an error (callers should treat this as fatal).
-func NewLoader(path string, onLoad func(*ProxyConfig) error) (*Loader, error) {
+func NewLoader(path string, onLoad func(*ProxySpec) error) (*Loader, error) {
 	l := &Loader{
 		path:   path,
 		onLoad: onLoad,
@@ -42,7 +42,7 @@ func NewLoader(path string, onLoad func(*ProxyConfig) error) (*Loader, error) {
 }
 
 // Current returns the currently active configuration. Safe for concurrent reads.
-func (l *Loader) Current() *ProxyConfig {
+func (l *Loader) Current() *ProxySpec {
 	return l.current.Load()
 }
 
@@ -119,9 +119,9 @@ func (l *Loader) tryReload(ctx context.Context) {
 	slog.Info("config reloaded", "upstreams", len(cfg.Upstreams))
 }
 
-// Load reads the YAML config file at path and returns a ProxyConfig with
+// Load reads the YAML config file at path and returns a ProxySpec with
 // defaults applied for any missing fields.
-func Load(path string) (*ProxyConfig, error) {
+func Load(path string) (*ProxySpec, error) {
 	k := koanf.New(".")
 
 	if err := k.Load(file.Provider(path), yaml.Parser()); err != nil {
@@ -130,7 +130,7 @@ func Load(path string) (*ProxyConfig, error) {
 
 	applyDefaults(k)
 
-	var cfg ProxyConfig
+	var cfg ProxySpec
 	if err := k.Unmarshal("", &cfg); err != nil {
 		return nil, fmt.Errorf("unmarshalling config: %w", err)
 	}
@@ -166,10 +166,10 @@ func Load(path string) (*ProxyConfig, error) {
 	return &cfg, nil
 }
 
-// applyValidationDefaults sets defaults for a single upstream's ValidationConfig.
+// applyValidationDefaults sets defaults for a single upstream's ValidationSpec.
 // rawUp is the raw map for the upstream entry (may be nil). Bool fields require
 // raw-key existence checks since absent YAML booleans unmarshal to false.
-func applyValidationDefaults(rawUp map[string]interface{}, v *ValidationConfig) {
+func applyValidationDefaults(rawUp map[string]interface{}, v *ValidationSpec) {
 	var rawVal map[string]interface{}
 	if rawUp != nil {
 		rawVal, _ = rawUp["validation"].(map[string]interface{})

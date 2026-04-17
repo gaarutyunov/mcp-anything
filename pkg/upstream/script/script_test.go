@@ -249,7 +249,7 @@ func TestBuildTools_Valid(t *testing.T) {
 		t.Fatalf("write script: %v", err)
 	}
 
-	cfgs := []config.ScriptConfig{
+	cfgs := []config.ScriptSpec{
 		{
 			ToolName:   "my_tool",
 			ScriptPath: scriptPath,
@@ -262,8 +262,8 @@ func TestBuildTools_Valid(t *testing.T) {
 			},
 		},
 	}
-	upCfg := &config.UpstreamConfig{Name: "test", ToolPrefix: "test"}
-	namingCfg := &config.NamingConfig{Separator: "__"}
+	upCfg := &config.UpstreamSpec{Name: "test", ToolPrefix: "test"}
+	namingCfg := &config.NamingSpec{Separator: "__"}
 
 	pool, err := runtime.NewPool(runtime.DefaultMaxScriptVMs)
 	if err != nil {
@@ -283,9 +283,9 @@ func TestBuildTools_Valid(t *testing.T) {
 
 // TestBuildTools_MissingToolName verifies that missing tool_name returns an error.
 func TestBuildTools_MissingToolName(t *testing.T) {
-	cfgs := []config.ScriptConfig{{ScriptPath: "/some/path.js"}}
-	upCfg := &config.UpstreamConfig{Name: "test", ToolPrefix: "test"}
-	namingCfg := &config.NamingConfig{Separator: "__"}
+	cfgs := []config.ScriptSpec{{ScriptPath: "/some/path.js"}}
+	upCfg := &config.UpstreamSpec{Name: "test", ToolPrefix: "test"}
+	namingCfg := &config.NamingSpec{Separator: "__"}
 	pool, err := runtime.NewPool(runtime.DefaultMaxScriptVMs)
 	if err != nil {
 		t.Fatalf("NewPool: %v", err)
@@ -299,9 +299,9 @@ func TestBuildTools_MissingToolName(t *testing.T) {
 
 // TestBuildTools_MissingScriptPath verifies that missing script_path returns an error.
 func TestBuildTools_MissingScriptPath(t *testing.T) {
-	cfgs := []config.ScriptConfig{{ToolName: "my_tool"}}
-	upCfg := &config.UpstreamConfig{Name: "test", ToolPrefix: "test"}
-	namingCfg := &config.NamingConfig{Separator: "__"}
+	cfgs := []config.ScriptSpec{{ToolName: "my_tool"}}
+	upCfg := &config.UpstreamSpec{Name: "test", ToolPrefix: "test"}
+	namingCfg := &config.NamingSpec{Separator: "__"}
 	pool, err := runtime.NewPool(runtime.DefaultMaxScriptVMs)
 	if err != nil {
 		t.Fatalf("NewPool: %v", err)
@@ -321,9 +321,9 @@ func TestBuildTools_ScriptSyntaxError(t *testing.T) {
 		t.Fatalf("write script: %v", err)
 	}
 
-	cfgs := []config.ScriptConfig{{ToolName: "bad", ScriptPath: scriptPath}}
-	upCfg := &config.UpstreamConfig{Name: "test", ToolPrefix: "test"}
-	namingCfg := &config.NamingConfig{Separator: "__"}
+	cfgs := []config.ScriptSpec{{ToolName: "bad", ScriptPath: scriptPath}}
+	upCfg := &config.UpstreamSpec{Name: "test", ToolPrefix: "test"}
+	namingCfg := &config.NamingSpec{Separator: "__"}
 	pool, err := runtime.NewPool(runtime.DefaultMaxScriptVMs)
 	if err != nil {
 		t.Fatalf("NewPool: %v", err)

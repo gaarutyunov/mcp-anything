@@ -138,10 +138,10 @@ type Tool struct {
 	Transforms   *transform.CompiledTransforms
 }
 
-// BuildTools converts a slice of CommandConfig entries into Tool descriptors.
+// BuildTools converts a slice of CommandSpec entries into Tool descriptors.
 // It validates each entry (non-empty tool_name and command, parseable template)
 // and returns an error if any entry is invalid.
-func BuildTools(cfgs []config.CommandConfig, upstreamCfg *config.UpstreamConfig, namingCfg *config.NamingConfig) ([]*Tool, error) {
+func BuildTools(cfgs []config.CommandSpec, upstreamCfg *config.UpstreamSpec, namingCfg *config.NamingSpec) ([]*Tool, error) {
 	sep := namingCfg.Separator
 	prefix := upstreamCfg.ToolPrefix
 

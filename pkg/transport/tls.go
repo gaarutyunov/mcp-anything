@@ -11,7 +11,7 @@ import (
 )
 
 // BuildTLSConfig constructs a *tls.Config for outbound (upstream) connections.
-func BuildTLSConfig(cfg config.TLSConfig) (*tls.Config, error) {
+func BuildTLSConfig(cfg config.TLSSpec) (*tls.Config, error) {
 	minVer := uint16(tls.VersionTLS12)
 	if cfg.MinVersion != "" {
 		v, err := parseTLSVersion(cfg.MinVersion)
@@ -70,7 +70,7 @@ func BuildTLSConfig(cfg config.TLSConfig) (*tls.Config, error) {
 }
 
 // BuildServerTLSConfig constructs a *tls.Config for inbound TLS termination.
-func BuildServerTLSConfig(cfg config.ServerTLSConfig) (*tls.Config, error) {
+func BuildServerTLSConfig(cfg config.ServerTLSSpec) (*tls.Config, error) {
 	cert, err := tls.LoadX509KeyPair(cfg.CertPath, cfg.KeyPath)
 	if err != nil {
 		return nil, fmt.Errorf("loading server certificate: %w", err)

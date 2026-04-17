@@ -37,13 +37,13 @@ type GeneratedTool struct {
 	OperationNode *yaml.Node          // YAML node for this operation, used for JSONPath group filter evaluation
 	// UIConfig is the resolved per-tool UI configuration, or nil if no UI is configured.
 	// Computed by merging upstream.AppUI with x-mcp-ui-static / x-mcp-ui-script extensions.
-	UIConfig *config.ToolUIConfig
+	UIConfig *config.ToolUISpec
 }
 
 // GenerateTools walks all operations in the OpenAPI document and returns a list of MCP
 // tools with routing metadata. It applies the full naming pipeline (ToolBaseName →
 // PrefixedName → TruncateDescription) and runs conflict detection before returning.
-func GenerateTools(doc *openapi3.T, upstream *config.UpstreamConfig, naming *config.NamingConfig) ([]*GeneratedTool, error) {
+func GenerateTools(doc *openapi3.T, upstream *config.UpstreamSpec, naming *config.NamingSpec) ([]*GeneratedTool, error) {
 	var prefixedList []PrefixedTool
 	var tools []*GeneratedTool
 
@@ -243,9 +243,9 @@ func FindOperationYAMLNode(root *yaml.Node, path, method string) *yaml.Node {
 
 // resolveToolUIConfig determines the per-tool UI config for an operation.
 // Per-operation x-mcp-ui-script / x-mcp-ui-static extensions take precedence over
-// the upstream-level AppUIConfig default. Script takes precedence over static at
+// the upstream-level AppUISpec default. Script takes precedence over static at
 // each level. Returns nil when no UI source is configured at either level.
-func resolveToolUIConfig(op *openapi3.Operation, upstreamDefault *config.AppUIConfig) *config.ToolUIConfig {
+func resolveToolUIConfig(op *openapi3.Operation, upstreamDefault *config.AppUISpec) *config.ToolUISpec {
 	var opScript, opStatic string
 	if val, ok := op.Extensions["x-mcp-ui-script"]; ok {
 		if s, ok := val.(string); ok {
@@ -260,12 +260,12 @@ func resolveToolUIConfig(op *openapi3.Operation, upstreamDefault *config.AppUICo
 
 	// Per-operation extensions take precedence.
 	if opScript != "" || opStatic != "" {
-		return &config.ToolUIConfig{Script: opScript, Static: opStatic}
+		return &config.ToolUISpec{Script: opScript, Static: opStatic}
 	}
 
 	// Fall back to upstream-level default.
 	if upstreamDefault != nil && (upstreamDefault.Script != "" || upstreamDefault.Static != "") {
-		return &config.ToolUIConfig{
+		return &config.ToolUISpec{
 			Script: upstreamDefault.Script,
 			Static: upstreamDefault.Static,
 		}

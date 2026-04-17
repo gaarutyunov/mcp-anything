@@ -24,7 +24,7 @@ import (
 // load spec bytes → apply overlay → parse with kin-openapi → validate → build router.
 // It also returns the post-overlay YAML root node for JSONPath filter evaluation.
 // It is safe to call from multiple goroutines if cfg is read-only.
-func LoadPipeline(ctx context.Context, specCfg config.OpenAPISourceConfig, overlayCfg *config.OverlayConfig) (*openapi3.T, routers.Router, *yaml.Node, error) {
+func LoadPipeline(ctx context.Context, specCfg config.OpenAPISourceSpec, overlayCfg *config.OverlaySpec) (*openapi3.T, routers.Router, *yaml.Node, error) {
 	specBytes, etag, err := loadSpecBytes(ctx, specCfg)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("loading spec bytes: %w", err)
@@ -80,7 +80,7 @@ var httpClient = &http.Client{Timeout: 30 * time.Second}
 
 // loadSpecBytes loads the raw spec bytes and returns the ETag (empty for file-based).
 // For HTTP URLs, it retries up to 5 times on transient connection errors and 5xx responses.
-func loadSpecBytes(ctx context.Context, cfg config.OpenAPISourceConfig) ([]byte, string, error) {
+func loadSpecBytes(ctx context.Context, cfg config.OpenAPISourceSpec) ([]byte, string, error) {
 	data, etag, _, err := FetchSpecConditional(ctx, cfg, "", 5)
 	return data, etag, err
 }
@@ -90,7 +90,7 @@ func loadSpecBytes(ctx context.Context, cfg config.OpenAPISourceConfig) ([]byte,
 // notModified=true with nil data and empty etag.
 // For file-based sources, ifNoneMatch is ignored and notModified is always false.
 // maxAttempts controls the number of attempts for HTTP sources (1 = no retry).
-func FetchSpecConditional(ctx context.Context, cfg config.OpenAPISourceConfig, ifNoneMatch string, maxAttempts int) (data []byte, etag string, notModified bool, err error) {
+func FetchSpecConditional(ctx context.Context, cfg config.OpenAPISourceSpec, ifNoneMatch string, maxAttempts int) (data []byte, etag string, notModified bool, err error) {
 	if !strings.HasPrefix(cfg.Source, "http") {
 		d, readErr := os.ReadFile(cfg.Source)
 		if readErr != nil {
@@ -164,7 +164,7 @@ func FetchSpecConditional(ctx context.Context, cfg config.OpenAPISourceConfig, i
 
 // LoadPipelineFromBytes runs the OpenAPI loading pipeline from pre-fetched spec bytes
 // (with overlay already applied). Used by background refresh to avoid re-fetching.
-func LoadPipelineFromBytes(ctx context.Context, specBytes []byte, specCfg config.OpenAPISourceConfig) (*openapi3.T, routers.Router, *yaml.Node, error) {
+func LoadPipelineFromBytes(ctx context.Context, specBytes []byte, specCfg config.OpenAPISourceSpec) (*openapi3.T, routers.Router, *yaml.Node, error) {
 	var specYAMLRoot yaml.Node
 	if err := yaml.Unmarshal(specBytes, &specYAMLRoot); err != nil {
 		return nil, nil, nil, fmt.Errorf("parsing spec YAML root: %w", err)

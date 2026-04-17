@@ -30,7 +30,7 @@ type Builder struct{}
 // with RegistryEntry objects ready for registration.
 // Parse errors in any script are fatal at startup.
 // cfg.JSScriptPool must be set before calling Build; it bounds concurrent JS runtimes.
-func (b *Builder) Build(_ context.Context, cfg *config.UpstreamConfig, naming *config.NamingConfig) (*pkgupstream.ValidatedUpstream, error) {
+func (b *Builder) Build(_ context.Context, cfg *config.UpstreamSpec, naming *config.NamingSpec) (*pkgupstream.ValidatedUpstream, error) {
 	if cfg.JSScriptPool == nil {
 		return nil, fmt.Errorf("upstream %q: JSScriptPool must be set before building a script upstream", cfg.Name)
 	}

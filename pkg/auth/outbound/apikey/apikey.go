@@ -15,9 +15,9 @@ import (
 
 func init() {
 	pkgmiddleware.Register("outbound/api_key", func(_ context.Context, cfg any) (func(http.Handler) http.Handler, error) {
-		oc, ok := cfg.(*config.OutboundAuthConfig)
+		oc, ok := cfg.(*config.OutboundAuthSpec)
 		if !ok {
-			return nil, fmt.Errorf("outbound/api_key: expected *config.OutboundAuthConfig, got %T", cfg)
+			return nil, fmt.Errorf("outbound/api_key: expected *config.OutboundAuthSpec, got %T", cfg)
 		}
 		return outbound.Middleware(NewProvider(oc.APIKey)), nil
 	})
@@ -31,7 +31,7 @@ type Provider struct {
 }
 
 // NewProvider creates a Provider from config.
-func NewProvider(cfg config.APIKeyOutboundConfig) *Provider {
+func NewProvider(cfg config.APIKeyOutboundSpec) *Provider {
 	return &Provider{
 		header:   cfg.Header,
 		valueEnv: cfg.ValueEnv,

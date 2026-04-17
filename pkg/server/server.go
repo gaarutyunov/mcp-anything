@@ -31,7 +31,7 @@ type OAuthCallbackHandler interface {
 
 // Server wraps the net/http server and manages its lifecycle.
 type Server struct {
-	cfg        *config.ProxyConfig
+	cfg        *config.ProxySpec
 	httpServer *http.Server
 }
 
@@ -42,7 +42,7 @@ type Server struct {
 // prometheusMetrics is an optional handler for the GET /metrics endpoint (Prometheus scrape); pass nil to skip.
 // readiness is an optional checker for /readyz; pass nil to always return 200 OK.
 // oauthCallback is an optional handler for GET /oauth/callback/{upstreamName}; pass nil to skip.
-func New(cfg *config.ProxyConfig, mcpHandlers map[string]http.Handler, wellKnown http.HandlerFunc, reloadMetrics http.HandlerFunc, prometheusMetrics http.Handler, readiness ReadinessChecker, oauthCallback OAuthCallbackHandler) *Server {
+func New(cfg *config.ProxySpec, mcpHandlers map[string]http.Handler, wellKnown http.HandlerFunc, reloadMetrics http.HandlerFunc, prometheusMetrics http.Handler, readiness ReadinessChecker, oauthCallback OAuthCallbackHandler) *Server {
 	r := chi.NewRouter()
 
 	// Health endpoints.

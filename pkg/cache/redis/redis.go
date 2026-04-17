@@ -19,7 +19,7 @@ import (
 )
 
 func init() {
-	pkgcache.Register("redis", func(ctx context.Context, cfg *config.CacheStoreConfig) (pkgcache.Store, error) {
+	pkgcache.Register("redis", func(ctx context.Context, cfg *config.CacheStoreSpec) (pkgcache.Store, error) {
 		return newStore(ctx, cfg)
 	})
 }
@@ -28,7 +28,7 @@ type store struct {
 	client *goredis.Client
 }
 
-func newStore(ctx context.Context, cfg *config.CacheStoreConfig) (*store, error) {
+func newStore(ctx context.Context, cfg *config.CacheStoreSpec) (*store, error) {
 	if cfg.Redis == nil {
 		return nil, fmt.Errorf("cache_store.redis config is required for provider \"redis\"")
 	}

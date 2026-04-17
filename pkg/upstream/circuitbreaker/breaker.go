@@ -31,7 +31,7 @@ type Breaker struct {
 }
 
 // New creates a Breaker for the named upstream using the given configuration.
-func New(upstreamName string, cfg config.CircuitBreakerConfig) *Breaker {
+func New(upstreamName string, cfg config.CircuitBreakerSpec) *Breaker {
 	b := &Breaker{
 		upstreamName:     upstreamName,
 		fallbackDuration: cfg.FallbackDuration,

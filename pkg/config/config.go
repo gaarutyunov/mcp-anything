@@ -15,30 +15,30 @@ type PoolAcquirer interface {
 	Acquire(ctx context.Context) (release func(), err error)
 }
 
-// ProxyConfig is the top-level configuration struct.
-type ProxyConfig struct {
-	Server         ServerConfig               `koanf:"server"`
-	Telemetry      TelemetryConfig            `koanf:"telemetry"`
-	Naming         NamingConfig               `koanf:"naming"`
-	Upstreams      []UpstreamConfig           `koanf:"upstreams"`
-	InboundAuth    InboundAuthConfig          `koanf:"inbound_auth"`
-	Groups         []GroupConfig              `koanf:"groups"`
-	Runtime        RuntimeConfig              `koanf:"runtime"`
-	TokenCounting  TokenCountingConfig        `koanf:"token_counting"`
-	RateLimits     map[string]RateLimitConfig `koanf:"rate_limits"`
-	RateLimitStore RateLimitStoreConfig       `koanf:"rate_limit_store"`
-	ToolSearch     *ToolSearchConfig          `koanf:"tool_search"`
-	SessionStore   SessionStoreConfig         `koanf:"session_store"`
+// ProxySpec is the top-level configuration struct.
+type ProxySpec struct {
+	Server         ServerSpec               `koanf:"server"`
+	Telemetry      TelemetrySpec            `koanf:"telemetry"`
+	Naming         NamingSpec               `koanf:"naming"`
+	Upstreams      []UpstreamSpec           `koanf:"upstreams"`
+	InboundAuth    InboundAuthSpec          `koanf:"inbound_auth"`
+	Groups         []GroupSpec              `koanf:"groups"`
+	Runtime        RuntimeSpec              `koanf:"runtime"`
+	TokenCounting  TokenCountingSpec        `koanf:"token_counting"`
+	RateLimits     map[string]RateLimitSpec `koanf:"rate_limits"`
+	RateLimitStore RateLimitStoreSpec       `koanf:"rate_limit_store"`
+	ToolSearch     *ToolSearchSpec          `koanf:"tool_search"`
+	SessionStore   SessionStoreSpec         `koanf:"session_store"`
 	// Caches defines named cache configurations referenced by upstreams or per-tool overlays.
-	Caches map[string]CacheConfig `koanf:"caches"`
+	Caches map[string]CacheSpec `koanf:"caches"`
 	// CacheStore configures the cache backend. Defaults to the memory provider when absent.
-	CacheStore      CacheStoreConfig                `koanf:"cache_store"`
-	CircuitBreakers map[string]CircuitBreakerConfig `koanf:"circuit_breakers"`
+	CacheStore      CacheStoreSpec                `koanf:"cache_store"`
+	CircuitBreakers map[string]CircuitBreakerSpec `koanf:"circuit_breakers"`
 }
 
-// CircuitBreakerConfig defines a named circuit breaker policy.
+// CircuitBreakerSpec defines a named circuit breaker policy.
 // Named policies are referenced per upstream via the circuit_breaker field.
-type CircuitBreakerConfig struct {
+type CircuitBreakerSpec struct {
 	// Threshold is the error ratio at which the circuit opens (0.0–1.0).
 	// For example, 0.5 means the circuit opens when 50% or more requests fail.
 	Threshold float64 `koanf:"threshold"`
@@ -54,9 +54,9 @@ type CircuitBreakerConfig struct {
 	RecoveryDuration time.Duration `koanf:"recovery_duration"`
 }
 
-// RateLimitConfig defines a named rate limit policy.
+// RateLimitSpec defines a named rate limit policy.
 // Named policies are referenced by upstreams or per-tool overlays.
-type RateLimitConfig struct {
+type RateLimitSpec struct {
 	// Average is the number of requests allowed per Period.
 	Average int64 `koanf:"average"`
 	// Period is the time window for the rate limit.
@@ -69,23 +69,23 @@ type RateLimitConfig struct {
 	Source string `koanf:"source"` // "user" | "ip" | "session"
 }
 
-// RateLimitStoreConfig configures the backend store for rate limit counters.
+// RateLimitStoreSpec configures the backend store for rate limit counters.
 // When Redis is nil, an in-memory store is used.
-type RateLimitStoreConfig struct {
-	Redis *RedisStoreConfig `koanf:"redis"`
+type RateLimitStoreSpec struct {
+	Redis *RedisStoreSpec `koanf:"redis"`
 }
 
-// RedisStoreConfig configures a Redis-backed rate limit store.
-type RedisStoreConfig struct {
+// RedisStoreSpec configures a Redis-backed rate limit store.
+type RedisStoreSpec struct {
 	Addr     string `koanf:"addr"`
 	Password string `koanf:"password"` // supports ${ENV_VAR} expansion
 }
 
-// TokenCountingConfig configures per-tool token counting on tool results.
+// TokenCountingSpec configures per-tool token counting on tool results.
 // When enabled, successful tool call results are tokenized and the count is
 // recorded as a Prometheus histogram (mcp_tool_result_tokens).
 // When absent or enabled: false, no tokenization occurs.
-type TokenCountingConfig struct {
+type TokenCountingSpec struct {
 	// Enabled activates token counting. Default: false.
 	Enabled bool `koanf:"enabled"`
 	// Encoding selects the tiktoken BPE encoding used for tokenization.
@@ -93,102 +93,102 @@ type TokenCountingConfig struct {
 	Encoding string `koanf:"encoding"`
 }
 
-// ToolSearchConfig configures semantic tool search using a vector index.
+// ToolSearchSpec configures semantic tool search using a vector index.
 // When enabled, tools/list returns only search_tools; actual tools remain callable.
-type ToolSearchConfig struct {
+type ToolSearchSpec struct {
 	// Enabled activates semantic tool search. Default: false.
 	Enabled bool `koanf:"enabled"`
 	// Limit is the default number of tools returned per search query. Default: 5.
-	Limit     int             `koanf:"limit"`
-	Embedding EmbeddingConfig `koanf:"embedding"`
+	Limit     int           `koanf:"limit"`
+	Embedding EmbeddingSpec `koanf:"embedding"`
 }
 
-// EmbeddingConfig configures the embedding provider for semantic search.
-type EmbeddingConfig struct {
+// EmbeddingSpec configures the embedding provider for semantic search.
+type EmbeddingSpec struct {
 	// Provider selects the embedding backend.
 	// Built-in: openai, openai_compat, ollama, cohere, mistral, jina, mixedbread, vertex, azure_openai, localai.
 	// Separate package (heavy dep): hugot.
-	Provider     string                   `koanf:"provider"`
-	OpenAI       *OpenAIEmbedConfig       `koanf:"openai"`
-	OpenAICompat *OpenAICompatEmbedConfig `koanf:"openai_compat"`
-	Ollama       *OllamaEmbedConfig       `koanf:"ollama"`
-	Cohere       *CohereEmbedConfig       `koanf:"cohere"`
-	Mistral      *MistralEmbedConfig      `koanf:"mistral"`
-	Jina         *JinaEmbedConfig         `koanf:"jina"`
-	Mixedbread   *MixedbreadEmbedConfig   `koanf:"mixedbread"`
-	Vertex       *VertexEmbedConfig       `koanf:"vertex"`
-	AzureOpenAI  *AzureOpenAIEmbedConfig  `koanf:"azure_openai"`
-	Hugot        *HugotEmbedConfig        `koanf:"hugot"`
+	Provider     string                 `koanf:"provider"`
+	OpenAI       *OpenAIEmbedSpec       `koanf:"openai"`
+	OpenAICompat *OpenAICompatEmbedSpec `koanf:"openai_compat"`
+	Ollama       *OllamaEmbedSpec       `koanf:"ollama"`
+	Cohere       *CohereEmbedSpec       `koanf:"cohere"`
+	Mistral      *MistralEmbedSpec      `koanf:"mistral"`
+	Jina         *JinaEmbedSpec         `koanf:"jina"`
+	Mixedbread   *MixedbreadEmbedSpec   `koanf:"mixedbread"`
+	Vertex       *VertexEmbedSpec       `koanf:"vertex"`
+	AzureOpenAI  *AzureOpenAIEmbedSpec  `koanf:"azure_openai"`
+	Hugot        *HugotEmbedSpec        `koanf:"hugot"`
 }
 
-// OpenAIEmbedConfig configures the OpenAI embedding provider.
-type OpenAIEmbedConfig struct {
+// OpenAIEmbedSpec configures the OpenAI embedding provider.
+type OpenAIEmbedSpec struct {
 	APIKey string `koanf:"api_key"` // supports ${ENV_VAR} expansion
 	Model  string `koanf:"model"`   // e.g. "text-embedding-3-small"
 }
 
-// OpenAICompatEmbedConfig configures an OpenAI-compatible embedding endpoint.
+// OpenAICompatEmbedSpec configures an OpenAI-compatible embedding endpoint.
 // Also used for the localai provider (base_url defaults to http://localhost:8080/v1).
-type OpenAICompatEmbedConfig struct {
+type OpenAICompatEmbedSpec struct {
 	BaseURL string `koanf:"base_url"`
 	APIKey  string `koanf:"api_key"` // supports ${ENV_VAR} expansion
 	Model   string `koanf:"model"`
 }
 
-// OllamaEmbedConfig configures the Ollama embedding provider.
-type OllamaEmbedConfig struct {
+// OllamaEmbedSpec configures the Ollama embedding provider.
+type OllamaEmbedSpec struct {
 	BaseURL string `koanf:"base_url"` // defaults to http://localhost:11434/api
 	Model   string `koanf:"model"`    // e.g. "nomic-embed-text"
 }
 
-// CohereEmbedConfig configures the Cohere embedding provider.
-type CohereEmbedConfig struct {
+// CohereEmbedSpec configures the Cohere embedding provider.
+type CohereEmbedSpec struct {
 	APIKey string `koanf:"api_key"` // supports ${ENV_VAR} expansion
 	Model  string `koanf:"model"`   // e.g. "embed-english-v3.0"
 }
 
-// MistralEmbedConfig configures the Mistral embedding provider.
-type MistralEmbedConfig struct {
+// MistralEmbedSpec configures the Mistral embedding provider.
+type MistralEmbedSpec struct {
 	APIKey string `koanf:"api_key"` // supports ${ENV_VAR} expansion
 }
 
-// JinaEmbedConfig configures the Jina embedding provider.
-type JinaEmbedConfig struct {
+// JinaEmbedSpec configures the Jina embedding provider.
+type JinaEmbedSpec struct {
 	APIKey string `koanf:"api_key"` // supports ${ENV_VAR} expansion
 	Model  string `koanf:"model"`   // e.g. "jina-embeddings-v2-base-en"
 }
 
-// MixedbreadEmbedConfig configures the Mixedbread embedding provider.
-type MixedbreadEmbedConfig struct {
+// MixedbreadEmbedSpec configures the Mixedbread embedding provider.
+type MixedbreadEmbedSpec struct {
 	APIKey string `koanf:"api_key"` // supports ${ENV_VAR} expansion
 	Model  string `koanf:"model"`   // e.g. "mxbai-embed-large-v1"
 }
 
-// VertexEmbedConfig configures the Google Vertex AI embedding provider.
-type VertexEmbedConfig struct {
+// VertexEmbedSpec configures the Google Vertex AI embedding provider.
+type VertexEmbedSpec struct {
 	APIKey  string `koanf:"api_key"` // supports ${ENV_VAR} expansion
 	Project string `koanf:"project"`
 	Model   string `koanf:"model"` // e.g. "text-embedding-004"
 }
 
-// AzureOpenAIEmbedConfig configures the Azure OpenAI embedding provider.
-type AzureOpenAIEmbedConfig struct {
+// AzureOpenAIEmbedSpec configures the Azure OpenAI embedding provider.
+type AzureOpenAIEmbedSpec struct {
 	APIKey        string `koanf:"api_key"`        // supports ${ENV_VAR} expansion
 	DeploymentURL string `koanf:"deployment_url"` // e.g. "https://RESOURCE.openai.azure.com/openai/deployments/DEPLOYMENT"
 	APIVersion    string `koanf:"api_version"`    // defaults to "2024-02-01"
 	Model         string `koanf:"model"`
 }
 
-// HugotEmbedConfig configures the in-process ONNX embedding provider.
+// HugotEmbedSpec configures the in-process ONNX embedding provider.
 // The model directory must contain tokenizer.json and an .onnx model file.
 // Uses a pure-Go ONNX backend (no CGO required).
-type HugotEmbedConfig struct {
+type HugotEmbedSpec struct {
 	ModelPath    string `koanf:"model_path"`    // path to directory containing model files
 	OnnxFilename string `koanf:"onnx_filename"` // .onnx filename within ModelPath; default "model.onnx"
 }
 
-// CacheConfig defines TTL and per-user key settings for a named cache.
-type CacheConfig struct {
+// CacheSpec defines TTL and per-user key settings for a named cache.
+type CacheSpec struct {
 	// TTL is how long a cached result remains valid.
 	TTL time.Duration `koanf:"ttl"`
 	// PerUser, when true, includes the authenticated subject in the cache key so
@@ -196,32 +196,32 @@ type CacheConfig struct {
 	PerUser bool `koanf:"per_user"`
 }
 
-// CacheStoreConfig configures the cache store backend.
-type CacheStoreConfig struct {
+// CacheStoreSpec configures the cache store backend.
+type CacheStoreSpec struct {
 	// Provider selects the store backend. Supported values: "memory", "redis".
 	// Defaults to "memory" when empty.
-	Provider string            `koanf:"provider"`
-	Redis    *RedisCacheConfig `koanf:"redis"`
+	Provider string          `koanf:"provider"`
+	Redis    *RedisCacheSpec `koanf:"redis"`
 }
 
-// RedisCacheConfig holds connection settings for the Redis cache store.
-type RedisCacheConfig struct {
+// RedisCacheSpec holds connection settings for the Redis cache store.
+type RedisCacheSpec struct {
 	// Addr is the Redis server address, e.g. "redis:6379".
 	Addr string `koanf:"addr"`
 	// Password is the Redis AUTH password. Supports ${ENV_VAR} expansion.
 	Password string `koanf:"password"`
 }
 
-// RuntimeConfig controls the bounded pools for concurrent script runtime instances.
+// RuntimeSpec controls the bounded pools for concurrent script runtime instances.
 // Limiting runtime concurrency prevents OOM conditions and denial-of-service attacks
 // caused by excessive memory growth under high load.
-type RuntimeConfig struct {
-	JS  JSRuntimeConfig  `koanf:"js"`
-	Lua LuaRuntimeConfig `koanf:"lua"`
+type RuntimeSpec struct {
+	JS  JSRuntimeSpec  `koanf:"js"`
+	Lua LuaRuntimeSpec `koanf:"lua"`
 }
 
-// JSRuntimeConfig configures Sobek JavaScript runtime pool sizes.
-type JSRuntimeConfig struct {
+// JSRuntimeSpec configures Sobek JavaScript runtime pool sizes.
+type JSRuntimeSpec struct {
 	// MaxAuthVMs is the maximum number of concurrent JS runtimes used for auth scripts
 	// (inbound + outbound combined). Default: 10.
 	MaxAuthVMs int `koanf:"max_auth_vms"`
@@ -230,76 +230,76 @@ type JSRuntimeConfig struct {
 	MaxScriptVMs int `koanf:"max_script_vms"`
 }
 
-// LuaRuntimeConfig configures gopher-lua runtime pool sizes.
-type LuaRuntimeConfig struct {
+// LuaRuntimeSpec configures gopher-lua runtime pool sizes.
+type LuaRuntimeSpec struct {
 	// MaxAuthVMs is the maximum number of concurrent Lua runtimes used for auth scripts
 	// (inbound + outbound combined). Default: 10.
 	MaxAuthVMs int `koanf:"max_auth_vms"`
 }
 
-// GroupConfig configures a named group of upstreams exposed at a single MCP endpoint.
+// GroupSpec configures a named group of upstreams exposed at a single MCP endpoint.
 // If no groups are configured, a synthetic default group is created at /mcp with all upstreams.
-type GroupConfig struct {
+type GroupSpec struct {
 	Name      string   `koanf:"name"`
 	Endpoint  string   `koanf:"endpoint"`  // e.g. /mcp or /mcp/readonly
 	Upstreams []string `koanf:"upstreams"` // upstream names to include
 	Filter    string   `koanf:"filter"`    // RFC 9535 JSONPath expression (optional)
 }
 
-// InboundAuthConfig controls how inbound MCP clients are authenticated.
-type InboundAuthConfig struct {
-	Strategy      string              `koanf:"strategy"` // jwt|introspection|apikey|lua|js|none
-	JWT           JWTAuthConfig       `koanf:"jwt"`
-	Introspection IntrospectionConfig `koanf:"introspection"`
-	APIKey        APIKeyAuthConfig    `koanf:"apikey"`
-	Lua           LuaAuthConfig       `koanf:"lua"`
-	JS            JSAuthConfig        `koanf:"js"`
+// InboundAuthSpec controls how inbound MCP clients are authenticated.
+type InboundAuthSpec struct {
+	Strategy      string            `koanf:"strategy"` // jwt|introspection|apikey|lua|js|none
+	JWT           JWTAuthSpec       `koanf:"jwt"`
+	Introspection IntrospectionSpec `koanf:"introspection"`
+	APIKey        APIKeyAuthSpec    `koanf:"apikey"`
+	Lua           LuaAuthSpec       `koanf:"lua"`
+	JS            JSAuthSpec        `koanf:"js"`
 	// JSAuthPool and LuaAuthPool are set programmatically for script-based strategies.
 	// Not loaded from the config file. Nil is valid when no script strategy is configured.
 	JSAuthPool  PoolAcquirer `koanf:"-"`
 	LuaAuthPool PoolAcquirer `koanf:"-"`
 }
 
-// LuaAuthConfig configures inbound token validation via a Lua script.
+// LuaAuthSpec configures inbound token validation via a Lua script.
 // The script receives the token as its first argument and must return:
 // allowed (bool), status (int), extra_headers (table), error_msg (string).
-type LuaAuthConfig struct {
+type LuaAuthSpec struct {
 	ScriptPath string        `koanf:"script_path"`
 	Timeout    time.Duration `koanf:"timeout"`
 }
 
-// JSAuthConfig configures inbound token validation via a JavaScript (Sobek) script.
+// JSAuthSpec configures inbound token validation via a JavaScript (Sobek) script.
 // The script receives (token, ctx) and must return:
 // { allowed: bool, status?: number, error?: string, subject?: string, extra_headers?: object }
-type JSAuthConfig struct {
+type JSAuthSpec struct {
 	ScriptPath string            `koanf:"script_path"`
 	Timeout    time.Duration     `koanf:"timeout"`
 	Env        map[string]string `koanf:"env"`
 }
 
-// JWTAuthConfig configures JWT Bearer token validation via OIDC/JWKS.
-type JWTAuthConfig struct {
+// JWTAuthSpec configures JWT Bearer token validation via OIDC/JWKS.
+type JWTAuthSpec struct {
 	Issuer   string `koanf:"issuer"`
 	Audience string `koanf:"audience"`
 	JWKSURL  string `koanf:"jwks_url"` // optional; uses OIDC discovery if empty
 }
 
-// IntrospectionConfig configures token introspection via an OIDC server.
-type IntrospectionConfig struct {
+// IntrospectionSpec configures token introspection via an OIDC server.
+type IntrospectionSpec struct {
 	Issuer       string `koanf:"issuer"`
 	ClientID     string `koanf:"client_id"`
 	ClientSecret string `koanf:"client_secret"` // supports ${ENV_VAR} expansion
 	Audience     string `koanf:"audience"`
 }
 
-// APIKeyAuthConfig configures API key validation from a request header.
-type APIKeyAuthConfig struct {
+// APIKeyAuthSpec configures API key validation from a request header.
+type APIKeyAuthSpec struct {
 	Header  string `koanf:"header"`   // header name to read the key from
 	KeysEnv string `koanf:"keys_env"` // env var containing comma-separated valid keys
 }
 
-// ServerTLSConfig configures inbound TLS termination for the MCP server.
-type ServerTLSConfig struct {
+// ServerTLSSpec configures inbound TLS termination for the MCP server.
+type ServerTLSSpec struct {
 	CertPath     string `koanf:"cert_path"`
 	KeyPath      string `koanf:"key_path"`
 	MinVersion   string `koanf:"min_version"`    // "1.0" | "1.1" | "1.2" | "1.3"; default: "1.2"
@@ -307,8 +307,8 @@ type ServerTLSConfig struct {
 	ClientCAPath string `koanf:"client_ca_path"` // CA cert for verifying MCP client certs (mTLS)
 }
 
-// TLSConfig configures TLS for an outbound upstream connection.
-type TLSConfig struct {
+// TLSSpec configures TLS for an outbound upstream connection.
+type TLSSpec struct {
 	InsecureSkipVerify bool   `koanf:"insecure_skip_verify"` // WARNING: disables certificate verification
 	MinVersion         string `koanf:"min_version"`          // "1.0" | "1.1" | "1.2" | "1.3"; default: "1.2"
 	MaxVersion         string `koanf:"max_version"`          // "1.0" | "1.1" | "1.2" | "1.3"
@@ -319,8 +319,8 @@ type TLSConfig struct {
 	SessionCacheSize   int    `koanf:"session_cache_size"`   // LRU TLS session cache; default: 64
 }
 
-// TransportConfig configures the HTTP transport (connection pooling, dialing, TLS) per upstream.
-type TransportConfig struct {
+// TransportSpec configures the HTTP transport (connection pooling, dialing, TLS) per upstream.
+type TransportSpec struct {
 	// Connection pooling
 	MaxIdleConns        int           `koanf:"max_idle_conns"`          // default: 100
 	MaxIdleConnsPerHost int           `koanf:"max_idle_conns_per_host"` // default: 10
@@ -340,30 +340,30 @@ type TransportConfig struct {
 	ProxyURL string `koanf:"proxy_url"` // http://, https://, socks5://, socks5h://
 
 	// TLS
-	TLS TLSConfig `koanf:"tls"`
+	TLS TLSSpec `koanf:"tls"`
 }
 
-// ServerConfig holds HTTP server settings.
-type ServerConfig struct {
-	Port                     int             `koanf:"port"`
-	ReadTimeout              time.Duration   `koanf:"read_timeout"`
-	WriteTimeout             time.Duration   `koanf:"write_timeout"`
-	ShutdownTimeout          time.Duration   `koanf:"shutdown_timeout"`
-	MaxRequestBody           string          `koanf:"max_request_body"`
-	StartupValidationTimeout time.Duration   `koanf:"startup_validation_timeout"`
-	TLS                      ServerTLSConfig `koanf:"tls"`
+// ServerSpec holds HTTP server settings.
+type ServerSpec struct {
+	Port                     int           `koanf:"port"`
+	ReadTimeout              time.Duration `koanf:"read_timeout"`
+	WriteTimeout             time.Duration `koanf:"write_timeout"`
+	ShutdownTimeout          time.Duration `koanf:"shutdown_timeout"`
+	MaxRequestBody           string        `koanf:"max_request_body"`
+	StartupValidationTimeout time.Duration `koanf:"startup_validation_timeout"`
+	TLS                      ServerTLSSpec `koanf:"tls"`
 }
 
-// TelemetryConfig holds observability settings.
-type TelemetryConfig struct {
+// TelemetrySpec holds observability settings.
+type TelemetrySpec struct {
 	ServiceName    string `koanf:"service_name"`
 	ServiceVersion string `koanf:"service_version"`
 	OTLPEndpoint   string `koanf:"otlp_endpoint"` // e.g. "localhost:4317"; empty = no trace exporter
 	Insecure       bool   `koanf:"insecure"`      // skip TLS for OTLP gRPC (useful in tests)
 }
 
-// SlugRulesConfig controls which slug transformations are applied.
-type SlugRulesConfig struct {
+// SlugRulesSpec controls which slug transformations are applied.
+type SlugRulesSpec struct {
 	ReplaceSlashes bool `koanf:"replace_slashes"`
 	ReplaceBraces  bool `koanf:"replace_braces"`
 	// ExpandCamelCase inserts underscores at camelCase word boundaries before
@@ -374,18 +374,18 @@ type SlugRulesConfig struct {
 	CollapseSeparators bool `koanf:"collapse_separators"`
 }
 
-// NamingConfig controls how tool names are generated.
-type NamingConfig struct {
-	Separator                   string          `koanf:"separator"`
-	MaxLength                   int             `koanf:"max_length"`
-	ConflictResolution          string          `koanf:"conflict_resolution"`
-	DescriptionMaxLength        int             `koanf:"description_max_length"`
-	DescriptionTruncationSuffix string          `koanf:"description_truncation_suffix"`
-	DefaultSlugRules            SlugRulesConfig `koanf:"default_slug_rules"`
+// NamingSpec controls how tool names are generated.
+type NamingSpec struct {
+	Separator                   string        `koanf:"separator"`
+	MaxLength                   int           `koanf:"max_length"`
+	ConflictResolution          string        `koanf:"conflict_resolution"`
+	DescriptionMaxLength        int           `koanf:"description_max_length"`
+	DescriptionTruncationSuffix string        `koanf:"description_truncation_suffix"`
+	DefaultSlugRules            SlugRulesSpec `koanf:"default_slug_rules"`
 }
 
-// ValidationConfig controls runtime request and response validation against the OpenAPI schema.
-type ValidationConfig struct {
+// ValidationSpec controls runtime request and response validation against the OpenAPI schema.
+type ValidationSpec struct {
 	ValidateRequest           bool   `koanf:"validate_request"`
 	ValidateResponse          bool   `koanf:"validate_response"`
 	ResponseValidationFailure string `koanf:"response_validation_failure"` // "warn" | "fail"
@@ -393,9 +393,9 @@ type ValidationConfig struct {
 	ErrorStatus               []int  `koanf:"error_status"`
 }
 
-// AppUIConfig configures an interactive HTML UI for all tools in an upstream.
+// AppUISpec configures an interactive HTML UI for all tools in an upstream.
 // If both static and script are set, script takes precedence.
-type AppUIConfig struct {
+type AppUISpec struct {
 	// Static is the path to a static HTML file served as-is for every tool.
 	Static string `koanf:"static"`
 	// Script is the path to a JavaScript render script executed by Sobek at
@@ -404,17 +404,17 @@ type AppUIConfig struct {
 	Script string `koanf:"script"`
 }
 
-// ToolUIConfig is the resolved UI configuration for a single tool.
-// It is computed by merging the per-upstream AppUIConfig with per-operation
+// ToolUISpec is the resolved UI configuration for a single tool.
+// It is computed by merging the per-upstream AppUISpec with per-operation
 // x-mcp-ui-static / x-mcp-ui-script OpenAPI overlay extensions.
 // Script takes precedence over static when both are set at the same level.
-type ToolUIConfig struct {
+type ToolUISpec struct {
 	Static string // path to static HTML file
 	Script string // path to JS render script
 }
 
-// UpstreamConfig describes a single upstream, either HTTP API or command-backed tools.
-type UpstreamConfig struct {
+// UpstreamSpec describes a single upstream, either HTTP API or command-backed tools.
+type UpstreamSpec struct {
 	Name       string `koanf:"name"`
 	Enabled    bool   `koanf:"enabled"`
 	ToolPrefix string `koanf:"tool_prefix"`
@@ -423,19 +423,19 @@ type UpstreamConfig struct {
 	// Cache is the name of a top-level caches entry to apply as the default for all tools
 	// in this upstream. Empty means no caching. Per-tool x-mcp-cache overlay extensions
 	// take precedence over this upstream-level default.
-	Cache                    string              `koanf:"cache"`
-	Timeout                  time.Duration       `koanf:"timeout"`
-	TLSSkipVerify            bool                `koanf:"tls_skip_verify"` // Deprecated: use transport.tls.insecure_skip_verify
-	Headers                  map[string]string   `koanf:"headers"`
-	Transport                TransportConfig     `koanf:"transport"`
-	OpenAPI                  OpenAPISourceConfig `koanf:"openapi"`
-	Overlay                  *OverlayConfig      `koanf:"overlay"`
-	StartupValidationTimeout time.Duration       `koanf:"startup_validation_timeout"`
-	Validation               ValidationConfig    `koanf:"validation"`
-	InboundAuthOverride      *InboundAuthConfig  `koanf:"inbound_auth_override"`
-	OutboundAuth             OutboundAuthConfig  `koanf:"outbound_auth"`
-	Commands                 []CommandConfig     `koanf:"commands"` // used by type: command only
-	Scripts                  []ScriptConfig      `koanf:"scripts"`  // used by type: script only
+	Cache                    string            `koanf:"cache"`
+	Timeout                  time.Duration     `koanf:"timeout"`
+	TLSSkipVerify            bool              `koanf:"tls_skip_verify"` // Deprecated: use transport.tls.insecure_skip_verify
+	Headers                  map[string]string `koanf:"headers"`
+	Transport                TransportSpec     `koanf:"transport"`
+	OpenAPI                  OpenAPISourceSpec `koanf:"openapi"`
+	Overlay                  *OverlaySpec      `koanf:"overlay"`
+	StartupValidationTimeout time.Duration     `koanf:"startup_validation_timeout"`
+	Validation               ValidationSpec    `koanf:"validation"`
+	InboundAuthOverride      *InboundAuthSpec  `koanf:"inbound_auth_override"`
+	OutboundAuth             OutboundAuthSpec  `koanf:"outbound_auth"`
+	Commands                 []CommandSpec     `koanf:"commands"` // used by type: command only
+	Scripts                  []ScriptSpec      `koanf:"scripts"`  // used by type: script only
 	// RateLimit is the name of a top-level rate_limits entry to apply to every tool
 	// from this upstream. Per-tool x-mcp-rate-limit overlay extension overrides this.
 	// Empty string means no rate limiting.
@@ -446,14 +446,14 @@ type UpstreamConfig struct {
 	CircuitBreaker string `koanf:"circuit_breaker"`
 	// AppUI configures an optional interactive HTML UI for every tool in this upstream.
 	// Per-tool overlay extensions (x-mcp-ui-static, x-mcp-ui-script) take precedence.
-	AppUI *AppUIConfig `koanf:"app_ui"`
+	AppUI *AppUISpec `koanf:"app_ui"`
 	// JSScriptPool is set programmatically (not from config file) to bound concurrent JS
 	// script tool executions. Nil is valid when no script upstream is configured.
 	JSScriptPool PoolAcquirer `koanf:"-"`
 }
 
-// CommandConfig defines a single command-backed MCP tool within a command upstream.
-type CommandConfig struct {
+// CommandSpec defines a single command-backed MCP tool within a command upstream.
+type CommandSpec struct {
 	ToolName    string             `koanf:"tool_name"`
 	Description string             `koanf:"description"`
 	Command     string             `koanf:"command"`
@@ -465,8 +465,8 @@ type CommandConfig struct {
 	MaxOutput   int64              `koanf:"max_output"` // max bytes from stdout/stderr; 0 = 1 MiB default
 }
 
-// ScriptConfig defines a single JavaScript-backed MCP tool within a script upstream.
-type ScriptConfig struct {
+// ScriptSpec defines a single JavaScript-backed MCP tool within a script upstream.
+type ScriptSpec struct {
 	ToolName    string             `koanf:"tool_name"`
 	Description string             `koanf:"description"`
 	ScriptPath  string             `koanf:"script_path"`
@@ -488,15 +488,15 @@ type CommandSchemaProperty struct {
 	Description string `koanf:"description"`
 }
 
-// OutboundAuthConfig controls how the proxy authenticates outbound requests to an upstream API.
-type OutboundAuthConfig struct {
-	Strategy                string                  `koanf:"strategy"` // bearer|api_key|oauth2_client_credentials|oauth2_user_session|lua|js|none
-	Bearer                  BearerOutboundConfig    `koanf:"bearer"`
-	APIKey                  APIKeyOutboundConfig    `koanf:"api_key"`
-	OAuth2ClientCredentials OAuth2CCConfig          `koanf:"oauth2_client_credentials"`
-	OAuth2UserSession       OAuth2UserSessionConfig `koanf:"oauth2_user_session"`
-	Lua                     LuaOutboundConfig       `koanf:"lua"`
-	JS                      JSOutboundConfig        `koanf:"js"`
+// OutboundAuthSpec controls how the proxy authenticates outbound requests to an upstream API.
+type OutboundAuthSpec struct {
+	Strategy                string                `koanf:"strategy"` // bearer|api_key|oauth2_client_credentials|oauth2_user_session|lua|js|none
+	Bearer                  BearerOutboundSpec    `koanf:"bearer"`
+	APIKey                  APIKeyOutboundSpec    `koanf:"api_key"`
+	OAuth2ClientCredentials OAuth2CCSpec          `koanf:"oauth2_client_credentials"`
+	OAuth2UserSession       OAuth2UserSessionSpec `koanf:"oauth2_user_session"`
+	Lua                     LuaOutboundSpec       `koanf:"lua"`
+	JS                      JSOutboundSpec        `koanf:"js"`
 	// Upstream is set programmatically (not from config file) to the owning upstream's name.
 	// Used by the lua and js strategies to pass the upstream name to scripts.
 	Upstream string `koanf:"-"`
@@ -510,45 +510,45 @@ type OutboundAuthConfig struct {
 	OAuthCallbackReg OAuthCallbackRegistrar `koanf:"-"`
 }
 
-// LuaOutboundConfig configures outbound credential acquisition via a Lua script.
+// LuaOutboundSpec configures outbound credential acquisition via a Lua script.
 // The script receives (upstream, cached_token, cached_expiry) as arguments and must return:
 // token (string), expiry_unix (int), raw_headers (table), error_msg (string).
-type LuaOutboundConfig struct {
+type LuaOutboundSpec struct {
 	ScriptPath string        `koanf:"script_path"`
 	Timeout    time.Duration `koanf:"timeout"`
 }
 
-// JSOutboundConfig configures outbound credential acquisition via a JavaScript (Sobek) script.
+// JSOutboundSpec configures outbound credential acquisition via a JavaScript (Sobek) script.
 // The script receives (upstream, ctx) and must return:
 // { token?: string, raw_headers?: object, expiry?: number, error?: string }
-type JSOutboundConfig struct {
+type JSOutboundSpec struct {
 	ScriptPath string            `koanf:"script_path"`
 	Timeout    time.Duration     `koanf:"timeout"`
 	Env        map[string]string `koanf:"env"`
 }
 
-// BearerOutboundConfig configures static Bearer token injection.
-type BearerOutboundConfig struct {
+// BearerOutboundSpec configures static Bearer token injection.
+type BearerOutboundSpec struct {
 	TokenEnv string `koanf:"token_env"` // env var name containing the token
 }
 
-// APIKeyOutboundConfig configures API key header injection.
-type APIKeyOutboundConfig struct {
+// APIKeyOutboundSpec configures API key header injection.
+type APIKeyOutboundSpec struct {
 	Header   string `koanf:"header"`    // header name to inject
 	ValueEnv string `koanf:"value_env"` // env var name containing the value
 	Prefix   string `koanf:"prefix"`    // prepended to value, e.g. "ApiKey "
 }
 
-// OAuth2CCConfig configures OAuth2 client credentials flow.
-type OAuth2CCConfig struct {
+// OAuth2CCSpec configures OAuth2 client credentials flow.
+type OAuth2CCSpec struct {
 	TokenURL     string   `koanf:"token_url"`
 	ClientID     string   `koanf:"client_id"`
 	ClientSecret string   `koanf:"client_secret"` // supports ${ENV_VAR} expansion
 	Scopes       []string `koanf:"scopes"`
 }
 
-// OpenAPISourceConfig points to an OpenAPI spec file or URL.
-type OpenAPISourceConfig struct {
+// OpenAPISourceSpec points to an OpenAPI spec file or URL.
+type OpenAPISourceSpec struct {
 	Source             string        `koanf:"source"`
 	AuthHeader         string        `koanf:"auth_header"`
 	RefreshInterval    time.Duration `koanf:"refresh_interval"`
@@ -557,8 +557,8 @@ type OpenAPISourceConfig struct {
 	Version            string        `koanf:"version"`
 }
 
-// OverlayConfig points to an OpenAPI Overlay document.
-type OverlayConfig struct {
+// OverlaySpec points to an OpenAPI Overlay document.
+type OverlaySpec struct {
 	Source          string        `koanf:"source"`
 	AuthHeader      string        `koanf:"auth_header"`
 	RefreshInterval time.Duration `koanf:"refresh_interval"`
@@ -593,20 +593,20 @@ type OAuthCallbackRegistrar interface {
 	AuthURL(upstreamName, userSubject string) (string, error)
 }
 
-// SessionStoreConfig configures the session store backend for oauth2_user_session.
-type SessionStoreConfig struct {
+// SessionStoreSpec configures the session store backend for oauth2_user_session.
+type SessionStoreSpec struct {
 	// Provider selects the store backend: memory|postgres|redis.
 	Provider string `koanf:"provider"`
 	// HMACKey is used to sign OAuth state parameters (CSRF protection).
 	// Supports ${ENV_VAR} expansion. If empty, a random key is generated on startup
 	// (states will not survive proxy restarts).
-	HMACKey  string                `koanf:"hmac_key"`
-	Postgres PostgresSessionConfig `koanf:"postgres"`
-	Redis    RedisSessionConfig    `koanf:"redis"`
+	HMACKey  string              `koanf:"hmac_key"`
+	Postgres PostgresSessionSpec `koanf:"postgres"`
+	Redis    RedisSessionSpec    `koanf:"redis"`
 }
 
-// PostgresSessionConfig configures a PostgreSQL-backed session store.
-type PostgresSessionConfig struct {
+// PostgresSessionSpec configures a PostgreSQL-backed session store.
+type PostgresSessionSpec struct {
 	// DSN is the PostgreSQL connection string. Supports ${ENV_VAR} expansion.
 	DSN string `koanf:"dsn"`
 	// EncryptionKey is a 32-byte AES-256 key encoded as 64 hex characters.
@@ -614,8 +614,8 @@ type PostgresSessionConfig struct {
 	EncryptionKey string `koanf:"encryption_key"`
 }
 
-// RedisSessionConfig configures a Redis-backed session store.
-type RedisSessionConfig struct {
+// RedisSessionSpec configures a Redis-backed session store.
+type RedisSessionSpec struct {
 	// Addr is the Redis server address (host:port).
 	Addr string `koanf:"addr"`
 	// Password is the Redis AUTH password. Supports ${ENV_VAR} expansion.
@@ -625,9 +625,9 @@ type RedisSessionConfig struct {
 	EncryptionKey string `koanf:"encryption_key"`
 }
 
-// OAuth2UserSessionConfig configures the oauth2_user_session outbound auth strategy.
+// OAuth2UserSessionSpec configures the oauth2_user_session outbound auth strategy.
 // It stores per-user OAuth tokens in a session store and handles token refresh.
-type OAuth2UserSessionConfig struct {
+type OAuth2UserSessionSpec struct {
 	// Provider selects the OAuth2/OIDC provider.
 	// Built-in shortcuts: "github" | "google" | "gitlab" | "slack"
 	// Standard: "oidc" (auto-discovers endpoints from issuer_url) | "oauth2" (explicit endpoints)

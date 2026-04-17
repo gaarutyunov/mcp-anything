@@ -20,9 +20,9 @@ import (
 
 func init() {
 	pkgmiddleware.Register("inbound/introspection", func(ctx context.Context, cfg any) (func(http.Handler) http.Handler, error) {
-		ic, ok := cfg.(*config.InboundAuthConfig)
+		ic, ok := cfg.(*config.InboundAuthSpec)
 		if !ok {
-			return nil, fmt.Errorf("inbound/introspection: expected *config.InboundAuthConfig, got %T", cfg)
+			return nil, fmt.Errorf("inbound/introspection: expected *config.InboundAuthSpec, got %T", cfg)
 		}
 		v, err := NewValidator(ctx, ic.Introspection)
 		if err != nil {
@@ -40,7 +40,7 @@ type Validator struct {
 
 // NewValidator creates a Validator using client credentials.
 // cfg.ClientSecret supports ${ENV_VAR} expansion.
-func NewValidator(ctx context.Context, cfg config.IntrospectionConfig) (*Validator, error) {
+func NewValidator(ctx context.Context, cfg config.IntrospectionSpec) (*Validator, error) {
 	secret := os.ExpandEnv(cfg.ClientSecret)
 	server, err := rs.NewResourceServerClientCredentials(ctx, cfg.Issuer, cfg.ClientID, secret)
 	if err != nil {

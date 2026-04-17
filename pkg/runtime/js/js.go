@@ -35,7 +35,7 @@ const noCacheExpiry = int64(1)
 
 func init() {
 	// Register runtime pools for JS auth and script execution.
-	pkgruntime.Register("js/auth", func(_ context.Context, cfg config.RuntimeConfig) (pkgruntime.Runtime, error) {
+	pkgruntime.Register("js/auth", func(_ context.Context, cfg config.RuntimeSpec) (pkgruntime.Runtime, error) {
 		max := cfg.JS.MaxAuthVMs
 		if max == 0 {
 			max = int(pkgruntime.DefaultMaxAuthVMs)
@@ -45,7 +45,7 @@ func init() {
 		}
 		return pkgruntime.NewPool(int64(max))
 	})
-	pkgruntime.Register("js/script", func(_ context.Context, cfg config.RuntimeConfig) (pkgruntime.Runtime, error) {
+	pkgruntime.Register("js/script", func(_ context.Context, cfg config.RuntimeSpec) (pkgruntime.Runtime, error) {
 		max := cfg.JS.MaxScriptVMs
 		if max == 0 {
 			max = int(pkgruntime.DefaultMaxScriptVMs)
@@ -58,12 +58,12 @@ func init() {
 
 	// Register inbound and outbound middleware strategies.
 	pkgmiddleware.Register("inbound/js", func(_ context.Context, cfg any) (func(http.Handler) http.Handler, error) {
-		ic, ok := cfg.(*config.InboundAuthConfig)
+		ic, ok := cfg.(*config.InboundAuthSpec)
 		if !ok {
-			return nil, fmt.Errorf("inbound/js: expected *config.InboundAuthConfig, got %T", cfg)
+			return nil, fmt.Errorf("inbound/js: expected *config.InboundAuthSpec, got %T", cfg)
 		}
 		if ic.JSAuthPool == nil {
-			return nil, fmt.Errorf("js inbound auth requires runtime pools; set InboundAuthConfig.JSAuthPool")
+			return nil, fmt.Errorf("js inbound auth requires runtime pools; set InboundAuthSpec.JSAuthPool")
 		}
 		v, err := NewValidator(ic.JS, ic.JSAuthPool)
 		if err != nil {
@@ -72,12 +72,12 @@ func init() {
 		return inbound.ValidatorMiddleware(v, ""), nil
 	})
 	pkgmiddleware.Register("outbound/js", func(_ context.Context, cfg any) (func(http.Handler) http.Handler, error) {
-		oc, ok := cfg.(*config.OutboundAuthConfig)
+		oc, ok := cfg.(*config.OutboundAuthSpec)
 		if !ok {
-			return nil, fmt.Errorf("outbound/js: expected *config.OutboundAuthConfig, got %T", cfg)
+			return nil, fmt.Errorf("outbound/js: expected *config.OutboundAuthSpec, got %T", cfg)
 		}
 		if oc.JSAuthPool == nil {
-			return nil, fmt.Errorf("js outbound auth requires runtime pools; set OutboundAuthConfig.JSAuthPool")
+			return nil, fmt.Errorf("js outbound auth requires runtime pools; set OutboundAuthSpec.JSAuthPool")
 		}
 		p, err := NewProvider(oc.Upstream, oc.JS, oc.JSAuthPool)
 		if err != nil {
@@ -155,7 +155,7 @@ type Validator struct {
 // NewValidator creates a Validator by reading and pre-compiling the JS script.
 // pool bounds the number of concurrent JS runtimes; it is shared with the outbound
 // JS auth provider to enforce a single global limit for all auth scripts.
-func NewValidator(cfg config.JSAuthConfig, pool config.PoolAcquirer) (*Validator, error) {
+func NewValidator(cfg config.JSAuthSpec, pool config.PoolAcquirer) (*Validator, error) {
 	src, err := os.ReadFile(cfg.ScriptPath)
 	if err != nil {
 		return nil, fmt.Errorf("reading js auth script %q: %w", cfg.ScriptPath, err)
@@ -285,7 +285,7 @@ type Provider struct {
 // NewProvider creates a Provider by reading and pre-compiling the JS script.
 // pool bounds the number of concurrent JS runtimes; it is shared with the inbound
 // JS auth validator to enforce a single global limit for all auth scripts.
-func NewProvider(upstreamName string, cfg config.JSOutboundConfig, pool config.PoolAcquirer) (*Provider, error) {
+func NewProvider(upstreamName string, cfg config.JSOutboundSpec, pool config.PoolAcquirer) (*Provider, error) {
 	src, err := os.ReadFile(cfg.ScriptPath)
 	if err != nil {
 		return nil, fmt.Errorf("reading js outbound script %q: %w", cfg.ScriptPath, err)

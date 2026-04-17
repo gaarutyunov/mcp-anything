@@ -86,7 +86,7 @@ func (MCPAnything) CaddyModule() caddy.ModuleInfo {
 func (m *MCPAnything) Provision(ctx caddy.Context) error {
 	var (
 		path string
-		cfg  *pkgconfig.ProxyConfig
+		cfg  *pkgconfig.ProxySpec
 		err  error
 	)
 	if m.ConfigPath != "" {

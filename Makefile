@@ -1,7 +1,8 @@
-.PHONY: all build build-operator lint vet test integration treeshake check clean helm-lint helm-package helm-push generate-crds lint-crds build-linter cover-merge cover-report
+.PHONY: all build build-operator build-builder lint vet test integration treeshake check clean helm-lint helm-package helm-push generate-crds lint-crds build-linter cover-merge cover-report
 
 BINARY := bin/proxy
 OPERATOR_BINARY := bin/operator
+BUILDER_BINARY := bin/builder
 LINTER_BINARY := bin/golangci-lint-custom
 GOFLAGS := -race
 INTEGRATION_TIMEOUT := 600s
@@ -20,6 +21,9 @@ build:
 
 build-operator:
 	go build -o $(OPERATOR_BINARY) ./cmd/operator
+
+build-builder:
+	go build -o $(BUILDER_BINARY) ./cmd/builder
 
 build-linter:
 	go build -o $(LINTER_BINARY) ./cmd/golangci-lint-custom

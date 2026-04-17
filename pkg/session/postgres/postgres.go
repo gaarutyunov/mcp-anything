@@ -13,6 +13,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/exaring/otelpgx"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -56,7 +57,13 @@ func New(ctx context.Context, cfg config.PostgresSessionConfig) (*Store, error) 
 		return nil, fmt.Errorf("postgres session store encryption key: %w", err)
 	}
 
-	pool, err := pgxpool.New(ctx, os.ExpandEnv(cfg.DSN))
+	poolCfg, err := pgxpool.ParseConfig(os.ExpandEnv(cfg.DSN))
+	if err != nil {
+		return nil, fmt.Errorf("parsing postgres DSN: %w", err)
+	}
+	poolCfg.ConnConfig.Tracer = otelpgx.NewTracer()
+
+	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {
 		return nil, fmt.Errorf("connecting to postgres: %w", err)
 	}

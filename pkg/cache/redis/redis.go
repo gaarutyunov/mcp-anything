@@ -12,6 +12,7 @@ import (
 	"time"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	redisotel "github.com/redis/go-redis/extra/redisotel/v9"
 	goredis "github.com/redis/go-redis/v9"
 
 	pkgcache "github.com/gaarutyunov/mcp-anything/pkg/cache"
@@ -38,6 +39,9 @@ func newStore(ctx context.Context, cfg *config.CacheStoreConfig) (*store, error)
 	})
 	if err := client.Ping(ctx).Err(); err != nil {
 		return nil, fmt.Errorf("connecting to Redis at %q: %w", cfg.Redis.Addr, err)
+	}
+	if err := redisotel.InstrumentTracing(client); err != nil {
+		return nil, fmt.Errorf("instrumenting redis cache store tracing: %w", err)
 	}
 	return &store{client: client}, nil
 }

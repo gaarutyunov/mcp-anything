@@ -25,14 +25,18 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
-		return inbound.ValidatorMiddleware(v, ic.APIKey.Header), nil
+		return func(next http.Handler) http.Handler {
+			return &Validator{header: v.header, keys: v.keys, Next: next}
+		}, nil
 	})
 }
 
 // Validator validates tokens by checking them against a set of allowed API keys.
-// The "token" passed to ValidateToken is the value of the configured header.
+// The token is read from the header configured at construction time.
 type Validator struct {
-	keys map[string]struct{}
+	header string
+	keys   map[string]struct{}
+	Next   http.Handler
 }
 
 // NewValidator creates a Validator by reading keys from the environment variable
@@ -49,7 +53,7 @@ func NewValidator(cfg config.APIKeyAuthConfig) (*Validator, error) {
 	if len(keys) == 0 {
 		return nil, fmt.Errorf("no API keys found in environment variable %q", cfg.KeysEnv)
 	}
-	return &Validator{keys: keys}, nil
+	return &Validator{header: cfg.Header, keys: keys}, nil
 }
 
 // ValidateToken checks whether token (the API key value) is in the allowed key set.
@@ -58,4 +62,9 @@ func (v *Validator) ValidateToken(_ context.Context, token string) (*inbound.Tok
 		return nil, errors.New("invalid API key")
 	}
 	return &inbound.TokenInfo{}, nil
+}
+
+// ServeHTTP implements http.Handler. It reads the API key from the configured header.
+func (v *Validator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	inbound.ServeValidated(w, r, v.Next, v, r.Header.Get(v.header))
 }

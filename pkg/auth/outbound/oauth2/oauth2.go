@@ -26,14 +26,17 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
-		return outbound.Middleware(p), nil
+		return func(next http.Handler) http.Handler {
+			return &Provider{src: p.src, Next: next}
+		}, nil
 	})
 }
 
 // Provider obtains tokens via the OAuth2 client credentials flow.
 // It caches the token and refreshes it automatically before expiry.
 type Provider struct {
-	src gooauth2.TokenSource
+	src  gooauth2.TokenSource
+	Next http.Handler
 }
 
 // NewProvider creates a Provider configured for the client credentials flow.
@@ -61,4 +64,9 @@ func (p *Provider) Token(_ context.Context) (string, error) {
 // RawHeaders returns nil because OAuth2 auth uses Token().
 func (p *Provider) RawHeaders(_ context.Context) (map[string]string, error) {
 	return nil, nil
+}
+
+// ServeHTTP implements http.Handler. It injects an OAuth2 access token into the request context.
+func (p *Provider) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	outbound.ServeWithProvider(w, r, p.Next, p)
 }

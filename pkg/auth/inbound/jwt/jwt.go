@@ -25,13 +25,16 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
-		return inbound.ValidatorMiddleware(v, ""), nil
+		return func(next http.Handler) http.Handler {
+			return &Validator{verifier: v.verifier, Next: next}
+		}, nil
 	})
 }
 
 // Validator validates JWT Bearer tokens using OIDC/JWKS.
 type Validator struct {
 	verifier *oidc.IDTokenVerifier
+	Next     http.Handler
 }
 
 // NewValidator creates a Validator from the given config.
@@ -73,4 +76,9 @@ func (v *Validator) ValidateToken(ctx context.Context, raw string) (*inbound.Tok
 		Scopes:   strings.Fields(claims.Scope),
 		Audience: token.Audience,
 	}, nil
+}
+
+// ServeHTTP implements http.Handler. It extracts a Bearer token and validates it.
+func (v *Validator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	inbound.ServeValidated(w, r, v.Next, v, inbound.ExtractBearerToken(r))
 }

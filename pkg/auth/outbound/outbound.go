@@ -4,7 +4,9 @@
 // all built-in strategies.
 package outbound
 
-import "context"
+import (
+	"context"
+)
 
 // TokenProvider supplies credentials for upstream API calls.
 // Implementations must be safe for concurrent use.

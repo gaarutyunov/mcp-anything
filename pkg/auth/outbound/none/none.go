@@ -17,15 +17,27 @@ func init() {
 		if _, ok := cfg.(*config.OutboundAuthConfig); !ok {
 			return nil, fmt.Errorf("outbound/none: expected *config.OutboundAuthConfig, got %T", cfg)
 		}
-		return outbound.Middleware(&Provider{}), nil
+		return func(next http.Handler) http.Handler {
+			return &Provider{Next: next}
+		}, nil
 	})
 }
 
 // Provider is a no-op provider that adds no authentication headers.
-type Provider struct{}
+type Provider struct {
+	Next http.Handler
+}
+
+// NewProvider creates a no-op Provider.
+func NewProvider() *Provider { return &Provider{} }
 
 // Token returns an empty token; no authentication is injected.
 func (p *Provider) Token(_ context.Context) (string, error) { return "", nil }
 
 // RawHeaders returns nil; no authentication headers are injected.
 func (p *Provider) RawHeaders(_ context.Context) (map[string]string, error) { return nil, nil }
+
+// ServeHTTP implements http.Handler. It passes through to Next with no credential injection.
+func (p *Provider) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	outbound.ServeWithProvider(w, r, p.Next, p)
+}

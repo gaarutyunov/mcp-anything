@@ -1,0 +1,32 @@
+# Stage 1: build the mcp-anything-builder CLI tool.
+FROM golang:1.25-alpine AS builder-tool
+
+RUN apk add --no-cache ca-certificates git
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -o /bin/mcp-builder ./cmd/builder
+
+# Stage 2: use the builder tool to generate and compile the custom Caddy binary.
+# The builder creates a temporary Go module with a replace directive pointing at
+# the local mcp-anything source, then runs go build to produce the binary.
+FROM golang:1.25-alpine AS build
+
+RUN apk add --no-cache ca-certificates git
+
+WORKDIR /src
+COPY --from=builder-tool /bin/mcp-builder /bin/mcp-builder
+COPY . .
+
+RUN /bin/mcp-builder \
+    --target caddy \
+    --output /usr/local/bin/caddy \
+    --module-dir /src
+
+# Stage 3: minimal runtime image.
+FROM alpine:3.21
+RUN apk add --no-cache ca-certificates
+COPY --from=build /usr/local/bin/caddy /usr/local/bin/caddy
+EXPOSE 8080
+ENTRYPOINT ["caddy", "run", "--config", "/etc/caddy/Caddyfile"]

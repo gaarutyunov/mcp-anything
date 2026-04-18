@@ -15,6 +15,7 @@ env:
   OPERATOR_IMAGE: ghcr.io/${{ github.repository }}-operator:sha-${{ github.sha }}
   PROXY_IMAGE: ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
   CADDY_IMAGE: ghcr.io/${{ github.repository }}-caddy:sha-${{ github.sha }}
+  CADDY_BUILDER_IMAGE: ghcr.io/${{ github.repository }}-caddy-builder:sha-${{ github.sha }}
   WORKSPACE_IMAGE: ghcr.io/${{ github.repository }}-workspace:sha-${{ github.sha }}
 
 jobs:
@@ -167,6 +168,30 @@ jobs:
           tags: ${{ env.WORKSPACE_IMAGE }}
           build-args: PROXY_IMAGE=${{ env.PROXY_IMAGE }}
 
+  build-caddy-builder-image:
+    name: Build & Push Caddy Builder Image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.caddy-builder
+          push: true
+          tags: ${{ env.CADDY_BUILDER_IMAGE }}
+
   integration-test:
     name: Integration Tests
     runs-on: ubuntu-latest
@@ -200,7 +225,7 @@ jobs:
   e2e-tests:
     name: E2E / ${{ matrix.name }}
     runs-on: ubuntu-latest
-    needs: [build-image, build-operator-image, build-workspace-image]
+    needs: [build-image, build-operator-image, build-caddy-builder-image, build-workspace-image]
     timeout-minutes: 10
     strategy:
       fail-fast: false
@@ -214,6 +239,10 @@ jobs:
             test: TestHelmChartSmokeE2E
           - name: Gateway API E2E
             test: TestGatewayAPIE2E
+          - name: Caddy Builder
+            test: TestCaddyBuilderE2E
+          - name: Kong JS Tools
+            test: TestKongJSToolsE2E
     steps:
       - uses: actions/checkout@v4
 
@@ -234,6 +263,7 @@ jobs:
           OPERATOR_IMAGE: ${{ env.OPERATOR_IMAGE }}
           E2E_TEST: ${{ matrix.test }}
           WORKSPACE_IMAGE: ${{ env.WORKSPACE_IMAGE }}
+          CADDY_BUILDER_IMAGE: ${{ env.CADDY_BUILDER_IMAGE }}
 
   coverage:
     name: Coverage Report

@@ -10,6 +10,7 @@ import (
 	"context"
 	"fmt"
 
+	redisotel "github.com/redis/go-redis/extra/redisotel/v9"
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/ulule/limiter/v3"
 	redisstore "github.com/ulule/limiter/v3/drivers/store/redis"
@@ -36,6 +37,10 @@ func init() {
 		// Verify connectivity before returning.
 		if err := client.Ping(ctx).Err(); err != nil {
 			return nil, fmt.Errorf("connecting to Redis at %q: %w", cfg.RateLimitStore.Redis.Addr, err)
+		}
+
+		if err := redisotel.InstrumentTracing(client); err != nil {
+			return nil, fmt.Errorf("instrumenting redis rate limit store tracing: %w", err)
 		}
 
 		store, err := redisstore.NewStore(client)

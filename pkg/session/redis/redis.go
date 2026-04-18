@@ -13,6 +13,7 @@ import (
 	"os"
 	"time"
 
+	redisotel "github.com/redis/go-redis/extra/redisotel/v9"
 	goredis "github.com/redis/go-redis/v9"
 
 	"github.com/gaarutyunov/mcp-anything/pkg/config"
@@ -56,6 +57,11 @@ func New(ctx context.Context, cfg config.RedisSessionConfig) (*Store, error) {
 	if err := client.Ping(ctx).Err(); err != nil {
 		_ = client.Close()
 		return nil, fmt.Errorf("connecting to redis: %w", err)
+	}
+
+	if err := redisotel.InstrumentTracing(client); err != nil {
+		_ = client.Close()
+		return nil, fmt.Errorf("instrumenting redis session store tracing: %w", err)
 	}
 
 	return &Store{client: client, encKey: encKey}, nil

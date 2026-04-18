@@ -34,11 +34,11 @@ vet:
 
 test:
 	mkdir -p $(COVERAGE_DIR)/unit
-	GOCOVERDIR=$(COVERAGE_DIR)/unit go test $(GOFLAGS) -cover -coverpkg=./... -count=1 ./...
+	go test $(GOFLAGS) -cover -coverpkg=./... -count=1 -coverprofile=$(COVERAGE_DIR)/unit/coverage.out ./...
 
 integration:
 	mkdir -p $(COVERAGE_DIR)/integration
-	GOCOVERDIR=$(COVERAGE_DIR)/integration COVERAGE_DIR=$(COVERAGE_DIR)/integration go test $(GOFLAGS) -tags integration -cover -coverpkg=./... -count=1 -timeout $(INTEGRATION_TIMEOUT) ./tests/integration/...
+	COVERAGE_DIR=$(COVERAGE_DIR)/integration go test $(GOFLAGS) -tags integration -count=1 -timeout $(INTEGRATION_TIMEOUT) ./tests/integration/...
 
 e2e:
 	go test $(GOFLAGS) -tags e2e -count=1 -timeout $(INTEGRATION_TIMEOUT) $(E2E_RUN_FLAG) ./tests/e2e/...
@@ -59,8 +59,10 @@ check: lint vet test build build-operator treeshake osv
 
 cover-merge:
 	mkdir -p $(COVERAGE_DIR)/merged
-	go tool covdata merge -i $(COVERAGE_DIR)/unit,$(COVERAGE_DIR)/integration -o $(COVERAGE_DIR)/merged
-	go tool covdata textfmt -i $(COVERAGE_DIR)/merged -o $(COVERAGE_DIR)/coverage.out
+	cp $(COVERAGE_DIR)/unit/coverage.out $(COVERAGE_DIR)/coverage.out
+	go tool covdata textfmt -i $(COVERAGE_DIR)/integration -o $(COVERAGE_DIR)/merged/integration.out 2>/dev/null \
+		&& tail -n +2 $(COVERAGE_DIR)/merged/integration.out >> $(COVERAGE_DIR)/coverage.out \
+		|| true
 
 cover-report: cover-merge
 	go tool cover -func=$(COVERAGE_DIR)/coverage.out

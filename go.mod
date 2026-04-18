@@ -7,6 +7,7 @@ require (
 	github.com/caddyserver/caddy/v2 v2.11.2
 	github.com/coreos/go-oidc/v3 v3.17.0
 	github.com/dgraph-io/ristretto v0.2.0
+	github.com/exaring/otelpgx v0.10.0
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/getkin/kin-openapi v0.134.0
 	github.com/go-chi/chi/v5 v5.2.5
@@ -27,6 +28,7 @@ require (
 	github.com/philippgille/chromem-go v0.7.0
 	github.com/pkoukk/tiktoken-go v0.1.8
 	github.com/prometheus/client_golang v1.23.2
+	github.com/redis/go-redis/extra/redisotel/v9 v9.18.0
 	github.com/redis/go-redis/v9 v9.18.0
 	github.com/sony/gobreaker/v2 v2.4.0
 	github.com/speakeasy-api/jsonpath v0.6.0
@@ -328,6 +330,7 @@ require (
 	github.com/quic-go/qpack v0.6.0 // indirect
 	github.com/quic-go/quic-go v0.59.0 // indirect
 	github.com/raeperd/recvcheck v0.2.0 // indirect
+	github.com/redis/go-redis/extra/rediscmd/v9 v9.18.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/rogpeppe/go-internal v1.14.1 // indirect
 	github.com/rs/xid v1.6.0 // indirect

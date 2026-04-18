@@ -54,7 +54,7 @@ generate-crds:
 lint-crds:
 	go run ./cmd/crdlint
 
-check: lint vet test build build-operator treeshake
+check: lint vet test build build-operator build-builder treeshake
 
 cover-merge:
 	mkdir -p $(COVERAGE_DIR)/merged

@@ -23,6 +23,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"text/template"
 )
 
@@ -210,16 +211,16 @@ func (b *Builder) goCmd(ctx context.Context, dir string, args ...string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = io.MultiWriter(b.cfg.Stderr, &stderrBuf)
 
-	// Inherit env but clear GOFLAGS to avoid interference; skip sum checks for
-	// the local replacement module so go.sum entries are not required for it.
+	// Inherit env but clear GOFLAGS to avoid interference; disable sum DB so
+	// the local replacement module does not require a go.sum entry.
 	env := make([]string, 0, len(os.Environ())+2)
 	for _, e := range os.Environ() {
-		if len(e) >= 8 && e[:8] == "GOFLAGS=" {
+		if strings.HasPrefix(e, "GOFLAGS=") {
 			continue
 		}
 		env = append(env, e)
 	}
-	env = append(env, "GONOSUMDB=*", "GOFLAGS=-mod=mod")
+	env = append(env, "GOSUMDB=off", "GOFLAGS=-mod=mod")
 	cmd.Env = env
 
 	if err := cmd.Run(); err != nil {

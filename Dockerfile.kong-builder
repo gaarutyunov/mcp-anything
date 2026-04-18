@@ -1,0 +1,30 @@
+# Stage 1: build the mcp-anything-builder CLI tool.
+FROM golang:1.25-alpine AS builder-tool
+
+RUN apk add --no-cache ca-certificates git
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -o /bin/mcp-builder ./cmd/builder
+
+# Stage 2: use the builder to produce the Kong Go plugin binary.
+# The builder creates a temporary Go module, downloads go-pdk, and runs go build.
+FROM golang:1.25-alpine AS build
+
+RUN apk add --no-cache ca-certificates git
+
+WORKDIR /src
+COPY --from=builder-tool /bin/mcp-builder /bin/mcp-builder
+COPY . .
+
+ENV CGO_ENABLED=0
+RUN /bin/mcp-builder \
+    --target kong \
+    --output /usr/local/bin/mcp-anything \
+    --module-dir /src
+
+# Stage 3: Kong Gateway runtime with the embedded plugin binary.
+# The plugin binary filename must match the Kong plugin name (mcp-anything).
+FROM kong:3.9
+COPY --from=build /usr/local/bin/mcp-anything /usr/local/share/lua/5.1/go-plugins/mcp-anything

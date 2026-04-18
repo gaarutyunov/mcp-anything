@@ -214,7 +214,7 @@ func main() {
 
 // kongTarget generates a Kong Go plugin binary wrapping mcp-anything.
 // The plugin starts mcp-anything as an embedded HTTP server and rewrites the
-// Kong service address to route MCP traffic through the proxy.
+// Kong service target so that Kong proxies MCP traffic through the embedded proxy.
 //
 // Requires github.com/Kong/go-pdk which is downloaded at build time.
 var kongTarget = targetSpec{
@@ -224,8 +224,7 @@ var kongTarget = targetSpec{
 //
 // Kong Go plugin that embeds mcp-anything as an HTTP handler.
 // The plugin starts a local mcp-anything server on first request and
-// rewrites the Kong service address so that Kong proxies MCP traffic
-// through the embedded proxy.
+// uses kong.Service.SetTarget to route MCP traffic through the embedded proxy.
 package main
 
 import (
@@ -234,7 +233,9 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strconv"
 	"sync"
+	"time"
 
 	"github.com/Kong/go-pdk"
 	"github.com/Kong/go-pdk/server"
@@ -285,9 +286,24 @@ func (c *Config) Access(kong *pdk.PDK) {
 		}
 		return
 	}
-	// Rewrite the upstream service address to the embedded proxy.
-	if err := kong.ServiceRequest.SetHeader("X-Forwarded-Host", proxyAddr); err != nil {
-		slog.Error("mcp-anything kong plugin: setting upstream header", "error", err)
+	host, portStr, err := net.SplitHostPort(proxyAddr)
+	if err != nil {
+		slog.Error("mcp-anything kong plugin: parsing proxy addr", "error", err)
+		if setErr := kong.Response.SetStatus(http.StatusInternalServerError); setErr != nil {
+			slog.Error("setting status", "error", setErr)
+		}
+		return
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		slog.Error("mcp-anything kong plugin: parsing proxy port", "error", err)
+		if setErr := kong.Response.SetStatus(http.StatusInternalServerError); setErr != nil {
+			slog.Error("setting status", "error", setErr)
+		}
+		return
+	}
+	if err := kong.Service.SetTarget(host, port); err != nil {
+		slog.Error("mcp-anything kong plugin: setting target", "error", err)
 		if setErr := kong.Response.SetStatus(http.StatusBadGateway); setErr != nil {
 			slog.Error("setting status", "error", setErr)
 		}
@@ -295,9 +311,9 @@ func (c *Config) Access(kong *pdk.PDK) {
 }
 
 // startProxy starts mcp-anything listening on a random local port and returns
-// the address (host:port).
+// the address (host:port) once the server is accepting connections.
 func startProxy(cfgPath string) (string, error) {
-	// Reserve a local port before starting the proxy so we know the address.
+	// Reserve a random port to know the address before starting.
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return "", fmt.Errorf("reserving local port: %w", err)
@@ -321,7 +337,6 @@ func startProxy(cfgPath string) (string, error) {
 		return "", fmt.Errorf("loading config: %w", err)
 	}
 
-	// Override the listen address with the reserved port.
 	cfg.Server.Addr = addr
 
 	ctx := context.Background()
@@ -330,12 +345,18 @@ func startProxy(cfgPath string) (string, error) {
 		return "", fmt.Errorf("creating proxy: %w", err)
 	}
 	proxy.StartBackground(ctx)
-	go func() {
-		if startErr := proxy.Start(ctx); startErr != nil && startErr != context.Canceled {
-			slog.Error("mcp-anything kong plugin: proxy error", "error", startErr)
+
+	// Poll until the server is accepting connections (up to 30 s).
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		conn, dialErr := net.DialTimeout("tcp", addr, 200*time.Millisecond)
+		if dialErr == nil {
+			_ = conn.Close()
+			return addr, nil
 		}
-	}()
-	return addr, nil
+		time.Sleep(100 * time.Millisecond)
+	}
+	return "", fmt.Errorf("proxy did not become ready on %s within 30s", addr)
 }
 
 func main() {

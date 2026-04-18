@@ -258,8 +258,8 @@ func buildCommandUpstreamConfig(up *v1alpha1.MCPUpstream, uc generatedUpstreamCo
 	return uc, nil
 }
 
-// buildGeneratedInputSchema converts an MCPUpstreamCommandInputSchema to its generated form.
-func buildGeneratedInputSchema(s *v1alpha1.MCPUpstreamCommandInputSchema) *generatedCommandInputSchema {
+// buildGeneratedInputSchema converts a CommandInputSchema to its generated form.
+func buildGeneratedInputSchema(s *v1alpha1.CommandInputSchema) *generatedCommandInputSchema {
 	gs := &generatedCommandInputSchema{
 		Type:     s.Type,
 		Required: s.Required,

@@ -16,7 +16,7 @@ type JWTAuthSpec struct {
 }
 
 // NamingConfig controls how tool names are generated.
-type ProxyNamingSpec struct {
+type NamingSpec struct {
 	// +optional
 	Separator string `json:"separator,omitempty"`
 	// +optional
@@ -28,11 +28,11 @@ type ProxyNamingSpec struct {
 	// +optional
 	DescriptionTruncationSuffix string `json:"descriptionTruncationSuffix,omitempty"`
 	// +optional
-	DefaultSlugRules ProxySlugRulesSpec `json:"defaultSlugRules,omitempty"`
+	DefaultSlugRules SlugRulesSpec `json:"defaultSlugRules,omitempty"`
 }
 
 // SlugRulesConfig controls which slug transformations are applied.
-type ProxySlugRulesSpec struct {
+type SlugRulesSpec struct {
 	// +optional
 	ReplaceSlashes bool `json:"replaceSlashes,omitempty"`
 	// +optional
@@ -49,7 +49,7 @@ type ProxySlugRulesSpec struct {
 }
 
 // TelemetryConfig holds observability settings.
-type ProxyTelemetrySpec struct {
+type TelemetrySpec struct {
 	// +optional
 	ServiceName string `json:"serviceName,omitempty"`
 	// +optional
@@ -63,7 +63,7 @@ type ProxyTelemetrySpec struct {
 }
 
 // CommandConfig defines a single command-backed MCP tool within a command upstream.
-type MCPUpstreamCommandSpec struct {
+type CommandSpec struct {
 	// +optional
 	ToolName string `json:"toolName,omitempty"`
 	// +optional
@@ -71,7 +71,7 @@ type MCPUpstreamCommandSpec struct {
 	// +optional
 	Command string `json:"command,omitempty"`
 	// +optional
-	InputSchema MCPUpstreamCommandInputSchema `json:"inputSchema,omitempty"`
+	InputSchema CommandInputSchema `json:"inputSchema,omitempty"`
 	// +optional
 	Timeout string `json:"timeout,omitempty"`
 	// +optional
@@ -87,17 +87,17 @@ type MCPUpstreamCommandSpec struct {
 }
 
 // CommandInputSchema is the JSON Schema definition for a command tool's input parameters.
-type MCPUpstreamCommandInputSchema struct {
+type CommandInputSchema struct {
 	// +optional
 	Type string `json:"type,omitempty"`
 	// +optional
-	Properties map[string]MCPUpstreamCommandSchemaProperty `json:"properties,omitempty"`
+	Properties map[string]CommandSchemaProperty `json:"properties,omitempty"`
 	// +optional
 	Required []string `json:"required,omitempty"`
 }
 
 // CommandSchemaProperty describes a single property in a command tool's input schema.
-type MCPUpstreamCommandSchemaProperty struct {
+type CommandSchemaProperty struct {
 	// +optional
 	Type string `json:"type,omitempty"`
 	// +optional
@@ -105,7 +105,7 @@ type MCPUpstreamCommandSchemaProperty struct {
 }
 
 // ValidationConfig controls runtime request and response validation against the OpenAPI schema.
-type MCPUpstreamValidationSpec struct {
+type ValidationSpec struct {
 	// +optional
 	ValidateRequest bool `json:"validateRequest,omitempty"`
 	// +optional

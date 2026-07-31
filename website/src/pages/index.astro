@@ -202,8 +202,9 @@ const features = [
   <!-- Main: two columns on desktop, stacked on mobile -->
   <div class="flex h-[calc(100vh-114px)] flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
 
-    <!-- Left: Hero -->
-    <section class="flex flex-1 items-center justify-center px-8 py-8 lg:flex-none lg:w-1/2 lg:justify-end lg:py-0 lg:pr-10">
+    <!-- Left: Hero. data-hero is the capture target for the social-image
+         skill, whose default selector list looks for it first. -->
+    <section data-hero class="flex flex-1 items-center justify-center px-8 py-8 lg:flex-none lg:w-1/2 lg:justify-end lg:py-0 lg:pr-10">
       <div class="w-full max-w-lg">
         <p class="mb-3 text-sm font-medium text-[var(--ga-muted)]">Open source &middot; Apache 2.0</p>
         <h1 class="mb-4 text-4xl font-bold tracking-tight text-[var(--ga-fg)] sm:text-5xl">

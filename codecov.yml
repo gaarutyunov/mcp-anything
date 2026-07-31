@@ -1,3 +1,16 @@
+# Code this repository does not author, and therefore has no business covering.
+# Everything listed here is either vendored third-party source or machine
+# generated output that is reproduced by `make generate-crds`.
+ignore:
+  # Vendored copy of the third-party @gaarutyunov/ui-kit design system. Committed
+  # on purpose (see website/vendor/ui-kit/VENDORED.md) but not ours to test.
+  - "website/vendor/**"
+  # controller-gen deepcopy output (405 uncovered statements today).
+  - "**/zz_generated*.go"
+  # `go run ./cmd/crdgen` output — CRD spec mirror types. The generator itself
+  # (internal/crdutil/typegen.go) is hand-written and stays covered.
+  - "**/*_gen.go"
+
 coverage:
   status:
     project:

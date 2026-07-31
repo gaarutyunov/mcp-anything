@@ -1,0 +1,187 @@
+name: PR Preview
+
+# Publishes the website built from a pull request to
+# https://mcp-anything.ai/pr-preview/pr-<N>/ so a change to the site can be
+# looked at before it is merged.
+#
+# The preview and the production site share one gh-pages branch: production
+# owns the root of it, this workflow owns pr-preview/ and stages nothing
+# outside that directory.
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, closed]
+    paths:
+      - 'website/**'
+      - '.github/workflows/pr-preview.yml'
+      - '.github/scripts/check-preview.py'
+
+# Shared with the production deploy workflow, on purpose: gh-pages has exactly
+# one writer at a time, whichever workflow that is. Never cancel a run
+# mid-push.
+concurrency:
+  group: gh-pages
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  preview:
+    name: Publish preview
+    runs-on: ubuntu-latest
+    # A pull_request from a fork gets a read-only GITHUB_TOKEN, so the push at
+    # the end could only fail. Skip rather than fail red on contributor PRs.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    env:
+      PR: ${{ github.event.number }}
+      PREFIX: /pr-preview/pr-${{ github.event.number }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        if: github.event.action != 'closed'
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+
+      - name: Build the site for ${{ env.PREFIX }}
+        if: github.event.action != 'closed'
+        working-directory: website
+        env:
+          # astro.config.mjs turns this into Astro's `base`, which is what
+          # makes the asset URLs resolve under the preview directory instead
+          # of at the domain root.
+          BASE_PATH: ${{ env.PREFIX }}
+        run: |
+          npm ci
+          npm run build
+
+      - name: Prove it works when served from ${{ env.PREFIX }}
+        if: github.event.action != 'closed'
+        run: |
+          # Stage the build at exactly the path it will occupy on gh-pages and
+          # serve *that* tree. A site built for the domain root passes every
+          # check that skips this step, and then 404s every asset once
+          # deployed -- while still rendering, so nothing looks wrong.
+          stage="$(mktemp -d)"
+          mkdir -p "${stage}${PREFIX}"
+          cp -R website/dist/. "${stage}${PREFIX}/"
+          python3 .github/scripts/check-preview.py \
+            --root "$stage" \
+            --prefix "$PREFIX" \
+            --page "${PREFIX}/" \
+            --page "${PREFIX}/docs/"
+
+      - name: Check out gh-pages
+        uses: actions/checkout@v4
+        continue-on-error: true
+        with:
+          ref: gh-pages
+          path: pages
+
+      - name: Prepare the gh-pages working copy
+        run: |
+          if [ ! -d pages/.git ]; then
+            # First ever preview: the branch does not exist yet.
+            mkdir -p pages
+            git -C pages init -b gh-pages
+            git -C pages remote add origin \
+              "${{ github.server_url }}/${{ github.repository }}.git"
+          fi
+          # Astro emits its bundles into _astro/. GitHub Pages runs Jekyll over
+          # a branch-hosted site unless this file exists, and Jekyll drops
+          # every path beginning with an underscore -- which would delete the
+          # CSS and JS of the production site and of every preview.
+          touch pages/.nojekyll
+          # Keep the path present so the scoped `git add` below always has a
+          # pathspec to match, even after the last preview is pruned.
+          mkdir -p pages/pr-preview
+
+      - name: Place the preview at ${{ env.PREFIX }}
+        if: github.event.action != 'closed'
+        run: |
+          rm -rf "pages/pr-preview/pr-${PR}"
+          mkdir -p "pages/pr-preview/pr-${PR}"
+          cp -R website/dist/. "pages/pr-preview/pr-${PR}/"
+
+      - name: Retire this preview (the PR closed)
+        if: github.event.action == 'closed'
+        run: rm -rf "pages/pr-preview/pr-${PR}"
+
+      - name: Prune previews for closed and merged PRs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # The `closed` event above only fires for PRs that touched the paths
+          # this workflow watches, so it cannot be the only cleanup: a PR that
+          # closes without touching website/** would leave its preview behind
+          # for good. This sweep is global and runs on every deploy, so any
+          # such leftover is collected by the next preview of any PR.
+          #
+          # It deletes on proof only. An unreadable state -- a token blip, a
+          # deleted PR, anything unexpected -- keeps the directory. The one
+          # thing worse than a stale preview is deleting a live one.
+          shopt -s nullglob
+          for dir in pages/pr-preview/pr-*; do
+            [ -d "$dir" ] || continue
+            n="${dir##*/pr-}"
+            case "$n" in
+              ''|*[!0-9]*) echo "keep $dir (not a PR directory)"; continue ;;
+            esac
+
+            state="$(gh pr view "$n" --repo "${{ github.repository }}" \
+                       --json state --jq .state 2>/dev/null || echo UNREADABLE)"
+            case "$state" in
+              CLOSED|MERGED) echo "prune $dir (PR #$n is $state)"; rm -rf "$dir" ;;
+              OPEN)          echo "keep  $dir (PR #$n is OPEN)" ;;
+              *)             echo "keep  $dir (PR #$n state unreadable: '$state')" ;;
+            esac
+          done
+
+      - name: Publish
+        working-directory: pages
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Scoped deliberately. This job owns pr-preview/ and .nojekyll and
+          # nothing else, so it is structurally incapable of modifying the
+          # production site that lives at the root of this branch -- even if
+          # something above went badly wrong.
+          git add --all -- pr-preview .nojekyll
+
+          if git diff --cached --quiet; then
+            echo "nothing to publish"
+            exit 0
+          fi
+
+          if [ "${{ github.event.action }}" = "closed" ]; then
+            git commit -m "preview: retire pr-${PR}"
+          else
+            git commit -m "preview: pr-${PR} @ ${{ github.event.pull_request.head.sha }}"
+          fi
+
+          remote="https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+          for attempt in 1 2 3; do
+            if git push "$remote" HEAD:gh-pages; then
+              echo "pushed on attempt $attempt"
+              exit 0
+            fi
+            echo "push rejected, re-basing on the current gh-pages tip"
+            git fetch "$remote" gh-pages
+            git rebase FETCH_HEAD
+          done
+          echo "::error::could not push the preview after 3 attempts"
+          exit 1
+
+      - name: Report the preview URL
+        if: github.event.action != 'closed'
+        run: |
+          {
+            echo "### Website preview"
+            echo ""
+            echo "https://mcp-anything.ai${PREFIX}/"
+          } >> "$GITHUB_STEP_SUMMARY"

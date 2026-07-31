@@ -1,12 +1,19 @@
 name: PR Preview
 
-# Publishes the website built from a pull request to
-# https://mcp-anything.ai/pr-preview/pr-<N>/ so a change to the site can be
-# looked at before it is merged.
+# Builds the website from a pull request and publishes it to the gh-pages
+# branch under pr-preview/pr-<N>/, so a change to the site can be looked at
+# before it is merged.
 #
-# The preview and the production site share one gh-pages branch: production
-# owns the root of it, this workflow owns pr-preview/ and stages nothing
-# outside that directory.
+# WHAT THIS DOES NOT YET DO: serve it. This repository's Pages site is
+# deployed from a GitHub Actions artifact (`build_type: workflow`), not from a
+# served branch, so nothing reads gh-pages and every preview URL 404s. The
+# bytes here are correct and verified; what publishes them to
+# mcp-anything.ai/pr-preview/pr-<N>/ is an open decision, because every way of
+# closing the gap touches how production is published. Until it is made, this
+# workflow is a verified no-op.
+#
+# This job stages nothing outside pr-preview/ and .nojekyll, whichever way
+# that decision goes.
 
 on:
   pull_request:

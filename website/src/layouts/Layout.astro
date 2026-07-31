@@ -35,7 +35,7 @@ const jsonLd = {
 ---
 
 <!doctype html>
-<html lang="en" class="scroll-smooth">
+<html lang="en" class="scroll-smooth" data-theme="dark">
   <head>
     <meta charset="utf-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
@@ -58,17 +58,26 @@ const jsonLd = {
     <meta name="generator" content={Astro.generator} />
     <title>{title}</title>
     <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} />
-    <!-- Prevent FOUC: apply theme before render -->
+    <!-- Prevent FOUC: apply theme before render. `data-theme` is the attribute
+         the ui-kit tokens key off, so this drives the components too. -->
     <script is:inline>
       (function() {
         const saved = localStorage.getItem('theme');
-        if (saved === 'dark' || (!saved && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
-          document.documentElement.classList.add('dark');
-        }
+        const dark = saved ? saved === 'dark'
+          : window.matchMedia('(prefers-color-scheme: dark)').matches;
+        document.documentElement.dataset.theme = dark ? 'dark' : 'light';
       })();
     </script>
   </head>
-  <body class="bg-white text-neutral-900 antialiased font-sans dark:bg-neutral-950 dark:text-neutral-100">
+  <body class="bg-[var(--ga-bg)] text-[var(--ga-fg)] antialiased font-sans">
     <slot />
+    <!--
+      Registering every <ga-*> element is a side effect of this import. It must
+      run in the browser: the components extend HTMLElement, which does not
+      exist while Astro pre-renders in Node.
+    -->
+    <script>
+      import "../../vendor/ui-kit/src/index.js";
+    </script>
   </body>
 </html>

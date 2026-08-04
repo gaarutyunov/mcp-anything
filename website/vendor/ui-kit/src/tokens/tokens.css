@@ -1,0 +1,187 @@
+/* =========================================================================
+   GA UI Kit — Design Tokens
+   Extracted from gaarutyunov.com (Next.js portfolio) and stereoscope
+   (buildless ES modules). A Geist-inspired, pure-black dark theme.
+
+   Every token is namespaced `--ga-*`. Components read these with built-in
+   fallbacks, so the kit looks correct even if this file is not loaded — but
+   loading it gives you the full theme (page background, fonts) and lets you
+   re-brand the entire kit by overriding a handful of variables.
+
+   Override anywhere:  :root { --ga-accent: #ac4bff; --ga-radius: 10px; }
+   ========================================================================= */
+
+:root,
+:host {
+  color-scheme: dark;
+
+  /* ---- Palette ---------------------------------------------------------- */
+  --ga-bg: #000000;
+  --ga-bg-elev: #1a1a1a;
+  --ga-bg-elev-hover: #1f1f1f;
+  --ga-fg: #ededed;
+  --ga-muted: #878787;
+  --ga-dim: #454545;
+  --ga-border: #1a1a1a;
+  --ga-border-subtle: #111111;
+  --ga-border-strong: #2a2a2a;
+
+  /* ---- Accents (shared by both source projects) ------------------------- */
+  --ga-accent: #54a2ff;          /* blue — primary actions / links          */
+  --ga-accent-contrast: #000000; /* text on top of an accent fill           */
+  --ga-blue: #54a2ff;
+  --ga-green: #00c758;
+  --ga-amber: #fcbb00;
+  --ga-purple: #ac4bff;
+  --ga-red: #ff6568;
+
+  /* ---- Semantic aliases ------------------------------------------------- */
+  --ga-success: var(--ga-green);
+  --ga-warning: var(--ga-amber);
+  --ga-danger: var(--ga-red);
+  --ga-info: var(--ga-blue);
+
+  /* ---- Typography ------------------------------------------------------- */
+  --ga-font-sans: "Geist", ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --ga-font-mono: "Geist Mono", "Fira Mono", ui-monospace, SFMono-Regular,
+    Menlo, monospace;
+  --ga-font-display: "Fira Mono", "Geist Mono", ui-monospace, monospace;
+
+  --ga-fs-xs: 12px;
+  --ga-fs-sm: 14px;
+  --ga-fs-base: 17px;
+  --ga-fs-lg: 20px;
+  --ga-fs-xl: 24px;
+  --ga-fs-2xl: clamp(28px, 5vw, 40px);
+  --ga-fs-3xl: clamp(34px, 6vw, 52px);
+  --ga-lh-base: 1.65;
+  --ga-lh-tight: 1.2;
+  --ga-tracking-tight: -0.02em;
+
+  /* ---- Spacing scale (4px base) ----------------------------------------- */
+  --ga-space-1: 4px;
+  --ga-space-2: 8px;
+  --ga-space-3: 12px;
+  --ga-space-4: 16px;
+  --ga-space-5: 20px;
+  --ga-space-6: 24px;
+  --ga-space-8: 32px;
+  --ga-space-10: 40px;
+  --ga-space-12: 48px;
+
+  /* ---- Shape ------------------------------------------------------------ */
+  --ga-radius: 6px;
+  --ga-radius-lg: 8px; /* matches Tailwind rounded-lg used by garutyunov.com cards */
+  --ga-radius-full: 9999px;
+
+  /* ---- Elevation -------------------------------------------------------- */
+  --ga-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --ga-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  --ga-shadow-lg: -16px 0 40px rgba(0, 0, 0, 0.4);
+
+  /* ---- Motion ----------------------------------------------------------- */
+  --ga-transition: 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+  --ga-transition-slow: 0.32s cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* ---- Focus ring ------------------------------------------------------- */
+  --ga-ring: 0 0 0 2px var(--ga-bg), 0 0 0 4px var(--ga-accent);
+
+  /* ---- Chart palette ----------------------------------------------------
+     Okabe-Ito, reordered. Colour-blind-safe is the DEFAULT here, not an opt-in
+     variant: the series order is chosen so the earliest tokens are the most
+     separable, and a two- or three-series chart gets the best pair there is.
+
+     Verified by simulating deuteranopia and protanopia (Brettel/Viénot in
+     linear sRGB) over the swatches and measuring CIEDE2000 between every pair.
+     Worst-case minimum separation across normal vision, deuteranopia and
+     protanopia, for the first N series:
+
+       2 series ΔE 53.6   |   5 series ΔE 8.3
+       3 series ΔE 26.9   |   6 series ΔE 6.9
+       4 series ΔE 11.8   |   7+ series ΔE 2.9
+
+     The drop at seven is blue vs reddish-purple under protanopia, which is
+     inherent to the hue pair; the order pushes it as late as it can go. Past
+     six series, distinguish by more than colour.
+     ------------------------------------------------------------------------ */
+  --ga-chart-1: #56b4e9; /* sky blue */
+  --ga-chart-2: #e69f00; /* orange */
+  --ga-chart-3: #009e73; /* bluish green */
+  --ga-chart-4: #d55e00; /* vermillion */
+  --ga-chart-5: #0072b2; /* blue */
+  --ga-chart-6: #f0e442; /* yellow */
+  --ga-chart-7: #cc79a7; /* reddish purple */
+  --ga-chart-8: #7f7f7f; /* grey */
+
+  /* The axis delimits the plot, so it is structure a reader needs and clears
+     3:1 against --ga-bg-elev (3.4:1). Gridlines are a decorative reading aid —
+     the data is legible without them — so they stay quiet deliberately; do not
+     encode meaning in a gridline. */
+  --ga-chart-grid: #1f1f1f;
+  --ga-chart-axis: #6e6e6e;
+  --ga-chart-label: #878787;
+  --ga-chart-tooltip-bg: #1a1a1a;
+  --ga-chart-tooltip-fg: #ededed;
+
+  /* ---- Layout ----------------------------------------------------------- */
+  --ga-max-width: 880px;
+}
+
+/* Optional light theme — opt in with <html data-theme="light"> ----------- */
+:root[data-theme="light"],
+:host([data-theme="light"]) {
+  color-scheme: light;
+  --ga-bg: #ffffff;
+  --ga-bg-elev: #f7f7f7;
+  --ga-bg-elev-hover: #efefef;
+  --ga-fg: #1a1a1a;
+  --ga-muted: #666666;
+  --ga-dim: #999999;
+  --ga-border: #e5e5e5;
+  --ga-border-subtle: #f0f0f0;
+  --ga-border-strong: #d4d4d4;
+  --ga-accent: #0068d6;
+  --ga-accent-contrast: #ffffff;
+  --ga-blue: #0068d6;
+  --ga-green: #008a3c;
+  --ga-amber: #b87900;
+  --ga-purple: #7b2fd6;
+  --ga-red: #d93438;
+  --ga-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.08);
+  --ga-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  --ga-shadow-lg: -16px 0 40px rgba(0, 0, 0, 0.12);
+
+  /* Chart palette, re-tuned for a white ground: every series clears 3:1
+     contrast on --ga-bg (the WCAG non-text minimum), and the hues keep the
+     lightness spread the dark palette gets for free — darkening them all
+     equally would collapse orange into vermillion under deuteranopia, which
+     an earlier draft of this palette did. Same verification, same profile:
+     ΔE 50.6 at two series, 30.8 at three, 6.6 at six. */
+  --ga-chart-1: #1b7fbf;
+  --ga-chart-2: #c18500;
+  --ga-chart-3: #00785a;
+  --ga-chart-4: #a34500;
+  --ga-chart-5: #005c90;
+  --ga-chart-6: #8c7a00;
+  --ga-chart-7: #a9548a;
+  --ga-chart-8: #6b6b6b;
+
+  --ga-chart-grid: #ececec;
+  --ga-chart-axis: #8a8a8a; /* 3.2:1 on --ga-bg-elev */
+  --ga-chart-label: #666666;
+  --ga-chart-tooltip-bg: #ffffff;
+  --ga-chart-tooltip-fg: #1a1a1a;
+}
+
+/* Page-level theme (loaded only when you import tokens.css globally) ------ */
+.ga-theme,
+body.ga-theme {
+  background: var(--ga-bg);
+  color: var(--ga-fg);
+  font-family: var(--ga-font-sans);
+  font-size: var(--ga-fs-base);
+  line-height: var(--ga-lh-base);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}

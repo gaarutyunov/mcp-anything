@@ -5,3 +5,6 @@ coverage/
 .env
 .env.*
 vendor/
+# ...except the website's vendored ui-kit, which is committed on purpose.
+# See website/vendor/ui-kit/VENDORED.md.
+!website/vendor/

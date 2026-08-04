@@ -14,10 +14,36 @@ ignore:
 coverage:
   status:
     project:
+      # The blocking gate is a ratchet, not an absolute bar: a PR may not drop
+      # project coverage below the commit it branched from (1% of slack for
+      # flaky/ordering noise). This is deliberately NOT `target: 80%`.
+      #
+      # Why: main sits at 49.82% (3829/7685 lines). An absolute 80% target needs
+      # ~2320 more covered lines, so it failed on *every* PR — including ones
+      # that touch no Go at all — and it failed on main itself. A gate no commit
+      # in the repo's history could pass reports nothing about the commit under
+      # test. Two separate causes, tracked as follow-ups rather than papered over:
+      #
+      #   1. E2E coverage is generated and then dropped. Dockerfile/Dockerfile.operator
+      #      build coverage-instrumented binaries writing to GOCOVERDIR=/tmp/gocov,
+      #      but the `e2e-tests` job neither extracts that directory from the k3s
+      #      pods nor uploads it, and `cover-merge` only merges unit + integration.
+      #      pkg/operator/** therefore reports 0.0% across 957 lines despite being
+      #      exercised by four E2E suites.
+      #   2. pkg/operator/**, cmd/operator and internal/crdutil have no unit tests
+      #      at all (zero *_test.go files). That is real missing coverage.
+      #
+      # Fixing (1) and then (2) is what moves the number. Raise this target as
+      # they land — the `goal` status below keeps the 80% ambition on every PR.
       default:
-        # 80% threshold for the overall project (existing code).
-        target: 80%
+        target: auto
         threshold: 1%
+      # Non-blocking: reports the original 80% ambition on every PR so it stays
+      # visible and measurable while the two causes above are worked off.
+      goal:
+        target: 80%
+        threshold: 0%
+        informational: true
     patch:
       default:
         # 100% threshold for new/changed lines in PRs.

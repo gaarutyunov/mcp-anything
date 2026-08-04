@@ -1,4 +1,0 @@
-User-agent: *
-Allow: /
-
-Sitemap: https://mcp-anything.ai/sitemap-index.xml

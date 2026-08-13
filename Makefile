@@ -1,7 +1,8 @@
-.PHONY: all build build-operator lint vet test integration treeshake check clean helm-lint helm-package helm-push generate-crds lint-crds build-linter cover-merge cover-report
+.PHONY: all build build-operator build-kong lint vet test integration treeshake check clean helm-lint helm-package helm-push generate-crds lint-crds build-linter cover-merge cover-report
 
 BINARY := bin/proxy
 OPERATOR_BINARY := bin/operator
+KONG_BINARY := bin/mcp-anything-kong
 LINTER_BINARY := bin/golangci-lint-custom
 GOFLAGS := -race
 INTEGRATION_TIMEOUT := 600s
@@ -20,6 +21,9 @@ build:
 
 build-operator:
 	go build -o $(OPERATOR_BINARY) ./cmd/operator
+
+build-kong:
+	go build -o $(KONG_BINARY) ./cmd/kong
 
 build-linter:
 	go build -o $(LINTER_BINARY) ./cmd/golangci-lint-custom
@@ -50,7 +54,7 @@ generate-crds:
 lint-crds:
 	go run ./cmd/crdlint
 
-check: lint vet test build build-operator treeshake
+check: lint vet test build build-operator build-kong treeshake
 
 cover-merge:
 	mkdir -p $(COVERAGE_DIR)/merged

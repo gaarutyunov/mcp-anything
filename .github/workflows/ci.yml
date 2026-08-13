@@ -16,6 +16,7 @@ env:
   PROXY_IMAGE: ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
   CADDY_IMAGE: ghcr.io/${{ github.repository }}-caddy:sha-${{ github.sha }}
   WORKSPACE_IMAGE: ghcr.io/${{ github.repository }}-workspace:sha-${{ github.sha }}
+  KONG_IMAGE: ghcr.io/${{ github.repository }}-kong:sha-${{ github.sha }}
 
 jobs:
   lint-and-test:
@@ -167,10 +168,34 @@ jobs:
           tags: ${{ env.WORKSPACE_IMAGE }}
           build-args: PROXY_IMAGE=${{ env.PROXY_IMAGE }}
 
+  build-kong-image:
+    name: Build & Push Kong Image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.kong
+          push: true
+          tags: ${{ env.KONG_IMAGE }}
+
   integration-test:
     name: Integration Tests
     runs-on: ubuntu-latest
-    needs: [lint-and-test, build-image, build-caddy-image, build-operator-image, push-helm-chart]
+    needs: [lint-and-test, build-image, build-caddy-image, build-operator-image, build-kong-image, push-helm-chart]
     steps:
       - uses: actions/checkout@v4
 
@@ -189,6 +214,7 @@ jobs:
         env:
           PROXY_IMAGE: ${{ env.PROXY_IMAGE }}
           CADDY_IMAGE: ${{ env.CADDY_IMAGE }}
+          KONG_IMAGE: ${{ env.KONG_IMAGE }}
           COVERAGE_DIR: ${{ github.workspace }}/coverage
      
       - name: upload integration coverage

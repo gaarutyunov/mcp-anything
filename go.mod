@@ -3,6 +3,7 @@ module github.com/gaarutyunov/mcp-anything
 go 1.25.0
 
 require (
+	github.com/Kong/go-pdk v0.11.2
 	github.com/brianvoe/gofakeit/v6 v6.28.0
 	github.com/caddyserver/caddy/v2 v2.11.2
 	github.com/coreos/go-oidc/v3 v3.17.0
@@ -380,6 +381,7 @@ require (
 	github.com/tklauser/numcpus v0.11.0 // indirect
 	github.com/tomarrell/wrapcheck/v2 v2.11.0 // indirect
 	github.com/tommy-muehle/go-mnd/v2 v2.5.1 // indirect
+	github.com/ugorji/go/codec v1.2.14 // indirect
 	github.com/ultraware/funlen v0.2.0 // indirect
 	github.com/ultraware/whitespace v0.2.0 // indirect
 	github.com/urfave/cli v1.22.17 // indirect

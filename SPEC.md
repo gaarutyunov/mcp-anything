@@ -153,7 +153,7 @@ Config / Spec plane:
 |Token introspection         |`github.com/zitadel/oidc/v3`                                     |v3.45.1 |OpenID certified, generics-based `ResourceServer` interface                    |
 |OAuth2 client               |`golang.org/x/oauth2`                                            |v0.33.0 |Client-side token acquisition and refresh for upstream calls                   |
 |Lua scripting               |`github.com/yuin/gopher-lua`                                     |v1.1.1  |Pure Go Lua 5.1, context timeout, KrakenD-proven, pool-safe                    |
-|Config loading              |`github.com/knadh/koanf/v2`                                      |v2.1.2  |Preserves key casing, modular providers                                        |
+|Config loading              |`github.com/gaarutyunov/goga/config`                             |M3      |Fixed defaults→file→env precedence over koanf; scalar/map key-collision guard   |
 |File watching               |`github.com/fsnotify/fsnotify`                                   |v1.9.0  |Parent-directory watching for ConfigMap symlink pattern                        |
 |OTel SDK                    |`go.opentelemetry.io/otel`                                       |v1.35.0 |Standard Go OTel SDK                                                           |
 |OTel HTTP instrumentation   |`go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp`  |v0.67.0 |Automatic HTTP server + client span/metric emission                            |
@@ -1060,6 +1060,13 @@ No `subPath` mounts — full directory mounts required for symlink-aware hot-rel
 ### Hot-reload trigger
 
 fsnotify watches the parent directory of `config.yaml`. Kubernetes atomic symlink swaps emit `CREATE` events on the `..data` directory. Events are debounced 500ms before reload is attempted.
+
+This watch is mcp-anything's own rather than `goga/config`'s `WithWatch`. goga watches the
+parent directory too, but then discards every event whose name is not the configured file —
+and a ConfigMap rotation never names it, because kubelet only touches `..data` and the
+timestamped version directory behind it. Reload is therefore driven by mcp-anything's
+unfiltered directory watch, and each trigger re-runs the whole `goga/config` pipeline
+(defaults, file, environment) rather than re-reading the file alone.
 
 ### Health endpoints
 

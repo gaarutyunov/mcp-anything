@@ -64,12 +64,19 @@ func WithConfigPath(path string) Option {
 // LoadConfig reads the config file path from the CONFIG_PATH environment variable
 // (defaulting to /etc/mcp-anything/config.yaml), loads and parses the file, and
 // returns both the path and the parsed ProxyConfig.
-func LoadConfig() (string, *pkgconfig.ProxyConfig, error) {
+//
+// CONFIG_PATH is read here rather than through goga/config because it selects
+// which file goga/config reads: it is the one setting that cannot come from the
+// configuration. It keeps its bare name — the operator emits it as a container
+// env var and the Helm chart and integration tests name it — rather than
+// becoming MCP_ANYTHING__CONFIG_PATH. Every other key is overridable through
+// the MCP_ANYTHING__ prefix; see [pkgconfig.EnvPrefix].
+func LoadConfig(ctx context.Context) (string, *pkgconfig.ProxyConfig, error) {
 	path := os.Getenv("CONFIG_PATH")
 	if path == "" {
 		path = "/etc/mcp-anything/config.yaml"
 	}
-	cfg, err := pkgconfig.Load(path)
+	cfg, err := pkgconfig.Load(ctx, path)
 	if err != nil {
 		return "", nil, fmt.Errorf("loading config from %q: %w", path, err)
 	}
@@ -120,7 +127,7 @@ func New(ctx context.Context, cfg *pkgconfig.ProxyConfig, opts ...Option) (*Prox
 	// the initial Rebuild and sets up fsnotify for hot-reload via Watch).
 	// Otherwise perform the initial Rebuild directly from the provided config.
 	if p.cfgPath != "" {
-		loader, loaderErr := pkgconfig.NewLoader(p.cfgPath, func(newCfg *pkgconfig.ProxyConfig) error {
+		loader, loaderErr := pkgconfig.NewLoader(ctx, p.cfgPath, func(newCfg *pkgconfig.ProxyConfig) error {
 			return p.manager.Rebuild(ctx, newCfg)
 		})
 		if loaderErr != nil {

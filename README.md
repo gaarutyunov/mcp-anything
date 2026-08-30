@@ -150,6 +150,30 @@ groups:
 
 See [examples/](examples/) for complete examples including Kubernetes CRDs and Helm values.
 
+### Where settings come from
+
+Configuration is loaded by [`goga/config`](https://github.com/gaarutyunov/goga), which merges
+its sources in one fixed order — **defaults → YAML file → environment** — with later
+sources winning. mcp-anything defines no command-line flags, so the environment has
+the last word.
+
+`CONFIG_PATH` selects the file (default `/etc/mcp-anything/config.yaml`). It keeps its
+bare name because it decides which file is read, and so cannot itself come from that file.
+
+Every other setting can be overridden by an environment variable named from its key path:
+the `MCP_ANYTHING` prefix, `__` between path segments, and `_` as a literal underscore
+inside a segment.
+
+| Variable | Key it sets |
+|---|---|
+| `MCP_ANYTHING__SERVER__PORT` | `server.port` |
+| `MCP_ANYTHING__NAMING__MAX_LENGTH` | `naming.max_length` |
+| `MCP_ANYTHING__TELEMETRY__OTLP_ENDPOINT` | `telemetry.otlp_endpoint` |
+
+This is a different mechanism from the `${VAR}` expansion above: `${VAR}` substitutes a
+value *inside* the YAML, while `MCP_ANYTHING__…` replaces a key's value outright, and does
+so again on every hot reload.
+
 ## OpenAPI Overlays
 
 Customize how operations are exposed as MCP tools without modifying the original spec. The [Kraken overlay](examples/kraken/overlay.yaml) shows realistic use:

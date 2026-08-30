@@ -61,7 +61,7 @@ func buildTestValidator(t *testing.T) *Validator {
 
 func TestValidateRequest_ValidRequestPasses(t *testing.T) {
 	v := buildTestValidator(t)
-	req := httptest.NewRequest(http.MethodGet, "/pets/123", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/pets/123", nil)
 	_, err := v.ValidateRequest(context.Background(), req)
 	if err != nil {
 		t.Errorf("expected no error for valid request, got: %v", err)
@@ -71,7 +71,7 @@ func TestValidateRequest_ValidRequestPasses(t *testing.T) {
 func TestValidateRequest_MissingRouteReturnsError(t *testing.T) {
 	v := buildTestValidator(t)
 	// Path not in spec.
-	req := httptest.NewRequest(http.MethodGet, "/unknown/path", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/unknown/path", nil)
 	_, err := v.ValidateRequest(context.Background(), req)
 	if err == nil {
 		t.Error("expected error for unrecognised path, got nil")
@@ -81,7 +81,7 @@ func TestValidateRequest_MissingRouteReturnsError(t *testing.T) {
 func TestValidateRequest_InvalidMethodReturnsError(t *testing.T) {
 	v := buildTestValidator(t)
 	// POST is not defined for /pets/{petId}.
-	req := httptest.NewRequest(http.MethodPost, "/pets/123", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/pets/123", nil)
 	_, err := v.ValidateRequest(context.Background(), req)
 	if err == nil {
 		t.Error("expected error for invalid method, got nil")
@@ -92,7 +92,7 @@ func TestValidateResponse_ValidResponsePasses(t *testing.T) {
 	v := buildTestValidator(t)
 
 	// First build a valid reqInput.
-	req := httptest.NewRequest(http.MethodGet, "/pets/123", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/pets/123", nil)
 	reqInput, err := v.ValidateRequest(context.Background(), req)
 	if err != nil {
 		t.Fatalf("request validation failed: %v", err)
@@ -113,7 +113,7 @@ func TestValidateResponse_ValidResponsePasses(t *testing.T) {
 func TestValidateResponse_WrongTypeFieldFails(t *testing.T) {
 	v := buildTestValidator(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/pets/123", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/pets/123", nil)
 	reqInput, err := v.ValidateRequest(context.Background(), req)
 	if err != nil {
 		t.Fatalf("request validation failed: %v", err)

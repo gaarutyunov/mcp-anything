@@ -27,7 +27,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	cfgPath, cfg, err := mcpanything.LoadConfig()
+	cfgPath, cfg, err := mcpanything.LoadConfig(ctx)
 	if err != nil {
 		slog.Error("config load failed", "error", err)
 		os.Exit(1)

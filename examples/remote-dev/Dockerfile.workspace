@@ -10,8 +10,8 @@
 #     --build-arg PROXY_IMAGE=<proxy-image> \
 #     -t workspace:latest .
 
-ARG GO_VERSION=1.25
-ARG GOLANGCI_LINT_VERSION=v2.7.2
+ARG GO_VERSION=1.27
+ARG GOLANGCI_LINT_VERSION=v2.13.2
 ARG PROXY_IMAGE=mcp-anything:latest
 
 # ── Stage 0: extract proxy binary from proxy image ───────────────────────────
@@ -32,9 +32,23 @@ ARG GOLANGCI_LINT_VERSION
 # Install required tools
 RUN apk add --no-cache git bash grep findutils
 
-# Install golangci-lint
-RUN wget -q -O- "https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh" \
-    | sh -s -- -b /usr/local/bin "${GOLANGCI_LINT_VERSION}"
+# Install golangci-lint.
+#
+# Not via upstream's install.sh: since v2.12 the release checksums file also
+# lists <asset>.sbom.json, and the script's prefix match picks the SBOM's hash,
+# so every install of a current release fails verification. The download below
+# does the same job with an anchored match, so the tarball is still verified.
+RUN set -eux; \
+    ver="${GOLANGCI_LINT_VERSION#v}"; \
+    arch="$(go env GOARCH)"; \
+    tarball="golangci-lint-${ver}-linux-${arch}.tar.gz"; \
+    base="https://github.com/golangci/golangci-lint/releases/download/${GOLANGCI_LINT_VERSION}"; \
+    cd /tmp; \
+    wget -q "${base}/${tarball}" "${base}/golangci-lint-${ver}-checksums.txt"; \
+    grep " ${tarball}$" "golangci-lint-${ver}-checksums.txt" | sha256sum -c -; \
+    tar -xzf "${tarball}"; \
+    mv "golangci-lint-${ver}-linux-${arch}/golangci-lint" /usr/local/bin/golangci-lint; \
+    rm -rf /tmp/golangci-lint-*
 
 # Copy write-file helper from builder stage
 COPY --from=helper-builder /usr/local/bin/write-file /usr/local/bin/write-file

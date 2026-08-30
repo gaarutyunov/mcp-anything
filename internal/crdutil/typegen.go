@@ -333,7 +333,7 @@ package v1alpha1
 					}
 				}
 			}
-			sb.WriteString(fmt.Sprintf("\t%s %s `json:\"%s,omitempty\"`\n", f.Name, f.Type, f.JSONTag))
+			fmt.Fprintf(&sb, "\t%s %s `json:\"%s,omitempty\"`\n", f.Name, f.Type, f.JSONTag)
 		}
 		sb.WriteString("}\n")
 	}

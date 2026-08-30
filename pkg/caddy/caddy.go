@@ -91,12 +91,12 @@ func (m *MCPAnything) Provision(ctx caddy.Context) error {
 	)
 	if m.ConfigPath != "" {
 		path = m.ConfigPath
-		cfg, err = pkgconfig.Load(path)
+		cfg, err = pkgconfig.Load(ctx, path)
 		if err != nil {
 			return fmt.Errorf("mcpanything: loading config from %q: %w", path, err)
 		}
 	} else {
-		path, cfg, err = mcpanything.LoadConfig()
+		path, cfg, err = mcpanything.LoadConfig(ctx)
 		if err != nil {
 			return fmt.Errorf("mcpanything: loading config: %w", err)
 		}

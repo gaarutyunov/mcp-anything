@@ -10,7 +10,7 @@ require (
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/exaring/otelpgx v0.10.0
 	github.com/fsnotify/fsnotify v1.10.1
-	github.com/gaarutyunov/goga v0.0.0-20260830104900-cb900a1f5f0e
+	github.com/gaarutyunov/goga v0.0.0-20260830140739-36cb9e804344
 	github.com/getkin/kin-openapi v0.142.0
 	github.com/go-chi/chi/v5 v5.2.5
 	github.com/go-logr/logr v1.4.4
@@ -485,20 +485,3 @@ require (
 	sigs.k8s.io/randfill v1.0.0 // indirect
 	sigs.k8s.io/structured-merge-diff/v6 v6.3.2 // indirect
 )
-
-// goga carries github.com/google/cel-go v0.29.2 as an indirect requirement it
-// does not itself import, and cel-go v0.29 renamed the interpreter.Interpretable
-// arguments of interpreter.NewCall. Caddy is the only module here that compiles
-// against cel-go, and no released Caddy builds against v0.29 yet, so v0.29.2 is
-// excluded to keep MVS on the version Caddy pins. Drop this once goga relaxes
-// the requirement or Caddy catches up.
-exclude github.com/google/cel-go v0.29.2
-
-// Same origin: goga pulls speakeasy-api/jsonpath v0.6.3 through oapi-codegen, and
-// v0.6.3 removed pkg/overlay, which speakeasy-api/openapi-overlay's own tests
-// import — so `go mod tidy` cannot resolve. v0.6.0, which openapi-overlay pins,
-// still has it. NOTE: an exclude applies only to the main module, so a module
-// that depends on mcp-anything still resolves v0.6.3 and still cannot tidy;
-// tests/treeshake reproduces that. Only goga dropping the requirement fixes it
-// for consumers.
-exclude github.com/speakeasy-api/jsonpath v0.6.3

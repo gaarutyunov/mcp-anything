@@ -32,7 +32,7 @@ jobs:
       - uses: golangci/golangci-lint-action@v9
         with:
           install-only: true
-          version: v2.7.2
+          version: v2.13.2
 
       - name: check
         run: make check

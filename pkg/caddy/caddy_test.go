@@ -86,7 +86,7 @@ func TestServeHTTP_ExactMatch(t *testing.T) {
 	mh := &mockHandler{body: "mcp response"}
 	m := &MCPAnything{handlers: map[string]http.Handler{"/mcp": mh}}
 
-	req := httptest.NewRequest(http.MethodGet, "/mcp", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/mcp", nil)
 	rr := httptest.NewRecorder()
 	next := &nextHandler{}
 
@@ -105,7 +105,7 @@ func TestServeHTTP_PrefixMatch(t *testing.T) {
 	mh := &mockHandler{body: "mcp response"}
 	m := &MCPAnything{handlers: map[string]http.Handler{"/mcp": mh}}
 
-	req := httptest.NewRequest(http.MethodPost, "/mcp/session/abc", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/mcp/session/abc", nil)
 	rr := httptest.NewRecorder()
 	next := &nextHandler{}
 
@@ -124,7 +124,7 @@ func TestServeHTTP_NoMatch_CallsNext(t *testing.T) {
 	mh := &mockHandler{}
 	m := &MCPAnything{handlers: map[string]http.Handler{"/mcp": mh}}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/other", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/other", nil)
 	rr := httptest.NewRecorder()
 	next := &nextHandler{}
 
@@ -150,7 +150,7 @@ func TestServeHTTP_MultipleEndpoints_ExactMatch(t *testing.T) {
 	}
 	next := &nextHandler{}
 
-	req := httptest.NewRequest(http.MethodGet, "/mcp/readonly", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/mcp/readonly", nil)
 	rr := httptest.NewRecorder()
 	if err := m.ServeHTTP(rr, req, next); err != nil {
 		t.Fatalf("ServeHTTP error: %v", err)

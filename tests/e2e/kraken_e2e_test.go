@@ -171,7 +171,7 @@ func TestKrakenMarketDataE2E(t *testing.T) {
 			Server: v1alpha1.ProxyServerSpec{
 				Port: 8080,
 			},
-			Naming: v1alpha1.ProxyNamingSpec{
+			Naming: v1alpha1.NamingSpec{
 				Separator: "__",
 			},
 		},

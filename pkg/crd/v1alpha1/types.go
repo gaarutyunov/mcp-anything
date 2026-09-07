@@ -54,14 +54,14 @@ type MCPProxySpec struct {
 	// +optional
 	// Naming configures how MCP tool names are generated.
 	// Generated from pkg/config.NamingConfig.
-	Naming ProxyNamingSpec `json:"naming,omitempty"`
+	Naming NamingSpec `json:"naming,omitempty"`
 	// +optional
 	// InboundAuth configures authentication for inbound MCP clients.
 	InboundAuth *ProxyInboundAuthSpec `json:"inboundAuth,omitempty"`
 	// +optional
 	// Telemetry configures observability settings.
 	// Generated from pkg/config.TelemetryConfig.
-	Telemetry *ProxyTelemetrySpec `json:"telemetry,omitempty"`
+	Telemetry *TelemetrySpec `json:"telemetry,omitempty"`
 	// +optional
 	// GatewayRef configures Kubernetes Gateway API HTTPRoute creation.
 	// When set, the operator creates an HTTPRoute that routes traffic from the
@@ -214,11 +214,11 @@ type MCPUpstreamSpec struct {
 	// +optional
 	// Validation configures request/response validation against the OpenAPI schema.
 	// Generated from pkg/config.ValidationConfig.
-	Validation *MCPUpstreamValidationSpec `json:"validation,omitempty"`
+	Validation *ValidationSpec `json:"validation,omitempty"`
 	// +optional
 	// Commands defines command-backed MCP tools. Required when Type is "command".
 	// Generated from pkg/config.CommandConfig.
-	Commands []MCPUpstreamCommandSpec `json:"commands,omitempty"`
+	Commands []CommandSpec `json:"commands,omitempty"`
 	// +optional
 	// RateLimit is the name of a rate limit policy defined in the owning MCPProxy's
 	// rateLimits.policies map. When set, the named policy is applied to all tool calls
